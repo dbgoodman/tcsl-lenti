@@ -1,0 +1,204 @@
+---
+title: "CTV Plots"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+require(data.table)
+require(ggplot2)
+require(scales)
+require(here)
+require(flowCore)
+require(flowWorkspace)
+require(RColorBrewer)
+library(ggridges)
+data_dir <- here::here('..','data')
+load(file.path(
+    data_dir, 'ctv.Rdata'))
+
+#car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
+
+make_ridge_plot <- function(df, var, show_line=F) {
+  
+  df$car <- factor(df$car, levels=rev(levels(factor(df$car))))
+  
+  df_ct <- df[, .N, by=c(c('day','car','donor','k562'))]
+  
+  var_disp = toupper(gsub('(.*)_t','\\1',var))
+  
+  p <- ggplot(df[variable == var]) + 
+  geom_density_ridges(aes(y=car, x=value, fill=car)) +
+  geom_label(data=df_ct, aes(x=0, y=car, label=round(N/1000, 2)), vjust=0, hjust=1, size=2) +
+  facet_grid(day ~ k562 + t_type + donor) +
+  xlim(c(-800, NA)) +
+  theme_light() + 
+  labs(x=var, y= 'CAR', title=paste0(var_disp, ' level (label = events/1e3)'))
+  
+  if (show_line) {
+    p <- p + geom_vline(xintercept=df[[var]])
+  }
+       
+  return(p)
+}
+```
+
+```{r fig.width=15, fig.height=6}
+
+ctv_gated_dt <- ctv_dt[
+    ctv_dt[, 
+      gt_thresh[variable=='cd_t'] == T &
+      gt_thresh[variable=='draq7_t'] == F & 
+      gt_thresh[variable=='ctv1_t'] == T &
+      gt_thresh[variable=='ctv2_t'] == T,
+      gt_thresh[variable=='gfp_t'] == T,
+      by=c('well', 'plate', 'day','event_id','t_type')][V1==T],
+    on=c('well', 'plate', 'day','event_id','t_type')][, V1 := NULL]
+
+#combine day 3/day 4 and day 14/16
+ctv_gated_dt[day==3, day := 4]
+ctv_gated_dt[day==14, day := 16]
+ctv_gated_dt[, day := factor(day, levels=levels(factor(day)), labels=c('3/4','14/16','24','33'))]
+
+# day 24 for cd8 zeta has too few events, they are noise
+ctv_gated_dt <- ctv_gated_dt[!(car == 'zeta' & t_type == 'cd8' & day == 24)]
+
+suppressMessages(print(make_ridge_plot(ctv_gated_dt[car != 'KLRG1' & k562=='cd19+'], 'ctv1_t')))
+
+ggplot(ctv_gated_dt[variable == 'ctv1_t' & k562 == 'cd19+']) + 
+    geom_boxplot(aes(x=car, y=value, fill=car), outlier.shape=NA) +
+    facet_grid(day ~ k562 + t_type + donor) +
+    theme_light() +
+    labs(x='CTV', y= 'CAR', title='CTV mean')
+```
+
+### Banff Poster CTV w/ masked names
+
+```{r}
+
+
+ctv_banff_dt <- ctv_dt[
+    ctv_dt[, 
+      gt_thresh[variable=='cd_t'] == T &
+      gt_thresh[variable=='draq7_t'] == F & 
+      gt_thresh[variable=='ctv1_t'] == T &
+      gt_thresh[variable=='ctv2_t'] == T &
+      gt_thresh[variable=='gfp_t'] == T,
+      by=c('well', 'plate', 'day','event_id','t_type')][V1==T],
+    on=c('well', 'plate', 'day','event_id','t_type')][, V1 := NULL]
+
+#combine day 3/day 4 and day 14/16
+ctv_banff_dt[day==3, day := 4]
+ctv_banff_dt[day==14, day := 16]
+ctv_banff_dt[, day := factor(day, levels=levels(factor(day)), labels=c('d3','d14','d24','d33'))]
+
+
+# mask receptor names except for known ones
+unmasked_names <- c('41BB','CD28')
+masked_names <- c('BAFF-R','CD40','KLRG1','TACI','TNR8')
+mask_receptor <- function(receptor) {
+  if (receptor %in% unmasked_names) return(receptor)
+  else if (receptor %in% masked_names) return(paste(match(receptor, masked_names)))
+  else return('-')
+}
+
+kept_set <- c('41BB','CD28','Receptor 1','Receptor 3','Receptor 4','zeta')
+
+# day 24 for cd8 zeta has too few events, they are noise
+ctv_banff_subset_dt <- ctv_banff_dt[!(car == 'zeta' & t_type == 'cd8' & day == 24) & donor == 2]
+ctv_banff_subset_dt <- ctv_banff_subset_dt[, 
+  car.masked := factor(car, levels=c(unmasked_names, masked_names, 'zeta'), 
+    labels=c(unmasked_names, paste('Receptor',c(1:5)), 'zeta'))]
+
+```
+
+```{r}
+make_ridge_plot_panel <- function(df, var, show_line=F) {
+  
+  df$car <- factor(df$car, levels=rev(levels(factor(df$car))))
+  
+  df_ct <- df[, .N, by=c(c('day','car','donor','k562'))]
+  
+  var_disp = toupper(gsub('(.*)_t','\\1',var))
+  
+  p <- ggplot(df[variable == var & value < 3200]) + 
+  geom_density_ridges(aes(y=car.masked, x=value, fill=car.masked)) +
+  facet_grid(t_type ~ day) +
+  xlim(c(600, NA)) +
+  theme_minimal(base_size=18) +
+  labs(x=var, y= 'CAR', title=paste0(var_disp, ' level (label = events/1e3)')) +
+  scale_fill_manual(values=rev(c('grey50',rev(brewer.pal(9,'Greens')[6:8]),brewer.pal(9,'Blues')[c(6,8)])))
+
+  
+  if (show_line) {
+    p <- p + geom_vline(xintercept=df[[var]])
+  }
+       
+  return(p)
+}
+
+p <- make_ridge_plot_panel(ctv_banff_subset_dt[k562=='cd19+' & car.masked %in% kept_set], 'ctv2_t')
+```
+
+### Tile plot of means
+
+```{r fig.width=10, fig.height=6}
+ctv_gated_means_dt <- ctv_gated_dt[, list(
+  value_mean= mean(value), value_sd= sd(value)),
+  by=c('car','k562','day','donor','variable','t_type')][,
+    value_rel_day := value_mean-mean(value_mean),
+      by=c('k562','day','donor','variable','t_type')]
+
+ctv_gated_means_subset <- ctv_gated_means_dt[variable=='ctv1_t' & car != 'KLRG1' & k562 == 'cd19+']
+
+ggplot(ctv_gated_means_subset,
+    aes(fill=0-value_rel_day, y=factor(car, levels=rev(levels(factor(car)))), x=day)) + 
+  geom_tile() + 
+  facet_grid(k562 ~ t_type + donor) + 
+  scale_fill_viridis_c(
+    'Mean proliferation, relative to mean',
+    limits = c(-1,1)*max(abs(ctv_gated_means_subset$value_rel_day)),
+    na.value = 'darkgrey') + 
+  theme_minimal() + 
+  theme(
+    panel.background=element_rect(fill="darkgrey", colour="darkgrey"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_y_discrete(expand=c(0,0)) + 
+  scale_x_discrete(expand=c(0,0))
+
+```
+  
+### Tile plot, merged across 2 donors
+
+```{r}
+
+ctv_gated_means_donormerge_dt <- ctv_gated_means_dt[, `:=`(
+  value_rel_day_mean= mean(value_rel_day),
+  value_rel_day_sd= sd(value_rel_day)),
+  by=c('k562','day','car','variable','t_type')]
+
+ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable=='ctv1_t' & car != 'KLRG1' & k562 == 'cd19+']
+
+ggplot(ctv_gated_means_donormerge_subset,
+    aes(fill=0-value_rel_day_mean, y=factor(car, levels=rev(levels(factor(car)))), x=day)) + 
+  geom_tile() + 
+  facet_grid(k562 ~ t_type) + 
+  scale_fill_viridis_c(
+    'Mean proliferation, relative to mean',
+    limits = c(-1,1)*max(abs(ctv_gated_means_donormerge_subset$value_rel_day_mean)),
+    na.value = 'darkgrey') + 
+  theme_minimal() + 
+  theme(
+    panel.background=element_rect(fill="darkgrey", colour="darkgrey"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_y_discrete(expand=c(0,0)) + 
+  scale_x_discrete(expand=c(0,0))
+```
+
+
+
+
+
+
+

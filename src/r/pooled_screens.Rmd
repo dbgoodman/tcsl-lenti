@@ -1,0 +1,1770 @@
+---
+title: "Illumina06 Data Analysis Summary"
+author: "Daniel Goodman & Kiavash Garakani"
+date: "4/08/2019"
+output:
+  html_document:
+    theme: united
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table)
+library(ggplot2)
+library(knitr)
+library(ggrepel)
+library(RColorBrewer)
+library(plotly)
+library(DESeq2)
+library(rnaseqGene)
+library(gtable)
+library(plyr)    
+library(grid)
+library(cowplot)
+
+rm(list = ls())
+```
+
+# User Inputs
+
+```{r, warning=FALSE}
+
+is.dbg <- T
+
+if (is.dbg){
+  tcsl.dir <- '/Volumes/HFSE/Box Sync/tcsl/ngs_data/'
+} else {
+  tcsl.dir <- '/Users/kgarakani/Box Sync/tcsl/ngs_data/'
+}
+
+dataset.name <- '2019.01.31.illumina_06'
+data.dir <- paste0(tcsl.dir, dataset.name, '/r/out/')
+output.dir <- paste0(tcsl.dir, dataset.name, '/r/out/notebook_06/')
+function.dir <- paste0(tcsl.dir, dataset.name, '/r/functions/')
+metadata.filename <- paste0(tcsl.dir, dataset.name, '/', dataset.name, '_layout.csv')
+car.seq.filename <- paste0(tcsl.dir, dataset.name, '/fa/ref.csv')
+min.sort.reads <- 100
+
+# global options
+opts_knit$set(fig_dim= c(10,10))
+theme_set(theme_bw())
+
+# load data
+load(paste0(data.dir, 'read_counts.rdata'))
+
+# load functions
+source(paste0(function.dir, 'calculate_bin_corr.r'))
+source(paste0(function.dir, 'calculate_lm.r'))
+source(paste0(function.dir, 'overlapping_strip_labels.r'))
+source(paste0(function.dir, 'run_deseq.r'))
+
+# pvalue threshold
+padj.thresh <- .05
+
+```
+
+# Data Quality Analysis
+
+```{r, fig.height = 6, fig.width = 12, warning=FALSE}
+
+# convert to days
+read.counts[grep('(\\d+)d', timepoint), day := as.numeric(gsub('(\\d+)d','\\1', timepoint))]
+read.counts[grep('(\\d+)h', timepoint), day := as.numeric(gsub('(\\d+)h','\\1', timepoint)) / 24]
+
+total.bin.pct.plot <- ggplot(read.counts[k.type != "NA",
+    list(bin.pct=bin.pct[1]),
+    by=.(batch, donor, timepoint,
+        assay, t.type, k.type, bin)][, 
+      assay.ord := factor(assay, levels = c("CTV1", "CTV2", "CTV3", "CD69", 
+                                            "IFNy", "IL2", "IL4"))]) +
+  geom_bar(aes(y=bin.pct, x=k.type, fill=bin), stat='identity', width=0.95) +
+  scale_fill_brewer(palette = "YlGn") +
+  facet_grid(t.type~assay.ord+batch+donor) +
+  labs(title='Total Bin Percentages', y='Bin Percent') +
+  scale_x_discrete('+/- CD19 Antigen', expand = c(0, 0), labels=c('-','+')) +
+  scale_y_continuous(limits = c(0,1), 
+                     expand = expand_scale(mult = c(0, 0)), 
+                     breaks=c(0.25, 0.5, 0.75, 1)) + 
+  theme(axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      panel.border = element_rect(colour = "black", fill=NA, size=1),
+      panel.spacing=unit(.2,"lines"),
+      strip.background=element_rect(color="grey30", fill="grey90"),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank())
+
+grid.newpage()
+grid.draw(overlapping_strip_labels(total.bin.pct.plot))
+
+```
+
+```{r, fig.height = 9, fig.width = 12, warning=FALSE}
+
+ggplot(unique(read.counts[sort.reads > min.sort.reads, 
+                          mean.car.abund, by=CAR.align])) + 
+  geom_bar(aes(y=log10(mean.car.abund), 
+               x=reorder(CAR.align, mean.car.abund)),
+           stat='identity') +
+  coord_flip() +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title='Mean CAR abundances as fraction of sort, all CARs, log10', 
+       y = 'Log10 of Mean CAR Abundance', x = 'CAR Costim Domain')
+
+ggplot(read.counts[sort.reads > min.sort.reads, mean(car.abund[assay=='baseline']), 
+                   by=CAR.align]) + 
+  geom_bar(aes(y=1000*V1,
+               x=reorder(CAR.align,V1)),
+           stat='identity') + 
+  scale_y_log10('CAR Frequency per 1,000', breaks=c(1,2,5,10,20,50,100), expand = c(0, 0)) +
+  coord_flip() + 
+  scale_x_discrete('CAR Costim Domain') + 
+  labs(title='Mean CAR abundances before addition of K562s')
+
+# baseline car abundance quality check
+
+ggplot(read.counts, 
+           aes(x=len, y=car.abund, color=interaction(batch, donor), 
+               label=CAR.align)) + 
+      geom_point(size = 0.25) + 
+      scale_y_log10() +
+      facet_grid(t.type ~ k.type) + 
+      labs(title = 'CAR Abundance vs. CAR Length, by Batch and Donor', 
+       x = 'CAR Length', y = 'CAR Abundance (log10)')
+
+```
+```{r, warning=FALSE, fig.height = 6, fig.width = 9}
+
+ggplot(read.counts[assay == 'baseline' & batch == 'prolif2']) +
+  geom_point(aes(x=len, y=car.abund*1000, color=interaction(donor, t.type), 
+                 shape=interaction(donor, t.type), label=CAR.align)) +
+  scale_x_log10() + scale_y_log10() + 
+  labs(title='Costim length vs. Library abundance', 
+       x='CAR length (bp)', y='Initial freq. per 1,000') +
+  scale_colour_manual(name = "Donor & T-cell Subset",
+                      labels = c("CD4, D1", "CD8, D1", "CD4, D2", "CD8, D2"),
+                      values = c("blue", "red", "blue", "red")) +   
+  scale_shape_manual(name = "Donor & T-cell Subset",
+                      labels = c("CD4, D1", "CD8, D1", "CD4, D2", "CD8, D2"),
+                       values = c(19, 19, 17, 17)) +
+  geom_text_repel(data = unique(read.counts[assay == 'baseline' & batch == 'prolif2' & 
+                                              donor == 'd1' & t.type == 'CD4' &
+                                              CAR.align %in% c("TNR18","KLRG1")]), 
+                  aes(x = len, y=car.abund*1000, 
+                      shape=interaction(donor, t.type), label=CAR.align), color = "black") +
+  theme_minimal()
+
+```
+
+```{r, warning = FALSE, fig.height = 5, fig.width = 5.1}
+
+# Bin - Bin Correlation Maps by Sort Group
+
+read.counts[, rel.bin.ratio := car.bin.pct/bin.pct, 
+            by = .(sort.group, bin, CAR.align)]
+
+# all sort groups
+
+bin.corr <- cor(dcast(read.counts, CAR.align + sort.group ~ bin,
+              value.var='rel.bin.ratio')[
+                is.na(A), A := 1][is.na(B), B := 1][
+                  is.na(C), C := 1][is.na(D), D := 1][, -c(1,2)])
+
+melt.bin.corr <- data.table(melt(bin.corr))
+
+ggplot(melt.bin.corr, aes(x=factor(Var1), y=factor(Var2))) +
+  geom_tile(aes(fill = value), colour = "black", size = .75) +
+  geom_text(aes(label=round(value, 3))) +
+  scale_fill_distiller(palette = 'Spectral') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  labs(title = 'Between-Bin Correlations in rel.bin.ratio for All Sort Groups') +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(), 
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        legend.position = "none")
+
+```
+
+# Cytokine/CD69 Data Analysis
+
+### CAR Scoring Metric Comparison
+
+For each CAR in each cytokine assay, the bin percents obtained for bins A 
+through D (where bin A is the bin with the highest cytokine production and bin D 
+is the bin with the lowest cytokine production) were combined into a single 
+"CAR score" to enable simple evaluation of individual CAR performance. Four CAR 
+scoring metrics were evaluated:
+
+`joint score`:
+$$\displaystyle \text{joint score}_{car} = \text{A}\cdot2^3+\text{B}\cdot2^2+
+\text{C}\cdot2^1+\text{D}\cdot2^0$$
+
+`max:min score`:
+$$\displaystyle \text{max:min score}_{car} = \text{A/D}$$
+
+`max:all score`:
+$$\displaystyle \text{max:all score}_{car} = \text{A/}(\text{B}+\text{C}+
+\text{D})$$
+
+`mid score`:
+$$\displaystyle \text{mid score}_{car} = (\text{A}+\text{B})/(\text{C}+
+\text{D})$$
+
+, where A, B, C, and D are the car bin percents in their respective bins. 
+
+
+```{r, warning=FALSE}
+
+score.labels <- c('Joint Score','Max:Min Score','Max:All Score','Mid Score')
+
+# joint score
+read.counts[, CAR.score.norm := CAR.score/mean(CAR.score),
+            by=.(batch, assay, k.type, t.type, donor)]
+
+# max:min score
+read.counts[batch != 'post-cytof', min.max.ratio := car.bin.pct[bin == 'A']/ 
+              car.bin.pct[bin == 'D'],
+            by=.(batch, assay, k.type, t.type, donor, CAR.align)]
+
+read.counts[batch == 'post-cytof', min.max.ratio := car.bin.pct[bin == 'D']/ 
+              car.bin.pct[bin == 'A'],
+            by=.(batch, assay, k.type, t.type, donor, CAR.align)]
+
+read.counts[, min.max.ratio.norm := min.max.ratio/mean(min.max.ratio),
+            by=.(batch, assay, k.type, t.type, donor)]
+
+# max:all score
+read.counts[batch != 'post-cytof', all.max.ratio := car.abs.pct[bin == 'A']/ 
+              mean(car.abs.pct[bin != 'A']),
+            by=.(batch, assay, k.type, t.type, donor, CAR.align)]
+
+read.counts[batch == 'post-cytof', all.max.ratio := car.abs.pct[bin == 'D']/ 
+              mean(car.abs.pct[bin != 'D']),
+            by=.(batch, assay, k.type, t.type, donor, CAR.align)]
+
+read.counts[, all.max.ratio.norm := all.max.ratio/mean(all.max.ratio),
+            by=.(batch, assay, k.type, t.type, donor)]
+
+# mid score
+read.counts[batch != 'post-cytof', mid.ratio := mean(car.abs.pct[bin %in% c('A','B')])/ 
+              mean(car.abs.pct[bin %in% c('C','D')]),
+            by=.(batch, assay, k.type, t.type, donor, CAR.align)]
+
+read.counts[batch == 'post-cytof', mid.ratio := mean(car.abs.pct[bin %in% c('C','D')])/ 
+              mean(car.abs.pct[bin %in% c('A','B')]),
+            by=.(batch, assay, k.type, t.type, donor, CAR.align)]
+
+read.counts[, mid.ratio.norm := mid.ratio/mean(mid.ratio),
+            by=.(batch, assay, k.type, t.type, donor)]
+
+```
+
+To evaluate the performance of each scoring metric, the coefficient of variation 
+for each metric across the CTV sorts was calculated and plotted below.
+
+```{r, fig.height = 5, fig.width = 11, warning=FALSE}
+
+cv <- function(vec, ...) sd(vec,...) / mean(vec, ...)
+
+melt.metrics.cv <- unique(melt.data.table(unique(read.counts[
+  k.type == "pos", .(CAR.align, sort.group, k.type, t.type, assay, donor,
+                     CAR.score.norm, min.max.ratio.norm, mid.ratio.norm,
+                     all.max.ratio.norm)])[, 
+                     .(CAR.score.norm = cv(CAR.score.norm),
+                     min.max.ratio.norm = cv(min.max.ratio.norm),
+                     mid.ratio.norm = cv(mid.ratio.norm),
+                     all.max.ratio.norm  = cv(all.max.ratio.norm)),
+                     by = .(CAR.align, k.type, t.type, assay)], 
+  measure.vars = c('CAR.score.norm',
+                   'min.max.ratio.norm', 'all.max.ratio.norm',
+                   'mid.ratio.norm')))[is.nan(value), value := 0]
+
+setkey(melt.metrics.cv, 't.type', 'CAR.align')
+
+ggplot(melt.metrics.cv[assay %in% c("CTV1", "CTV2", "CTV3")]) +
+  geom_boxplot(aes(x=assay, 
+                  y=value,
+                  color = variable)) +
+  scale_color_brewer(palette='Set1', labels=score.labels) +
+  labs(title = 'Metric Comparisons by CAR - Coefficient of Variation') +
+  facet_grid(~ t.type) +
+  theme_bw() +
+  theme(panel.spacing=unit(.2,"lines"),
+      strip.background=element_rect(color="grey30", fill="grey90"), 
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.y = element_blank(), 
+      panel.grid.major.x = element_blank()) +
+  labs(x='Assay Week', y='CV of normalized score')
+
+```
+
+The joint score has a clearly lower coefficient of variation. 
+
+To further evaluate each scoring metric, we plot the metric score against two 
+closely concordant replicates, CTV1 > CD4+ > CD19+ > Batch Prolif1 > Donor 2 & 
+CTV1 > CD4+ > CD19+ > Batch Prolif2 > Donor 1, and compute the R-squared value.
+
+```{r, fig.height = 11, fig.width = 14, warning=FALSE}
+
+# generate casted metric data tables
+car.score.dt <- dcast(unique(read.counts[batch != 'post-cytof' & 
+                                           assay != 'baseline', 
+                                  .(CAR.align, sort.group, k.type, t.type, 
+                                  batch, assay, donor, CAR.score.norm)]),
+             CAR.align ~ sort.group, 
+             value.var='CAR.score.norm')[, .(CAR.align, 
+                                             prolif1_d2_4d_CTV1_CD4_pos,
+                                             prolif2_d1_3d_CTV1_CD4_pos, 
+                                             metric = 'CAR.score.norm')]
+
+min.max.dt <- dcast(unique(read.counts[batch != 'post-cytof' & 
+                                         assay != 'baseline', 
+                                  .(CAR.align, sort.group, k.type, t.type, 
+                                    batch, assay, donor, min.max.ratio.norm)]),
+             CAR.align ~ sort.group, 
+             value.var='min.max.ratio.norm')[, .(CAR.align, 
+                                                 prolif1_d2_4d_CTV1_CD4_pos,
+                                                 prolif2_d1_3d_CTV1_CD4_pos, 
+                                                 metric = 'min.max.ratio.norm')]
+
+all.max.dt <- dcast(unique(read.counts[batch != 'post-cytof' & 
+                                         assay != 'baseline', 
+                                  .(CAR.align, sort.group, k.type, t.type, 
+                                  batch, assay, donor, all.max.ratio.norm)]),
+             CAR.align ~ sort.group, 
+             value.var='all.max.ratio.norm')[, .(CAR.align, 
+                                                 prolif1_d2_4d_CTV1_CD4_pos,
+                                                 prolif2_d1_3d_CTV1_CD4_pos,
+                                                 metric = 'all.max.ratio.norm')]
+
+mid.ratio.dt <- dcast(unique(read.counts[batch != 'post-cytof' & 
+                                           assay != 'baseline', 
+                                  .(CAR.align, sort.group, k.type, t.type, 
+                                  batch, assay, donor, mid.ratio.norm)]),
+             CAR.align ~ sort.group, 
+             value.var='mid.ratio.norm')[, .(CAR.align, 
+                                             prolif1_d2_4d_CTV1_CD4_pos,
+                                             prolif2_d1_3d_CTV1_CD4_pos, 
+                                             metric = 'mid.ratio.norm')]
+
+# compute regression equation and r-squared
+car.score.label <- calculate_lm(car.score.dt, 'prolif1_d2_4d_CTV1_CD4_pos',
+                                'prolif2_d1_3d_CTV1_CD4_pos')
+
+min.max.label <- calculate_lm(min.max.dt, 'prolif1_d2_4d_CTV1_CD4_pos',
+                                'prolif2_d1_3d_CTV1_CD4_pos')
+
+all.max.label <- calculate_lm(all.max.dt, 'prolif1_d2_4d_CTV1_CD4_pos',
+                                'prolif2_d1_3d_CTV1_CD4_pos')
+
+mid.ratio.label <- calculate_lm(mid.ratio.dt, 'prolif1_d2_4d_CTV1_CD4_pos',
+                                'prolif2_d1_3d_CTV1_CD4_pos')
+
+car.score.dt[, lm.label := car.score.label]
+min.max.dt[, lm.label := min.max.label]
+all.max.dt[, lm.label := all.max.label]
+mid.ratio.dt[, lm.label := mid.ratio.label]
+
+# set regression equation position on graph
+car.score.dt[, x.pos := 0.967][, y.pos := 1.18]
+min.max.dt[, x.pos := 1.24][, y.pos := 4.0]
+all.max.dt[, x.pos := 1.0][, y.pos := 1.9]
+mid.ratio.dt[, x.pos := 1.16][, y.pos := 1.475]
+
+# combine casted metric data tables
+metric.comparisons <- rbind(car.score.dt, min.max.dt, all.max.dt, mid.ratio.dt)
+
+ggplot(metric.comparisons)+
+  geom_point(aes(x=prolif1_d2_4d_CTV1_CD4_pos, 
+                 y=prolif2_d1_3d_CTV1_CD4_pos), 
+             color = "blue", size = 3) +
+  geom_text(aes(x = x.pos, y = y.pos, label = lm.label), parse = TRUE, 
+            size = 9, family="Times") +
+  geom_smooth(aes(x=prolif1_d2_4d_CTV1_CD4_pos,
+                  y=prolif2_d1_3d_CTV1_CD4_pos), method = "lm",
+              formula = y ~ x, color = "black", se=F) +
+  facet_wrap( ~ metric, scales = 'free', nrow = 2, ncol = 2) +
+  theme_bw(base_size = 24) +
+  theme(panel.spacing=unit(.2,"lines"),
+      strip.background=element_rect(color="grey30", fill="grey90"), 
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.y = element_blank(), 
+      panel.grid.major.x = element_blank(), 
+      panel.grid.minor.x = element_blank()) +
+  labs(x = 'Replicate 1', y = 'Replicate 2', title = 'Comparison of CAR Scoring Metric Performance')
+
+```
+
+On the basis of these results, the joint score was used for further analysis of the cytokine and CD69 data.
+
+```{r, warning = FALSE}
+
+# CAR Score
+car.score.cor <- as.data.table(melt(cor(dcast(unique(read.counts[batch != 'post-cytof' & 
+                                           assay != 'baseline', 
+                                  .(CAR.align, sort.group, k.type, t.type, 
+                                  batch, assay, donor, CAR.score.norm)]),
+             CAR.align ~ sort.group, 
+             value.var='CAR.score.norm')[, -c(1, 6)])))
+
+car.score.cor[, assay.1 := sapply(strsplit(as.character(Var1),"_"), `[`, 4)]
+car.score.cor[, t.type.1 := sapply(strsplit(as.character(Var1),"_"), `[`, 5)]
+car.score.cor[, k.type.1 := sapply(strsplit(as.character(Var1),"_"), `[`, 6)]
+car.score.cor[, assay.2 := sapply(strsplit(as.character(Var2),"_"), `[`, 4)]
+car.score.cor[, t.type.2 := sapply(strsplit(as.character(Var2),"_"), `[`, 5)]
+car.score.cor[, k.type.2 := sapply(strsplit(as.character(Var2),"_"), `[`, 6)]
+
+car.score.cor <- car.score.cor[assay.1 == assay.2 & k.type.1 == k.type.2 & 
+                                 t.type.1 == t.type.2]
+car.score.cor <- car.score.cor[, .(Var1, Var2, value, assay = assay.1, 
+                                   t.type = t.type.1, k.type = k.type.1)]
+car.score.cor <- car.score.cor[, Rep1 := paste(sapply(strsplit(as.character(Var1),"_"), `[`, 1),
+                                                sapply(strsplit(as.character(Var1),"_"), `[`, 2), 
+                                                sep = '_')]
+car.score.cor <- car.score.cor[, Rep2 := paste(sapply(strsplit(as.character(Var2),"_"), `[`, 1),
+                                                sapply(strsplit(as.character(Var2),"_"), `[`, 2), 
+                                                sep = '_')]
+car.score.cor <- car.score.cor[, group := paste(assay, t.type, k.type, sep = '_')]
+
+car.score.cor[Rep1 == 'prolif1_d2', Rep1 := 'Replicate 1']
+car.score.cor[Rep1 == 'prolif2_d1', Rep1 := 'Replicate 2']
+car.score.cor[Rep1 == 'prolif2_d2', Rep1 := 'Replicate 3']
+car.score.cor[Rep2 == 'prolif1_d2', Rep2 := 'Replicate 1']
+car.score.cor[Rep2 == 'prolif2_d1', Rep2 := 'Replicate 2']
+car.score.cor[Rep2 == 'prolif2_d2', Rep2 := 'Replicate 3']
+
+car.score.replicate.plot <- ggplot(car.score.cor) + 
+  geom_tile(aes(x = factor(Rep1), y = factor(Rep2), fill = value), 
+            color = "black", size = 0.2) + 
+  geom_text(aes(x = factor(Rep1), y = factor(Rep2), label = round(value, 2))) + 
+  scale_fill_distiller(palette = 'Spectral') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  labs(title = 'Between-Replicate Correlations in Normalized CAR Score for All Sort Groups') +
+  facet_grid(t.type + k.type ~ assay) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5), 
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(), 
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        legend.position = "none", 
+        panel.spacing=unit(.2,"lines"),
+        strip.background=element_rect(color="grey30", fill="grey90"), 
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(), 
+        panel.grid.major.x = element_blank())
+
+grid.newpage()
+grid.draw(overlapping_strip_labels(car.score.replicate.plot))
+
+```
+
+### Cytokine Results
+
+```{r, fig.height = 4, fig.width = 7}
+
+cast.post.cytof.car.scores <- dcast(read.counts[batch == "post-cytof" & bin == "A"], 
+      batch + donor + timepoint + assay + t.type + CAR.align ~ 
+        k.type, value.var = 'CAR.score')
+
+ggplot(cast.post.cytof.car.scores[assay == "IFNy"]) +
+  geom_segment(aes(x = reorder(CAR.align, neg-pos),
+                   xend = reorder(CAR.align, neg-pos),
+                   y = neg,
+                   yend = pos), color="grey") +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color='CD19 -')) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color='CD19 +')) +
+  scale_color_manual(
+                        values=c("red", "blue")) +
+  facet_wrap(~ assay) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'Joint score')
+
+
+ggplot(cast.post.cytof.car.scores[assay == "IL2"]) +
+  geom_segment(aes(x = reorder(CAR.align, neg-pos),
+                   xend = reorder(CAR.align, neg-pos),
+                   y = neg,
+                   yend = pos), color="grey") +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color='CD19 -')) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color='CD19 +')) +
+  scale_color_manual(
+                        values=c("red", "blue")) +
+  facet_wrap(~ assay) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'Joint score')
+
+ggplot(cast.post.cytof.car.scores[assay == "IL4"]) +
+  geom_segment(aes(x = reorder(CAR.align, neg-pos),
+                   xend = reorder(CAR.align, neg-pos),
+                   y = neg,
+                   yend = pos), color="grey") +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color='CD19 -')) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color='CD19 +')) +
+  scale_color_manual(
+                        values=c("red", "blue")) +
+  facet_wrap(~ assay) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  labs(y = 'Joint score')
+
+```
+
+```{r, warning = FALSE}
+
+# IFNy vs. IL-4
+
+ifny.il4.dt <- merge(cast.post.cytof.car.scores[assay == "IFNy"], 
+                     cast.post.cytof.car.scores[assay == "IL4"], 
+                     by = c('batch', 'donor', 'timepoint', 't.type', 'CAR.align'), 
+                     suffixes = c(".IFNy", ".IL4"))
+
+ggplot(ifny.il4.dt) +
+  geom_segment(aes(x = neg.IFNy, 
+                   xend = pos.IFNy, 
+                   y = neg.IL4, 
+                   yend = pos.IL4), color="lightgrey") +
+  geom_point(aes(x = neg.IFNy, y = neg.IL4, color='CD19 -')) + 
+  geom_point(aes(x = pos.IFNy, y = pos.IL4, color='CD19 +')) +
+  geom_text_repel(aes(x = pos.IFNy, y = pos.IL4, label = CAR.align)) +
+  scale_color_manual(values=c("red", "blue")) + 
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  labs(x = 'IFN-y Joint Score', y = 'IL-4 Joint score',
+       title = 'IFN-y vs. IL-4 Joint Score')
+
+# IL-2 vs. IL-4
+
+il2.il4.dt <- merge(cast.post.cytof.car.scores[assay == "IL2"], 
+                     cast.post.cytof.car.scores[assay == "IL4"], 
+                     by = c('batch', 'donor', 'timepoint', 't.type', 'CAR.align'), 
+                     suffixes = c(".IL2", ".IL4"))
+
+ggplot(il2.il4.dt) +
+  geom_segment(aes(x = neg.IL2, 
+                   xend = pos.IL2, 
+                   y = neg.IL4, 
+                   yend = pos.IL4), color="lightgrey") +
+  geom_point(aes(x = neg.IL2, y = neg.IL4, color='CD19 -')) + 
+  geom_point(aes(x = pos.IL2, y = pos.IL4, color='CD19 +')) +
+  geom_text_repel(aes(x = pos.IL2, y = pos.IL4, label = CAR.align)) +
+  scale_color_manual(values=c("red", "blue")) + 
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  labs(x = 'IL-2 Joint Score', y = 'IL-4 Joint score', 
+       title = 'IL-2 vs. IL-4 Joint Score')
+
+```
+
+### CD69 Results
+
+```{r, fig.height = 5.5, fig.width = 8}
+
+ggplot(cast.post.cytof.car.scores[assay == "CD69"]) + 
+  geom_segment(aes(x = reorder(CAR.align, neg-pos), 
+                   xend = reorder(CAR.align, neg-pos), 
+                   y = neg, 
+                   yend = pos), color="grey") +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color='CD19 -')) + 
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color='CD19 +')) +
+  scale_color_manual(values=c("red", "blue")) + 
+  facet_wrap(~ assay + t.type) +
+  theme(axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'CD69 Joint score', x = 'CAR Costim Domain') +
+  coord_flip()
+
+# CD4 vs. CD8
+
+cd4.cd8.dt <- merge(cast.post.cytof.car.scores[t.type == "CD4"], 
+                     cast.post.cytof.car.scores[t.type == "CD8"], 
+                     by = c('batch', 'donor', 'timepoint', 'assay', 'CAR.align'), 
+                     suffixes = c(".CD4", ".CD8"))
+
+ggplot(cd4.cd8.dt) +
+  geom_segment(aes(x = neg.CD4, 
+                   xend = pos.CD4, 
+                   y = neg.CD8, 
+                   yend = pos.CD8), color="lightgrey") +
+  geom_point(aes(x = neg.CD4, y = neg.CD8, color='CD19 -')) + 
+  geom_point(aes(x = pos.CD4, y = pos.CD8, color='CD19 +')) +
+  geom_text_repel(aes(x = pos.CD4, y = pos.CD8, label = CAR.align)) +
+  scale_color_manual(values=c("red", "blue")) + 
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  labs(x = 'CD4 Joint Score', y = 'CD8 Joint score', 
+       title = 'CD69, CD4 vs. CD8 Joint Score')
+
+```
+
+```{r, warning = FALSE}
+
+post.cytof.dt <- read.counts[batch == 'post-cytof', 
+                             CAR.score.norm.pos := .SD[k.type == 'pos', CAR.score.norm], 
+                             by = .(batch, donor, assay, t.type, bin, CAR.align)]
+
+il2.plot <- ggplot(copy(read.counts[t.type == "CD4" & bin == 'A' & 
+                                      assay == "IL2"])[, 
+                          assay.k.type := paste0(assay, '.', k.type)]) +
+  geom_tile(aes(x = factor(assay.k.type, levels = c("IL2.neg", "IL2.pos")),
+                y = reorder(CAR.align, CAR.score.norm.pos),
+                fill = CAR.score.norm), colour = "black", size = .20) +
+  geom_vline(aes(xintercept = 1.5), colour = "black", size = 1) +
+  scale_fill_distiller(palette = 'Spectral', name = "Normalized Joint Score") +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(), 
+      legend.position = "none")
+  
+il4.plot <- ggplot(copy(read.counts[t.type == "CD4" & bin == 'A' & 
+                                      assay == "IL4"])[, 
+                          assay.k.type := paste0(assay, '.', k.type)]) +
+  geom_tile(aes(x = factor(assay.k.type, levels = c("IL4.neg", "IL4.pos")),
+                y = reorder(CAR.align, CAR.score.norm.pos),
+                fill = CAR.score.norm), colour = "black", size = .20) +
+  geom_vline(aes(xintercept = 1.5), colour = "black", size = 1) +
+  scale_fill_distiller(palette = 'Spectral', name = "Normalized Joint Score") +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(), 
+      legend.position = "none")
+  
+ifny.plot <- ggplot(copy(read.counts[t.type == "CD4" & bin == 'A' & 
+                                      assay == "IFNy"])[, 
+                          assay.k.type := paste0(assay, '.', k.type)]) +
+  geom_tile(aes(x = factor(assay.k.type, levels = c("IFNy.neg", "IFNy.pos")),
+                y = reorder(CAR.align, CAR.score.norm.pos),
+                fill = CAR.score.norm), colour = "black", size = .20) +
+  geom_vline(aes(xintercept = 1.5), colour = "black", size = 1) +
+  scale_fill_distiller(palette = 'Spectral', name = "Normalized Joint Score") +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(), 
+      legend.position = "none")
+
+cd69.plot <- ggplot(copy(read.counts[t.type == "CD4" & bin == 'A' & 
+                                      assay == "CD69"])[, 
+                          assay.k.type := paste0(assay, '.', k.type)]) +
+  geom_tile(aes(x = factor(assay.k.type, levels = c("CD69.neg", "CD69.pos")),
+                y = reorder(CAR.align, CAR.score.norm.pos),
+                fill = CAR.score.norm), colour = "black", size = .20) +
+  geom_vline(aes(xintercept = 1.5), colour = "black", size = 1) +
+  scale_fill_distiller(palette = 'Spectral', name = "Normalized Joint Score") +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(), 
+      legend.position = "none")
+
+```
+
+The results of the cytokine and CD69 sorts for CD4+ T cells is summarized in the tile plot shown below. For each condition and CAR costim, the tile is colored according to normalized joint score.
+
+```{r image}
+
+include_graphics(paste0(output.dir, "post_cytof_tile_plot.png"))
+
+```
+
+```{r, include = FALSE}
+
+# post.cytof.tile.plot <- plot_grid(cd69.plot, ifny.plot, il2.plot, il4.plot, 
+#                                   nrow = 1, ncol = 4)
+# 
+# save_plot(paste0(output.dir, "post_cytof_tile_plot.png"), 
+#           post.cytof.tile.plot,
+#           base_aspect_ratio = 2,
+#           base_height = 8)
+
+```
+
+### TNFR Superfamily Performance
+
+```{r, warning = FALSE}
+
+tnfr.superfamily <- c("41BB", "TNR18", "CD40", "TNR8", 
+                     "OX40", "BAFF-R", "BCMAI", "TACI")
+
+read.counts[, tnfr := F]
+read.counts[CAR.align %in% tnfr.superfamily, tnfr := T]
+
+cast.post.cytof.car.scores <- dcast(read.counts[batch == "post-cytof" & bin == "A"], 
+      batch + donor + timepoint + assay + t.type + CAR.align + tnfr ~ 
+        k.type, value.var = 'CAR.score')
+
+ggplot(cast.post.cytof.car.scores[assay == "IFNy"]) + 
+  geom_segment(aes(x = reorder(CAR.align, neg-pos), 
+                   xend = reorder(CAR.align, neg-pos), 
+                   y = neg, 
+                   yend = pos, 
+                   color = tnfr)) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color=tnfr)) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color=tnfr)) +
+  scale_color_manual(values=c("grey", "blue"), name = "In TNFR Superfamily?") + 
+  facet_wrap(~ assay) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'CAR score')
+
+ggplot(cast.post.cytof.car.scores[assay == "IL2"]) + 
+  geom_segment(aes(x = reorder(CAR.align, neg-pos), 
+                   xend = reorder(CAR.align, neg-pos), 
+                   y = neg, 
+                   yend = pos, 
+                   color = tnfr)) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color=tnfr)) + 
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color=tnfr)) +
+  scale_color_manual(values=c("grey", "blue"), name = "In TNFR Superfamily?") + 
+  facet_wrap(~ assay) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'CAR score')
+
+ggplot(cast.post.cytof.car.scores[assay == "IL4"]) + 
+  geom_segment(aes(x = reorder(CAR.align, neg-pos), 
+                   xend = reorder(CAR.align, neg-pos), 
+                   y = neg, 
+                   yend = pos, 
+                   color = tnfr)) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color=tnfr)) + 
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color=tnfr)) +
+  scale_color_manual(values=c("grey", "blue"), name = "In TNFR Superfamily?") +
+  facet_wrap(~ assay) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  labs(y = 'CAR score')
+  
+ggplot(cast.post.cytof.car.scores[assay == "CD69"]) + 
+  geom_segment(aes(x = reorder(CAR.align, neg-pos), 
+                   xend = reorder(CAR.align, neg-pos), 
+                   y = neg, 
+                   yend = pos,
+                   color = tnfr)) +
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = neg, color=tnfr)) + 
+  geom_point(aes(x = reorder(CAR.align, neg-pos), y = pos, color=tnfr)) +
+  scale_color_manual(values=c("grey", "blue"), name = "In TNFR Superfamily?") +
+  facet_wrap(~ assay + t.type) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'CAR score') +
+  coord_flip()
+
+```
+
+# CTV Data Analysis
+
+### Bin A vs. D Metric Results
+
+```{r, message=FALSE, warning=FALSE, fig.height = 8, fig.width = 15}
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = 'D', test_bin = 'A'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.A.D <- deseq.results.dt
+
+bin.A.D.lfc.plot <- ggplot(deseq.results.dt) +
+  geom_bar(aes(x = reorder(car.axis, log2FoldChange), y = log2FoldChange,
+                 fill = -log10(padj)), stat='identity')+
+  geom_errorbar(aes(x = reorder(car.axis, log2FoldChange), 
+                    ymin=log2FoldChange-2*lfcSE, 
+                    ymax=log2FoldChange+2*lfcSE), color = 'black', width=.1)+
+  scale_fill_distiller(palette = 'Spectral', limits = c(-log10(padj.thresh), NA))+
+  scale_x_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  facet_wrap( ~ t.type+k.type+assay, scales = 'free_x', nrow = 2, ncol = 3)+
+  labs(y = 'Shrunken log2 Fold Change', 
+       title = 'Shrunken Log2 Fold Change, Bin A vs. Bin D')
+
+bin.A.D.lfc.plot
+
+```
+
+### Bin AD (pos) vs Bin BD (neg)
+```{r, warning = FALSE, message = FALSE, fig.height = 8, fig.width = 15}
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+
+deseq.results.dt.pos <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = 'D', test_bin = 'A'),
+                                by = .(group)]
+deseq.results.dt.neg <- read.counts[batch != 'post-cytof' & k.type == 'neg',
+                                run_deseq(data.dt = .SD, ref_bin = 'D', test_bin = 'B'),
+                                by = .(group)]
+
+deseq.results.dt <- rbind(deseq.results.dt.pos, deseq.results.dt.neg)
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.cast <- dcast.data.table(data=deseq.results.dt, CAR.align+assay+t.type~k.type, value.var=c('padj','log2FoldChange'))
+
+deseq.results.dt.cast[, pval.color := "Neither"]
+deseq.results.dt.cast[padj_pos < padj.thresh, pval.color := "CD19+"]
+deseq.results.dt.cast[padj_neg < padj.thresh, pval.color := "CD19-"]
+deseq.results.dt.cast[padj_neg < padj.thresh & padj_pos < padj.thresh, pval.color := "Both"]
+
+deseq.results.dt.cast[, pval.color := factor(pval.color, 
+                                      levels = c("Neither", "CD19+", "CD19-", "Both"))]
+
+# Dotplot
+ggplot(deseq.results.dt.cast) + 
+  geom_point(aes(x=log2FoldChange_neg, y=log2FoldChange_pos, color=pval.color), size=2) +
+  scale_x_continuous(limits=c(-3.5,3.5)) +
+  scale_y_continuous(limits=c(-3.5,3.5)) +
+  facet_wrap( ~ t.type + assay, nrow = 2, ncol = 3) +
+  scale_colour_manual(values = c("black", "blue", "red", "purple"), 
+                      name = "p < 0.05:") +
+  labs(x='CD19- log2 Bin Fold Change (B/D)', y='CD19+ log2 Bin Fold Change (A/D)') +
+  theme_bw(base_size=18)
+
+# Heatmap
+merge.deseq.dt <- merge(
+  deseq.results.dt.pos[, .(t.type, 
+     assay, CAR.align, 
+     pos = log2FoldChange,
+     pos.pval = padj,
+     pos.se = lfcSE)],
+  deseq.results.dt.neg[, .(t.type,
+     assay, CAR.align, 
+     neg = log2FoldChange,
+     neg.pval = padj,
+     neg.se = lfcSE)],
+  by=c('t.type', 'assay', 'CAR.align'))
+                         
+melt.deseq.lfc <- melt(merge.deseq.dt[, .(t.type, assay, CAR.align, pos, neg)], 
+     measure.vars = c("pos", "neg"), 
+     value.name = "LFC")
+
+melt.deseq.pval <- melt(merge.deseq.dt[, .(t.type, assay, CAR.align, pos.pval, neg.pval)], 
+     measure.vars = c("pos.pval", "neg.pval"), 
+     value.name = "pval")
+
+melt.deseq.pval[, variable := gsub('.pval', '', variable)]
+
+melt.deseq.dt <- merge(melt.deseq.lfc, melt.deseq.pval, by = c('t.type', 'assay', 'CAR.align', "variable"))
+
+melt.deseq.dt[, car.axis := paste(CAR.align,assay,t.type, sep='|'), 
+                 by=.(t.type, assay)]
+
+melt.deseq.dt[, mean.LFC := mean(LFC), by = .(car.axis)]
+melt.deseq.dt[, signif := ''][pval <= padj.thresh , signif := "*"]
+
+lfc.tile.plot <- ggplot(melt.deseq.dt) + 
+  geom_tile(aes(x = factor(variable, levels = c("pos", "neg"), labels=c('CD19+','CD19-')), 
+                y = reorder(car.axis, mean.LFC), 
+                fill = LFC), colour = "black", size = .20) + 
+  geom_text(aes(x = factor(variable, levels = c("pos", "neg"), labels=c('CD19+','CD19-')),
+                y = reorder(car.axis, mean.LFC),
+                label = signif), size = 5, vjust = 0.77) +
+  scale_fill_distiller(palette = 'Spectral', limits = c(-3.7, NA)) +
+  facet_wrap(~ t.type + assay, nrow = 1, scales = 'free_y') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand = c(0, 0), 
+                   labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Log Fold Change between CTV bin abundance') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+lfc.tile.plot
+```
+
+### Compare Replicates
+
+```{r, message=FALSE, warning=FALSE, fig.height = 5, fig.width = 8}
+
+# Scatter plots
+# normalize CAR score
+read.counts[, CAR.score.norm := CAR.score/mean(CAR.score),
+            by=.(batch, assay, k.type, t.type, donor)]
+
+# merge results
+read.counts.mean <- unique(read.counts[bin == 'A' & batch != 'post-cytof' & k.type == 'pos', 
+                    .(len, CAR.score.norm = mean(CAR.score.norm),  
+                      car.abund = mean(car.abund), 
+                      car.axis = paste(CAR.align,assay,t.type,k.type, sep='|')), 
+                    keyby = .(CAR.align, assay, t.type, k.type)])
+
+# comparing to bin A/D DESeq results
+merge.dt <- merge(read.counts.mean[, -c(1,2,3,4)], deseq.results.dt.A.D, by = c("car.axis"))
+
+ggplotly(ggplot(merge.dt, aes(label = CAR.align)) +
+  geom_point(aes(y = log2FoldChange, x = log2(len), color = -log10(padj))) +
+  scale_color_distiller(palette = 'Spectral', limits = c(-log10(padj.thresh), NA)) +
+  facet_wrap( ~ t.type + k.type + assay, nrow = 2, ncol = 3) +
+  labs(title = 'CAR Length vs. Shrunken log2 Fold Change (Bin A vs. D)', 
+       y = 'log2 Fold Change', x = 'log2(CAR length)'))
+
+ggplotly(car.abund.lfc.plot <- ggplot(merge.dt, aes(label = CAR.align)) +
+  geom_point(aes(x = log2FoldChange, y = log2(car.abund), color = -log10(padj))) +
+  scale_color_distiller(palette = 'Spectral', limits = c(-log10(padj.thresh), NA)) +
+  facet_wrap( ~ t.type + k.type + assay, nrow = 2, ncol = 3) +
+  labs(title = 'CAR Abundance vs. Shrunken log2 Fold Change (Bin A vs. D)', 
+       x = 'log2 Fold Change', y = 'log2(CAR abundance)'))
+
+ggplotly(car.score.lfc.plot <- ggplot(merge.dt, aes(label = CAR.align)) +
+  geom_point(aes(x = log2FoldChange, y = log2(CAR.score.norm), color = -log10(padj))) +
+  scale_color_distiller(palette = 'Spectral', limits = c(-log10(padj.thresh), NA)) +
+  facet_wrap( ~ t.type + k.type + assay, nrow = 2, ncol = 3) +
+  labs(title = 'Joint Score vs. Shrunken log2 Fold Change (Bin A vs. D)', 
+       x = 'log2 Fold Change', y = 'log2(CAR score)'))
+
+```
+
+### Bin Metric Comparisons
+
+```{r, message=FALSE, warning=FALSE, fig.height = 6, fig.width = 8}
+
+# Bin B/D
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = 'D', test_bin = 'B'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.B.D <- deseq.results.dt
+
+# Bin A/B
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = 'B', test_bin = 'A'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.A.B <- deseq.results.dt
+
+# Bin A/C
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = 'C', test_bin = 'A'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.A.C <- deseq.results.dt
+
+# Bin B/C
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = 'C', test_bin = 'B'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.B.C <- deseq.results.dt
+
+# Bin A/CD
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = c("C","D"), 
+                                          test_bin = 'A'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.A.CD <- deseq.results.dt
+
+# Bin A/BCD
+
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = c("B","C","D"), 
+                                          test_bin = 'A'),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.dt.A.BCD <- deseq.results.dt
+
+
+merge.deseq.dt <- Reduce(merge,list(deseq.results.dt.A.B[, .(group, t.type, k.type, 
+                                                             assay, CAR.align,
+                                                             car.axis, A.B = log2FoldChange,
+                                                             A.B.pval = padj,
+                                                             A.B.se = lfcSE)],
+                                  deseq.results.dt.A.C[, .(car.axis, A.C = log2FoldChange,
+                                                             A.C.pval = padj,
+                                                             A.C.se = lfcSE)],
+                                  deseq.results.dt.A.D[, .(car.axis, A.D = log2FoldChange,
+                                                             A.D.pval = padj,
+                                                             A.D.se = lfcSE)],
+                                  deseq.results.dt.B.C[, .(car.axis, B.C = log2FoldChange,
+                                                             B.C.pval = padj,
+                                                             B.C.se = lfcSE)],
+                                  deseq.results.dt.A.CD[, .(car.axis, A.CD = log2FoldChange,
+                                                             A.CD.pval = padj,
+                                                             A.CD.se = lfcSE)],
+                                  deseq.results.dt.A.BCD[, .(car.axis, A.BCD = log2FoldChange,
+                                                             A.BCD.pval = padj,
+                                                             A.BCD.se = lfcSE)]))
+
+# Heatmap
+deseq.corr.dt <- cor(merge.deseq.dt[, .(A.B, A.C, A.D, B.C, A.CD, A.BCD)])
+
+melt.deseq.corr.dt <- data.table(melt(deseq.corr.dt))
+
+deseq.corr.plot <- ggplot(melt.deseq.corr.dt, 
+                          aes(x=factor(Var1, levels = c("A.B", "B.C", "A.D", "A.C", 
+                                                        "A.CD", "A.BCD")), 
+                              y=factor(Var2, levels = c("A.B", "B.C", "A.D", "A.C",
+                                                        "A.CD", "A.BCD")))) +
+  geom_tile(aes(fill = value), colour = "black", size = .75) +
+  geom_text(aes(label=round(value, 3))) +
+  scale_fill_distiller(palette = 'Spectral') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  labs(title = 'Correlations in Shrunken log2 Fold Change') +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(), 
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        legend.position = "none")
+
+```
+
+```{r, warning = FALSE}
+
+deseq.corr.plot
+
+```
+
+### Combined Metric Log Fold Change Tile Plot
+
+```{r, message=FALSE, warning=FALSE, fig.height = 8, fig.width = 15}
+
+merge.deseq.dt <- Reduce(merge,
+                         list(deseq.results.dt.A.C[, .(group, t.type, k.type, 
+                                                       assay, CAR.align, car.axis, 
+                                                       A.C = log2FoldChange,
+                                                       A.C.pval = padj,
+                                                       A.C.se = lfcSE)],
+                              deseq.results.dt.A.D[, .(car.axis, 
+                                                       A.D = log2FoldChange,
+                                                       A.D.pval = padj,
+                                                       A.D.se = lfcSE)],
+                              deseq.results.dt.A.CD[, .(car.axis, 
+                                                        A.CD = log2FoldChange,
+                                                        A.CD.pval = padj,
+                                                        A.CD.se = lfcSE)],
+                              deseq.results.dt.A.BCD[, .(car.axis, 
+                                                         A.BCD = log2FoldChange,
+                                                         A.BCD.pval = padj,
+                                                         A.BCD.se = lfcSE)]))
+
+melt.deseq.lfc <- melt(merge.deseq.dt[, .(car.axis, group, t.type, k.type, assay, 
+                        CAR.align, A.C, A.D, A.CD, A.BCD)], 
+     measure.vars = c("A.C", "A.D", "A.CD", "A.BCD"), 
+     value.name = "LFC")
+
+melt.deseq.pval <- melt(merge.deseq.dt[, .(car.axis, A.C.pval, A.D.pval, A.CD.pval, A.BCD.pval)], 
+     measure.vars = c("A.C.pval", "A.D.pval", "A.CD.pval", "A.BCD.pval"), 
+     value.name = "pval")
+
+melt.deseq.pval[, variable := gsub('.pval', '', variable)]
+
+melt.deseq.dt <- merge(melt.deseq.lfc, melt.deseq.pval, by = c("car.axis", "variable"))
+melt.deseq.dt[, mean.LFC := mean(LFC), by = .(car.axis)]
+melt.deseq.dt[, signif := ''][pval <= padj.thresh , signif := "*"]
+
+lfc.tile.plot <- ggplot(melt.deseq.dt) + 
+  geom_tile(aes(x = factor(variable, levels = c("A.C", "A.D", "A.CD", "A.BCD")), 
+                y = reorder(car.axis, mean.LFC), 
+                fill = LFC), colour = "black", size = .20) + 
+  geom_text(aes(x = factor(variable), y = reorder(car.axis, mean.LFC),
+                label = signif), size = 5, vjust = 0.77) +
+  scale_fill_distiller(palette = 'Spectral', limits = c(-3.7, NA)) +
+  facet_wrap(~ t.type + assay, nrow = 1, scales = 'free_y') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand = c(0, 0), 
+                   labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Shrunken Log Fold Change') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+lfc.tile.plot
+
+```
+
+# CAR Abundance Data Analysis
+
+### Joint Score Results
+
+```{r, fig.height = 11, fig.width = 14, warning=FALSE}
+
+car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
+          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+
+read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
+
+read.counts[, car.abund.rel.baseline := car.abund/car.abund.adj,
+            by=.(donor, t.type, batch)]
+
+read.counts[assay == 'baseline',
+            car.abund.rel.baseline := 1,
+            by=.(batch, donor, t.type, CAR.align)]
+
+read.counts[assay != 'baseline', 
+            car.abund.pos := 
+              mean(.SD[k.type == 'pos', car.abund.rel.baseline], na.rm = T), 
+            by = .(batch, assay, t.type, donor, CAR.align)]
+
+read.counts.adj <- rbind(read.counts[batch != 'post-cytof'], 
+              copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[, k.type := 'pos'],
+              copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[, k.type := 'neg'])[CAR.align != 'CD96' & k.type != 'NA']
+
+CAR.align.ranks <- read.counts.adj[k.type == "pos" & assay %in% c('CTV2', 'CTV3'), 
+                                 .(mean.car.abund.pos = mean(car.abund.pos, na.rm = T)), 
+                             by = CAR.align][, mean.car.abund.rank := 
+                                              rank(-mean.car.abund.pos)]
+
+read.counts.adj <- merge(CAR.align.ranks, read.counts.adj, on = "CAR.align")
+
+ggplot(read.counts.adj[batch != 'post-cytof' & is.na(car.abund.rel.baseline) == F][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.rel.baseline),
+                group=interaction(t.type, k.type, batch, donor), 
+                color=t.type, 
+                linetype = k.type)) + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CTV CAR Abundance') +
+  scale_color_manual(values = c("red", "blue"),labels=c('CD4','CD8')) +
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_linedraw(base_size=20)
+
+# CD4's
+
+read.counts.adj <- rbind(read.counts[batch != 'post-cytof'], 
+              copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[, k.type := 'pos'],
+              copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[, k.type := 'neg'])[CAR.align != 'CD96' & k.type != 'NA']
+
+CAR.align.ranks <- read.counts.adj[t.type == 'CD4' & k.type == "pos" & assay %in% c('CTV2', 'CTV3'), 
+                                 .(mean.car.abund.pos = mean(car.abund.pos, na.rm = T)), 
+                             by = CAR.align][, mean.car.abund.rank := 
+                                              rank(-mean.car.abund.pos)]
+
+read.counts.adj <- merge(CAR.align.ranks, read.counts.adj, on = "CAR.align")
+
+ggplot(read.counts.adj[t.type == 'CD4' & batch != 'post-cytof' & 
+                         is.na(car.abund.rel.baseline) == F &
+                         paste0(batch, '.', donor) != 'prolif2.d2'][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.rel.baseline),
+                group=interaction(t.type, k.type, batch, donor), 
+                linetype = k.type), color = 'red') + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CD4+ T Cell CTV CAR Abundance') +
+  scale_color_discrete('',labels=c('CD4','CD8')) +
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_linedraw(base_size=20)
+
+# CD8's
+
+read.counts.adj <- rbind(read.counts[batch != 'post-cytof'], 
+              copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[, k.type := 'pos'],
+              copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[, k.type := 'neg'])[CAR.align != 'CD96' & k.type != 'NA']
+
+CAR.align.ranks <- read.counts.adj[t.type == 'CD8' & k.type == "pos" & assay %in% c('CTV2', 'CTV3'), 
+                                 .(mean.car.abund.pos = mean(car.abund.pos, na.rm = T)), 
+                             by = CAR.align][, mean.car.abund.rank := 
+                                              rank(-mean.car.abund.pos)]
+
+read.counts.adj <- merge(CAR.align.ranks, read.counts.adj, on = "CAR.align")
+
+ggplot(read.counts.adj[t.type == 'CD8' & batch != 'post-cytof' & 
+                         is.na(car.abund.rel.baseline) == F &
+                         paste0(batch, '.', donor) != 'prolif2.d2'][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.rel.baseline),
+                group=interaction(t.type, k.type, batch, donor), 
+                linetype = k.type), color = 'blue') + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CD8+ T Cell CTV CAR Abundance') +
+  scale_color_discrete('',labels=c('CD4','CD8')) +
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_linedraw(base_size=20)
+
+```
+
+
+```{r}
+ggplot(
+    rbind(read.counts[batch != 'post-cytof'], 
+          copy(read.counts[batch != 'post-cytof' & 
+                               assay == 'baseline'])[,k.type := 'neg'],
+          copy(read.counts[batch != 'post-cytof' & 
+                               assay == 'baseline'])[,k.type := 'pos'])[
+                                   k.type != 'NA'][, CAR.align.ord := 
+                                                       reorder(CAR.align, -car.abund.rel.baseline)][CAR.align.ord == 'CD40']) + 
+    geom_line(aes(
+        x=day, y=log2(car.abund.rel.baseline), linetype=k.type,
+        color= interaction(t.type), group= interaction(k.type, t.type, 
+                                                       batch, donor))) + 
+    facet_wrap(~CAR.align.ord, ncol=10) + scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+    labs(x='Timepoint (days)', y='log2 Car Abundance relative 
+         to Starting abundance', 
+         title = 'CTV CAR Abundance') + geom_hline(linetype=2, yintercept=0) + theme_linedraw(base_size=18) + 
+    scale_color_manual(values = c("red", "blue"),labels=c('CD4','CD8'))
+
+```
+
+```{r, fig.height = 11, fig.width = 14, warning=FALSE}
+
+read.counts[assay == 'baseline',
+            car.abund.ratio := 1]
+
+read.counts[assay != 'baseline', 
+            car.abund.ratio := 
+              mean(.SD[k.type == 'pos', car.abund], na.rm = T)/
+              mean(.SD[k.type == 'neg', car.abund], na.rm = T), 
+            by = .(batch, assay, t.type, donor, CAR.align)]
+
+read.counts.adj <- rbind(read.counts[batch != 'post-cytof'], 
+              copy(read.counts[batch != 'post-cytof' & 
+                                 assay == 'baseline'])[, k.type := 'pos'],
+              copy(read.counts[batch == 'prolif2' & 
+                                 t.type == 'CD8' & 
+                                 assay == 'baseline' &
+                                 donor == 'd2'])[, donor := 'd1'][, k.type := 'pos'])[k.type == 'pos' & bin == 'A' & CAR.align != 'CD96']
+
+CAR.align.ranks <- read.counts.adj[k.type == "pos" & assay %in% c('CTV2', 'CTV3'), 
+                                 .(mean.car.abund.ratio = mean(car.abund.ratio, na.rm = T)), 
+                             by = CAR.align][, mean.car.abund.rank := 
+                                              rank(-mean.car.abund.ratio)]
+
+read.counts.adj <- merge(CAR.align.ranks, read.counts.adj, on = "CAR.align")
+
+ggplot(read.counts.adj[batch != 'post-cytof' & is.na(car.abund.ratio) == F][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.ratio),
+                group=interaction(t.type, batch, donor), 
+                color=t.type)) + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CTV CAR Abundance, Positive:Negative Ratio') +
+  scale_color_manual(values = c("red", "blue"),labels=c('CD4','CD8')) +
+  geom_hline(linetype=2, yintercept=0) + geom_hline(linetype=2, yintercept=0) + theme_linedraw(base_size=20)
+
+```
+
+```{r, fig.height = 11, fig.width = 14, warning=FALSE}
+
+read.counts.adj <- rbind(read.counts[batch != 'post-cytof'], 
+              copy(read.counts[batch != 'post-cytof' & 
+                                 assay == 'baseline'])[, k.type := 'pos'],
+              copy(read.counts[batch == 'prolif2' & 
+                                 t.type == 'CD8' & 
+                                 assay == 'baseline' &
+                                 donor == 'd2'])[, donor := 'd1'][, k.type := 'pos'])[k.type == 'pos' & bin == 'A' & CAR.align != 'CD96']
+
+CAR.align.ranks <- read.counts.adj[k.type == "pos" & assay %in% c('CTV2', 'CTV3'), 
+                                 .(mean.car.abund.ratio = mean(car.abund.ratio, na.rm = T)), 
+                             by = .(CAR.align, t.type)][, mean.car.abund.rank := 
+                                              rank(-mean.car.abund.ratio), keyby = t.type]
+
+read.counts.adj <- merge(CAR.align.ranks, read.counts.adj, by = c("CAR.align", "t.type"))
+
+ggplot(read.counts.adj[batch != 'post-cytof' & is.na(car.abund.ratio) == F & 
+                         t.type == "CD4" & paste0(batch, '.', donor) != 'prolif2.d2'][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.ratio),
+                group=interaction(t.type, batch, donor)), color = 'red') + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CD4+ T cell CTV CAR Abundance, Positive:Negative Ratio') +
+  geom_hline(linetype=2, yintercept=0) + geom_hline(linetype=2, yintercept=0) +
+  theme_linedraw(base_size=20)
+
+ggplot(read.counts.adj[batch != 'post-cytof' & is.na(car.abund.ratio) == F & 
+                         t.type == "CD8"][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.ratio),
+                group=interaction(t.type, batch, donor)), color = 'blue') + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CD8+ T cell CTV CAR Abundance, Positive:Negative Ratio') +
+  geom_hline(linetype=2, yintercept=0) + geom_hline(linetype=2, yintercept=0) +
+  theme_linedraw(base_size=20)
+
+```
+
+```{r, warning = FALSE}
+
+ggplot(
+  dcast(read.counts[batch != 'post-cytof' & assay != 'baseline'][
+    order(-day), start.abund := car.abund[assay=='baseline'], 
+    by=.(batch, t.type, donor)], t.type + donor + batch + CAR.align + assay ~ k.type,
+    value.var='car.abund.rel.baseline', fun.aggregate=mean)) + 
+  geom_point(aes(x=log2(neg), y=log2(pos), color=t.type, shape=donor, label=CAR.align)) +
+  facet_grid(~assay) + geom_abline() +
+  theme_minimal(base_size=18) +
+  labs(title='Log2 abundance relative to starting', x='CD19-', y='CD19+')
+
+ggplot(
+  dcast(read.counts[batch != 'post-cytof' & assay != 'baseline'][
+    order(-day), start.abund := car.abund[assay=='baseline'], 
+    by=.(batch, t.type, donor)], k.type + donor + batch + CAR.align + assay ~ t.type,
+    value.var='car.abund.rel.baseline', fun.aggregate=mean)) + 
+  geom_point(aes(x=log2(CD8), y=log2(CD4), color=k.type, shape=donor, label=CAR.align)) +
+  facet_grid(~assay) +
+  geom_abline() + 
+  scale_color_manual(values=c('gray','red')) +
+  theme_minimal(base_size=18) +
+  labs(title='Log2 abundance relative to starting', x='CD8',y='CD4')
+
+```
+
+### DESeq2 Results
+
+```{r, message=FALSE, warning=FALSE, fig.height = 8, fig.width = 15}
+
+## CD19+
+
+# Bin A / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = "A"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.A.base.pos.dt <- deseq.results.dt
+
+# Bin B / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = "B"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.B.base.pos.dt <- deseq.results.dt
+
+# Bin C / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = "C"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.C.base.pos.dt <- deseq.results.dt
+
+# Bin D / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = "D"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.D.base.pos.dt <- deseq.results.dt
+
+# Bins A, B, C, & D vs. baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'pos',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = c("A", "B", "C", "D")),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.car.abund.pos.dt <- deseq.results.dt
+
+## DESeq2 - CD19-
+
+# Bin B / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'neg',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = "B"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.B.base.neg.dt <- deseq.results.dt
+
+# Bin C / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'neg',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline", 
+                                          test_bin = "C"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.C.base.neg.dt <- deseq.results.dt
+
+# Bin D / baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'neg',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = "D"),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.D.base.neg.dt <- deseq.results.dt
+
+# Bins B, C, & D vs. baseline
+read.counts[, group := paste(assay, t.type, k.type, sep = '_')]
+read.counts[, baseline.counts := .SD[assay == 'baseline', counts], 
+        by = .(batch, donor, t.type, CAR.align)]
+
+deseq.results.dt <- read.counts[batch != 'post-cytof' & k.type == 'neg',
+                                run_deseq(data.dt = .SD, ref_bin = "baseline",
+                                          test_bin = c("B", "C", "D")),
+                                by = .(group)]
+
+deseq.results.dt[, car.axis := paste(CAR.align,assay,t.type,k.type, sep='|'), 
+                 by=.(t.type, k.type, assay)]
+
+deseq.results.car.abund.neg.dt <- deseq.results.dt
+
+# merge data.tables
+merge.deseq.dt <- Reduce(merge,
+                         list(deseq.results.A.base.pos.dt[, .(t.type, 
+                                                              assay, CAR.align, car.axis =
+                                                                paste(CAR.align, assay, t.type, 
+                                                                      sep = '|'), 
+                                                              A.base.pos = log2FoldChange,
+                                                              A.base.pos.pval = padj,
+                                                              A.base.pos.se = lfcSE)],
+                              deseq.results.B.base.pos.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              B.base.pos = log2FoldChange,
+                                                              B.base.pos.pval = padj,
+                                                              B.base.pos.se = lfcSE)], 
+                              deseq.results.C.base.pos.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              C.base.pos = log2FoldChange,
+                                                              C.base.pos.pval = padj,
+                                                              C.base.pos.se = lfcSE)], 
+                              deseq.results.D.base.pos.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              D.base.pos = log2FoldChange,
+                                                              D.base.pos.pval = padj,
+                                                              D.base.pos.se = lfcSE)], 
+                              deseq.results.car.abund.pos.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              ABCD.base.pos = log2FoldChange,
+                                                              ABCD.base.pos.pval = padj,
+                                                              ABCD.base.pos.se = lfcSE)],
+                              deseq.results.B.base.neg.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              B.base.neg = log2FoldChange,
+                                                              B.base.neg.pval = padj,
+                                                              B.base.neg.se = lfcSE)], 
+                              deseq.results.C.base.neg.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              C.base.neg = log2FoldChange,
+                                                              C.base.neg.pval = padj,
+                                                              C.base.neg.se = lfcSE)], 
+                              deseq.results.D.base.neg.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              D.base.neg = log2FoldChange,
+                                                              D.base.neg.pval = padj,
+                                                              D.base.neg.se = lfcSE)], 
+                              deseq.results.car.abund.neg.dt[, .(car.axis = paste(CAR.align, 
+                                                                                  assay, t.type, 
+                                                                                  sep = '|'), 
+                                                              BCD.base.neg = log2FoldChange,
+                                                              BCD.base.neg.pval = padj,
+                                                              BCD.base.neg.se = lfcSE)]))
+
+melt.deseq.lfc <- melt(merge.deseq.dt[, .(car.axis, t.type, assay, CAR.align,
+                                         B.base.neg, C.base.neg, D.base.neg,
+                                         BCD.base.neg, A.base.pos, B.base.pos, C.base.pos,
+                                         D.base.pos, ABCD.base.pos)], 
+     measure.vars = c("B.base.neg", "C.base.neg", "D.base.neg", "BCD.base.neg",
+                      "A.base.pos", "B.base.pos", "C.base.pos", "D.base.pos", "ABCD.base.pos"), 
+     value.name = "LFC")
+
+melt.deseq.pval <- melt(merge.deseq.dt[, .(car.axis,
+                                         B.base.neg.pval, C.base.neg.pval,
+                                         D.base.neg.pval, BCD.base.neg.pval, A.base.pos.pval,
+                                         B.base.pos.pval, C.base.pos.pval, D.base.pos.pval,
+                                         ABCD.base.pos.pval)], 
+     measure.vars = c("B.base.neg.pval", "C.base.neg.pval", "D.base.neg.pval",
+                      "BCD.base.neg.pval", "A.base.pos.pval", "B.base.pos.pval", "C.base.pos.pval",
+                      "D.base.pos.pval", "ABCD.base.pos.pval"), 
+     value.name = "pval")
+melt.deseq.pval[, variable := gsub('.pval', '', variable)]
+
+melt.deseq.dt <- merge(melt.deseq.lfc, melt.deseq.pval, by = c("car.axis", "variable"))
+melt.deseq.dt[, k.type := sapply(strsplit(as.character(variable),"[.]"), `[`, 3)]
+melt.deseq.dt[, group := paste(assay, t.type, k.type, sep = "_")]
+melt.deseq.dt[, mean.LFC := mean(.SD[k.type == "pos", LFC]), by = .(assay, t.type, CAR.align)]
+melt.deseq.dt[, signif := ''][pval <= padj.thresh , signif := "*"]
+
+ggplot(melt.deseq.dt) + 
+  geom_tile(aes(x = factor(variable, levels = c("B.base.neg", "C.base.neg", "D.base.neg", 
+                                                "BCD.base.neg", "A.base.pos", "B.base.pos", 
+                                                "C.base.pos", "D.base.pos", "ABCD.base.pos")), 
+                y = reorder(car.axis, mean.LFC), 
+                fill = LFC), colour = "black", size = .20) + 
+  geom_text(aes(x = factor(variable), y = reorder(car.axis, mean.LFC),
+                label = signif), size = 5, vjust = 0.77) +
+  geom_vline(aes(xintercept = 4.5), colour = "black", size = 1) + 
+  scale_fill_distiller(palette = 'Spectral', limits = c(-3.7, NA)) +
+  facet_wrap(~ t.type + assay, nrow = 1, scales = 'free_y') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Shrunken Log Fold Change') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+```
+
+### Only BCD/ABCD
+
+```{r, warning=FALSE, fig.height = 8, fig.width = 15}
+melt.deseq.posneg.dt <- melt.deseq.dt[variable %in% c("BCD.base.neg", "ABCD.base.pos")]
+
+melt.deseq.posneg.dt[, mean.LFC := mean(.SD[k.type == "pos", LFC]), by = .(assay, t.type, CAR.align)]
+melt.deseq.posneg.dt[, signif := '']
+melt.deseq.posneg.dt[pval <= padj.thresh , signif := "*"]
+
+
+ggplot(melt.deseq.posneg.dt) + 
+    geom_tile(aes(x = factor(variable, levels = c("ABCD.base.pos", "BCD.base.neg"), labels=c('CD19+','CD19-')), 
+                  y = reorder(car.axis, mean.LFC), 
+                  fill = LFC), colour = "black", size = .20) + 
+    geom_text(aes(x = factor(variable, levels = c("ABCD.base.pos", "BCD.base.neg"), labels=c('CD19+','CD19-')),
+                  y = reorder(car.axis, mean.LFC),
+                  label = signif), size = 5, vjust = 0.77) +
+    geom_vline(aes(xintercept = 4.5), colour = "black", size = 1) + 
+    scale_fill_distiller(palette = 'Spectral', limits = c(-3.7, NA)) +
+    facet_wrap(~ t.type + assay, nrow = 1, scales = 'free_y') +
+    scale_x_discrete(expand=c(0,0)) +
+    scale_y_discrete(labels= (
+        function (breaks)
+            unlist(lapply(breaks, function(str)
+                strsplit(str, '|',fixed=T)[[1]][1])))) +
+    labs(title = 'Shrunken Log Fold Change') + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank())
+```
+
+### CTV vs. CAR Abundance Comparisons
+
+```{r, warning = FALSE}
+
+read.counts[, car.abund.rel.baseline := car.abund/car.abund[assay=='baseline'],
+            by=.(donor, t.type, batch, CAR.align)]
+
+car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
+          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+
+read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
+
+read.counts[, car.abund.rel.baseline := car.abund/car.abund.adj,
+            by=.(donor, t.type, batch)]
+
+read.counts[, mean.car.abund.rel.baseline := mean(car.abund.rel.baseline), 
+            by = .(t.type, k.type, assay, CAR.align)]
+
+read.counts[assay == 'baseline',
+            car.abund.rel.baseline := 1,
+            by=.(batch, donor, t.type, CAR.align)]
+
+lfc.abund.comp <- merge(deseq.results.car.abund.pos.dt[, .(group, CAR.align, assay, 
+                                                           t.type, k.type,
+                                                           abund.lfc = log2FoldChange,
+                                                           abund.padj = padj)],
+                        deseq.results.dt.A.D[, .(group, CAR.align,
+                                                 bin.A.D.lfc = log2FoldChange,
+                                                 bin.A.D.padj = padj)], 
+                        by = c("group", "CAR.align"))
+
+lfc.abund.comp[, pval.color := "Neither"]
+lfc.abund.comp[abund.padj < padj.thresh, pval.color := "Abundance"]
+lfc.abund.comp[bin.A.D.padj < padj.thresh, pval.color := "CTV"]
+lfc.abund.comp[abund.padj < padj.thresh & bin.A.D.padj < padj.thresh, pval.color := "Both"]
+
+lfc.abund.comp[, pval.color := factor(pval.color, 
+                                      levels = c("Neither", "Abundance", "CTV", "Both"))]
+
+ggplot(lfc.abund.comp, aes(x=abund.lfc, y=bin.A.D.lfc, label=CAR.align)) + 
+  facet_grid(assay ~ t.type) + 
+  geom_point(aes(color = factor(pval.color))) +
+  theme_bw(base_size = 12) +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.spacing=unit(.2,"lines"),
+        strip.background=element_rect(color="grey30", fill="grey90"), 
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(), 
+        panel.grid.major.x = element_blank(), 
+        panel.grid.minor.x = element_blank()) +
+  labs(x='CAR Abundance log2 Fold Change', 
+       y='CTV log2 Fold Change', 
+       title='CTV vs. CAR Abundance Log Fold Change') +
+  scale_colour_manual(values = c("black", "blue", "red", "purple"), 
+                      name = "p < 0.05:") +
+  geom_text_repel(data=unique(lfc.abund.comp[CAR.align %in% c("41BB", "BAFF-R",
+                                                              "CD28", "CD40", "CD72", 
+                                                              "KLRG1", "TACI", "TNR8")]),
+                  min.segment.length = 0, box.padding = 0.48)
+
+ggplotly()
+
+```
+
+## Plots for Kole 8/13/19
+
+```{r}
+
+ggplot(read.counts.adj[batch != 'post-cytof' & k.type != 'neg' & is.na(car.abund.rel.baseline) == F][, 
+  CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)]) + 
+  geom_line(aes(x=day, y=log2(car.abund.rel.baseline),
+                group=interaction(t.type, batch, donor), 
+                color=t.type)) + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CTV CAR Abundance') +
+  scale_color_manual('T Cell Subset', values = c("red", "blue"),labels=c('CD4','CD8')) +
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_linedraw(base_size=20)
+
+ggplot(read.counts.adj[
+  batch != 'post-cytof' & k.type != 'neg' & is.na(car.abund.rel.baseline) == F][, 
+    CAR.align.ord := reorder(CAR.align, mean.car.abund.rank)][
+      CAR.align.ord %in% c('TNR8','BAFF-R','TACI','41BB','CD28','CD40','KLRG1')][,
+        CAR.align.ord := factor(CAR.align.ord, 
+          levels=c('TNR8','BAFF-R','TACI','41BB','CD28','CD40','KLRG1'))]) + 
+  geom_line(aes(x=day, y=log2(car.abund.rel.baseline),
+                group=interaction(t.type, batch, donor), 
+                color=t.type)) + 
+  facet_wrap(~ CAR.align.ord, ncol=8) + 
+  scale_linetype_manual('', values=c(2,1), labels=c('CD19-','CD19+')) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance', 
+       title = 'CTV CAR Abundance') +
+  scale_color_manual('T Cell Subset', values = c("red", "blue"),labels=c('CD4','CD8')) +
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_linedraw(base_size=20)

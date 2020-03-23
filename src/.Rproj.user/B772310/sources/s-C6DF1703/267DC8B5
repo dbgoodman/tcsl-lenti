@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1582919428853.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "267DC8B5",
+    "lastKnownWriteTime" : 1575605040,
+    "last_content_update" : 1582919431199,
+    "path" : "/Volumes/HFSE/Box Sync/tcsl/flow/TCSL105 ALL FILES/r/diff.Rmd",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "903,44",
+        "scrollLine" : "868"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 4,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}

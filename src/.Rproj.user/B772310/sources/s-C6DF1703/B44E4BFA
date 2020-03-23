@@ -1,0 +1,27 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1582919252989.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "B44E4BFA",
+    "lastKnownWriteTime" : 1581036375,
+    "last_content_update" : 1581036375,
+    "path" : "/Volumes/HFSE/Box Sync/tcsl/lenti_screen_compiled_data/src/r/plots_exh.Rmd",
+    "project_path" : "r/plots_exh.Rmd",
+    "properties" : {
+        "chunk_output_type" : "inline",
+        "cursorPosition" : "21,27",
+        "scrollLine" : "6",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}

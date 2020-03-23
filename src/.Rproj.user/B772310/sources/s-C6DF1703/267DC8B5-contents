@@ -1,0 +1,926 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+require(data.table)
+require(ggplot2)
+require(scales)
+require(here)
+require(flowCore)
+require(flowWorkspace)
+require(ggcyto)
+require(RColorBrewer)
+library(uwot)
+
+parent_folder = here::here('..')
+
+#for using python reticulate/hdbscan
+library(reticulate)
+use_virtualenv("/Users/dbg/pyenvs/tcsl/")
+```
+
+# Differentiation
+
+## Load Platemaps
+
+
+```{r}
+
+diff_dir <- here::here('..','Diff')
+
+# load platemap filenames
+platemap_paths <- data.table(
+  filepath= normalizePath(file.path(diff_dir, list.files(
+    diff_dir,
+    pattern='.*platemap.*csv',
+    recursive=TRUE))))
+
+#parse day from file name
+platemap_paths[, day := gsub('.*D(\\d+).*', '\\1', filepath)]
+
+# load and merge platemaps
+platemaps <- platemap_paths[, fread(file=.BY[[1]]), by=filepath]
+platemaps[, car := sub('KRLG1','KLRG1',car)]
+
+# put 0 back into well number (ugh)
+platemaps[, well := gsub(' ', '',
+  gsub('([A-H])(\\d{1})$', '\\1 0\\2', well))]
+```
+
+## Load FCS files
+
+```{r}
+
+diff_fcs_dir <- here::here('..','Diff','processed')
+
+# load platemap filenames
+fcs_paths <- data.table(
+  filepath= normalizePath(file.path(diff_fcs_dir, list.files(
+    diff_fcs_dir,
+    pattern='.*fcs',
+    recursive=TRUE))))
+
+# parse well name
+fcs_paths[, well := gsub('.*processed_\\d+_\\d+_([A-H]\\d+).*.fcs','\\1', filepath)]
+fcs_paths[, plate := gsub('.*processed_\\d+_(\\d+)_[A-H]\\d+.*.fcs','\\1', filepath)]
+fcs_paths[, day := gsub('.*processed_(\\d+)_\\d+_[A-H]\\d+.*.fcs','\\1', filepath)]
+
+fcs_dt <- fcs_paths[, 
+  as.data.frame(flowCore::exprs(read.FCS(filepath))),
+  by=c('well','plate','day')]
+
+# give each event an ID for tracking after melt
+fcs_dt[, event_id := .I, by=c('well','plate','day')]
+
+channel_map <- list(
+  cd4="FJComp-450_50 Violet-A",
+  ccr7="FJComp-780_60 YG-A",
+  gfp="FJComp-515_20 Blue-A",
+  zombie="FJComp-586_15 Violet-A",
+  myc="FJComp-610_20 YG-A",
+  cd45ra= "FJComp-660_20 Red-A",
+  cd62l= "FJComp-800_30 Violet-A",
+  cd95="FJComp-710_50 Violet-A",
+  cd27="FJComp-780_60 Red-A",
+  cd45ro="FJComp-379_28 UV-A")
+
+# replace column names
+chan_names <- data.table(merge(
+  names(fcs_dt),
+  data.table(
+    marker=names(channel_map),
+    chan=unlist(channel_map)), 
+  by.x='x', by.y='chan',
+  all=T))
+
+# fill in original column names
+chan_names[is.na(marker), marker := x]
+
+# rename columns
+names(fcs_dt) <- chan_names[
+  names(fcs_dt), marker, on='x']
+
+#meltable columns
+melt_cols <- c(names(channel_map), 'SSC-A','SSC-W','SSC-H','FSC-A','FSC-H','FSC-W')
+
+# flowJo transform 
+for (chan_name in melt_cols) { 
+  fcs_dt[, c(paste0(chan_name,'_t')) := flowJoTrans()(fcs_dt[[chan_name]])] }
+
+# add transformed cols to melt
+transformed_vars <- paste0(melt_cols,'_t')
+melt_cols <- c(melt_cols, transformed_vars)
+
+# merge unmelted with plate map
+fcs_dt[, day := as.numeric(day)]
+fcs_dt[, plate := as.numeric(plate)]
+fcs_dt <- merge(
+  fcs_dt, platemaps,
+  on=c('well','day','plate'), all=TRUE)
+
+# melt fcs
+fcs_melt_dt <- melt(fcs_dt, measure.vars=melt_cols)
+
+# export csv.gz for umap
+# write.csv(fcs_dt[, !c('filepath','row','col','Time'), with=FALSE], 
+#   file=gzfile(normalizePath(file.path(diff_fcs_dir, 'diff_umap_input.csv.gz'))))
+
+# # write sampled csv for umap
+# sample_size <- 5000
+# 
+# write.csv(fcs_dt[, !c('filepath','row','col','Time'), with=FALSE][,
+#   .SD[sample(.N, min(.N, sample_size))], by=c('well', 'plate', 'day')], 
+#   file=gzfile(normalizePath(file.path(diff_fcs_dir, 'diff_umap_input_sampled_5k.csv.gz'))))
+```
+
+### Missing wells
+
+These wells are missing or empty:
+
+```{r}
+unique(fcs_melt_dt[is.na(value), list(day, plate, well, car, k562, donor)])
+```
+
+### Cells per well
+
+```{r fig.width=15, fig.height=15}
+
+ggplot(fcs_dt[, .N, by=c('day', 'plate', 'well', 'car', 'k562', 'donor')]) + 
+  geom_point(aes(x=car, y=N)) + facet_grid(donor + k562 ~ day) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) + 
+  labs(title='cells per condition', y='N live Ts by flowjo gating', y='CAR')
+```
+
+
+## Myc to GFP
+
+```{r, fig.width=12, fig.height=8}
+
+mfi_myc_summ <- melt(fcs_dt[gfp > 10^2.5 & !is.na(car) & car != 'untrans', list(
+  myc_to_gfp=mean(myc/gfp),
+  gfp=mean(gfp_t),
+  myc=mean(myc_t)),
+  by=c('car','donor','day','k562')], id.vars=c('car','donor','day','k562'))[,
+    value_norm := value/mean(value), by=c('variable','donor')][,
+      list(value_mean = mean(value_norm), value_sd = sd(value_norm)), by=c('car','day','k562','variable')]
+
+per_car <- ggplot(mfi_myc_summ, aes(
+    x=car, y=value_mean, 
+    ymin=value_mean-value_sd, ymax=value_mean+value_sd,
+    fill=k562)) + 
+  geom_bar(stat='identity', position=position_dodge()) + 
+  geom_errorbar(position=position_dodge(width=0.75), width=0.5) + 
+  facet_grid(variable~day, scales='free') +
+    theme_minimal(base_size = 18) + 
+  labs(y='Relative Expression',x='CAR', title='Myc and GFP by CAR') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+per_day <- ggplot(rbind(
+    mfi_myc_summ,
+    mfi_myc_summ[k562 =='none' & day == 0][, k562 := 'cd19+'],
+    mfi_myc_summ[k562 =='none' & day == 0][, k562 := 'cd19-']), 
+    aes(
+      x=day, y=value_mean, 
+      ymin=value_mean-value_sd, ymax=value_mean+value_sd, 
+      color=car)) + 
+  geom_point() + geom_line() + geom_linerange() +
+  scale_color_brewer(palette='Paired') +
+  facet_grid(k562~variable) +
+  theme_minimal(base_size = 18) +
+  labs(y='Relative Expression', x='Day', title='Myc and GFP over time')
+
+library(cowplot)
+plot_grid(per_day, per_car) 
+
+```
+
+## Gating Strategies
+
+```{r, fig.width=15, fig.height=8}
+
+## First, set the cutoffs for each channel
+
+# melt a sampled fcs set
+fcs_melt_sample_dt <- melt(
+  fcs_dt[, .SD[sample(.N, min(.N, 1000))], 
+    by=c('well', 'plate', 'day')], 
+  measure.vars=melt_cols)
+
+# choose thresholds visually (plotted below)
+marker_pos_threshold <- list(
+  cd62l=flowJoTrans(inverse=T)(1300),
+  cd27=flowJoTrans(inverse=T)(1800),
+  ccr7=flowJoTrans(inverse=T)(1100),
+  cd45ro=flowJoTrans(inverse=T)(800),
+  cd45ra=flowJoTrans(inverse=T)(1200),
+  cd95=flowJoTrans(inverse=T)(2100))
+
+marker_thresh_dt <- data.table(
+  variable= paste0(names(marker_pos_threshold),'_t'),
+  threshold= flowJoTrans()(unlist(marker_pos_threshold)))
+
+# assess marker thresholds
+ggplot(fcs_melt_sample_dt[
+    variable %in% paste0(names(channel_map),'_t')]) + 
+  geom_density(aes(x=value, color=factor(day), linetype=k562)) + 
+  scale_x_continuous(limits=c(-1000,5000)) +
+  facet_grid(k562~variable, scale='free') + 
+  scale_color_manual(values=brewer.pal(7, "YlGnBu")[3:7]) +
+  geom_vline(data=marker_thresh_dt, aes(xintercept=threshold))
+```
+
+## Examine pairs of markers
+```{r, fig.width=12, fig.height=8}
+
+fcs_melt_sample_dt <- melt(
+  fcs_dt[, .SD[sample(.N, min(.N, 1000))], 
+    by=c('well', 'plate', 'day')], 
+  measure.vars=melt_cols)
+
+# this function assigned 'none' k562 group to baseline day 0
+map_day_0 <- function(df) {
+  return(rbind(
+    df,
+    df[k562=='none' & day == 0][, k562 := 'cd19+'],
+    df[k562=='none' & day == 0][, k562 := 'cd19-']
+  ))
+}
+
+cast_vars <- function(df, cast_vars) {
+  return(
+    dcast(map_day_0(df[variable %in% cast_vars]), 
+      well + plate + day + car + k562 + donor + event_id ~ variable,
+      value.var='value'))
+}
+
+plot_2d_density_vars <- function(df, x_var, y_var) {
+
+  cast_dt <- cast_vars(df, cast_vars=c(x_var, y_var))
+  
+  x_threshold <- marker_thresh_dt[variable==x_var, threshold]
+  y_threshold <- marker_thresh_dt[variable==y_var, threshold]
+  
+  thresh_dt <- cast_dt[, melt(table(
+    x_thresh= (get(x_var) > x_threshold),
+    y_thresh= (get(y_var) > y_threshold))),
+    by=c('k562','car')]
+  
+  thresh_dt[, frac := value/sum(value), by=c('k562','car')]
+  
+  quadrant_labels <- data.table(
+    x=c(Inf,Inf,-Inf,-Inf),
+    y=c(Inf,-Inf,Inf,-Inf),
+    x_thresh=c(T, T, F, F),
+    y_thresh=c(T, F, T, F),
+    hjust=c(1,1,0,0),
+    vjust=c(1,0,1,0)
+  )
+  
+  thresh_dt <- thresh_dt[quadrant_labels, on=c('x_thresh','y_thresh')]
+  thresh_dt[, pct := percent(frac)]
+  
+  plot <- ggplot(cast_dt) + 
+    geom_density2d(aes(y=get(y_var), x=get(x_var)), n=200) + 
+    facet_grid(k562~car) + 
+    scale_x_continuous(limits=c(-1000,4000)) + 
+    scale_y_continuous(limits=c(-1000,4000)) + 
+    geom_vline(xintercept=x_threshold) + 
+    geom_hline(yintercept=y_threshold) +
+    geom_text(data=thresh_dt, aes(x=x, y=y, label=pct, hjust=hjust, vjust=vjust))
+  
+  return(plot)
+}
+
+
+plot_2d_density_vars_split_donor <- function(df, x_var, y_var) {
+
+  cast_dt <- cast_vars(df, cast_vars=c(x_var, y_var))
+  
+  x_threshold <- marker_thresh_dt[variable==x_var, threshold]
+  y_threshold <- marker_thresh_dt[variable==y_var, threshold]
+  
+  thresh_dt <- cast_dt[, melt(table(
+    x_thresh= (get(x_var) > x_threshold),
+    y_thresh= (get(y_var) > y_threshold))),
+    by=c('k562','car','donor')]
+  
+  thresh_dt[, frac := value/sum(value), by=c('k562','car','donor')]
+  
+  quadrant_labels <- data.table(
+    x=c(Inf,Inf,-Inf,-Inf),
+    y=c(Inf,-Inf,Inf,-Inf),
+    x_thresh=c(T, T, F, F),
+    y_thresh=c(T, F, T, F),
+    hjust=c(1,1,0,0),
+    vjust=c(1,0,1,0)
+  )
+  
+  thresh_dt <- thresh_dt[quadrant_labels, on=c('x_thresh','y_thresh')]
+  thresh_dt[, pct := percent(frac)]
+  
+  plot <- ggplot(cast_dt) + 
+    geom_density2d(aes(y=get(y_var), x=get(x_var)), n=200) + 
+    facet_grid(k562+donor~car) + 
+    scale_x_continuous(limits=c(-1000,4000)) + 
+    scale_y_continuous(limits=c(-1000,4000)) + 
+    geom_vline(xintercept=x_threshold) + 
+    geom_hline(yintercept=y_threshold) +
+    geom_text(data=thresh_dt, aes(x=x, y=y, label=pct, hjust=hjust, vjust=vjust))
+  
+  return(plot)
+}
+
+
+plot_2d_density_vars(fcs_melt_sample_dt[day==6], y_var='ccr7_t', x_var='cd45ro_t') +
+  labs(x='CD45RO', y='CCR7',title='Day 6 CCR7 vs CD45RO Diff')
+
+
+plot_2d_density_vars(fcs_melt_sample_dt[day==33], y_var='ccr7_t', x_var='cd45ra_t') +
+  labs(x='CD45RA', y='CCR7',title='Day 33 CCR7 vs CD45RA Diff')
+
+plot_2d_density_vars(fcs_melt_sample_dt[day==6], y_var='cd45ra_t', x_var='cd62l_t') +
+  labs(y='CD45RA', x='CD62L',title='Day 6 CD45RA vs CD62L Diff')
+
+plot_2d_density_vars(fcs_melt_sample_dt[day==6], y_var='cd45ra_t', x_var='cd45ro_t') +
+  labs(y='CD45RA', x='CD45RO',title='Day 6 CD45RO vs CD45RA')
+
+plot_2d_density_vars(fcs_melt_sample_dt[day==33], x_var='cd45ro_t', y_var='cd27_t') +
+  labs(x='CD45RO', y='CD27',title='Day 33 CD45RO vs CD27 Diff')
+
+
+fcs_flags <- fcs_dt[,
+  list( 
+    car, donor, day, k562, Time, well, plate, event_id,
+    cd62l= cd62l > marker_pos_threshold$cd62l,
+    cd27= cd27 > marker_pos_threshold$cd27,
+    ccr7= ccr7 > marker_pos_threshold$ccr7,
+    cd45ro= cd45ro > marker_pos_threshold$cd45ro,
+    cd45ra= cd45ra > marker_pos_threshold$cd45ra,
+    cd95= cd95 > marker_pos_threshold$cd95)]
+
+fcs_flags[,
+  `:=`(
+    cd62_cd45ra_diff= factor(
+      cd62l + 2*cd45ra),
+    cd45ra_ccr7_diff= factor(
+      cd45ra + 2*ccr7),
+    cd45ro_ccr7_diff= factor(
+      cd45ro + 2*ccr7),
+    cd45ro_cd27_diff= factor(
+      cd45ro + 2*cd27),
+    cd62_cd27_diff= factor(
+      cd62l + 2*cd27)
+    )]
+
+
+levels(fcs_flags$cd62_cd45ra_diff) <- c('TEM','TCM','TEMRA','Naive')
+levels(fcs_flags$cd45ra_ccr7_diff) <- c('TEM','TEMRA','TCM','Naive')
+levels(fcs_flags$cd45ro_ccr7_diff) <- c('TEMRA','TEM','Naive','TCM')
+levels(fcs_flags$cd45ro_cd27_diff) <- c(
+  'CD45RO-/CD27-','CD45RO+/CD27-','CD45RO-/CD27+','CD45RO+/CD27+')
+levels(fcs_flags$cd62_cd27_diff) <- c(
+  'CD62L-/CD27-','CD62L+/CD27-','CD62L-/CD27+','CD62L+/CD27+')
+
+diff_marker_dt <- melt.data.table(
+    fcs_flags,
+    measure.vars= c(
+        'cd62_cd45ra_diff', 'cd45ro_ccr7_diff', 'cd45ra_ccr7_diff',
+        'cd45ro_cd27_diff', 'cd62_cd27_diff',
+        'cd62l', 'cd27', 'ccr7', 'cd45ro', 'cd45ra', 'cd95'))
+
+```
+
+### Diff Plot Functions
+
+```{r, fig.width=12, fig.height=8}
+
+make_diff_percent_dt <- function(dt, diff_set) {
+  
+  subset_dt <- map_day_0(
+    dcast(dt[variable == diff_set],
+    ... ~ variable, value.var='value'))
+  subset_dt[, c(diff_set) := factor(get(diff_set))]
+  
+  subset_dt <- subset_dt[, 
+    melt(table(get(diff_set))),
+    by=c('car', 'donor', 'day', 'k562', 'well', 'plate')][,
+      frac := value/sum(value),
+      by=c('car', 'donor', 'day', 'k562', 'well', 'plate')]
+  names(subset_dt) <- gsub('V1', 'value', names(subset_dt))
+  names(subset_dt) <- gsub('Var1', 'diff', names(subset_dt))
+  
+  diff_mean_dt <- subset_dt[!is.na(donor), list(
+      val_mean= mean(frac), 
+      val_sd= sd(frac)), 
+      by=c('car','k562','donor','day','diff')]
+
+  return(diff_mean_dt)
+}
+
+cd62_cd45ra_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd45ra_diff')
+cd45ra_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ra_ccr7_diff')
+cd45ro_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_ccr7_diff')
+  cd62_cd27_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd27_diff')
+
+plot_by_day <- function(diff_mean_dt, title) {
+  return(ggplot(diff_mean_dt) + 
+      geom_bar(aes(x=as.factor(day), y=val_mean, fill=diff), stat='identity', position='stack') +
+      facet_grid(k562+donor~car) + 
+    theme_minimal(base_size=18) + 
+    labs(x='Day', y='% Subset', title=title))
+}
+
+plot_by_car <- function(diff_mean_dt, title) {
+  return(ggplot(diff_mean_dt) + 
+      geom_bar(aes(x=car, y=val_mean, fill=diff), stat='identity', position='stack') +
+      facet_grid(k562+donor~day) + 
+    theme_minimal(base_size=18) + 
+    labs(x='Day', y='% Subset', title=title) + 
+    coord_flip())
+}
+
+plot_by_day(cd62_cd45ra_diff_dt, 'CD62L vs CD45RA differentiation')
+plot_by_day(cd45ra_ccr7_diff_dt, 'CD45RA vs CCR7 differentiation')
+plot_by_day(cd45ro_ccr7_diff_dt, 'CD45RO vs CCR7 differentiation')
+    
+plot_by_car(cd62_cd45ra_diff_dt, 'CD62L vs CD45RA differentiation')
+plot_by_car(cd45ra_ccr7_diff_dt, 'CD45RA vs CCR7 differentiation')
+plot_by_car(cd45ro_ccr7_diff_dt, 'CD45RO vs CCR7 differentiation')
+
+```
+
+### Diff Plot Functions
+
+```{r, fig.width=18, fig.height=7}
+
+make_diff_percent_dt <- function(dt, diff_set) {
+  
+  subset_dt <- map_day_0(
+    dcast(dt[variable == diff_set],
+    ... ~ variable, value.var='value'))
+  subset_dt[, c(diff_set) := factor(get(diff_set))]
+  
+  subset_dt <- subset_dt[, 
+    melt(table(get(diff_set))),
+    by=c('car', 'donor', 'day', 'k562', 'well', 'plate')][,
+      frac := value/sum(value),
+      by=c('car', 'donor', 'day', 'k562', 'well', 'plate')]
+  names(subset_dt) <- gsub('V1', 'value', names(subset_dt))
+  names(subset_dt) <- gsub('Var1', 'diff', names(subset_dt))
+  
+  diff_mean_dt <- subset_dt[!is.na(donor), list(
+      val_mean= mean(frac), 
+      val_sd= sd(frac)), 
+      by=c('car','k562','donor','day','diff')]
+
+  return(diff_mean_dt)
+}
+
+cd62_cd45ra_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd45ra_diff')
+cd45ra_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ra_ccr7_diff')
+cd45ro_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_ccr7_diff')
+cd45ro_cd27_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_cd27_diff')
+cd27_dt <- make_diff_percent_dt(diff_marker_dt, 'cd27')
+cd95_dt <- make_diff_percent_dt(diff_marker_dt, 'cd95')
+
+
+plot_by_day <- function(diff_mean_dt, title) {
+  return(ggplot(diff_mean_dt) + 
+      geom_bar(aes(x=as.factor(day), y=val_mean, fill=diff), stat='identity', position='stack') +
+      facet_grid(k562+donor~car) + 
+    theme_minimal(base_size=18) + 
+    labs(x='Day', y='% Subset', title=title))
+}
+
+line_plot_by_day <- function(diff_mean_dt, title) {
+  return(ggplot(diff_mean_dt, 
+      aes(x=as.factor(day), y=val_mean, color=car, group=car, 
+          ymax=val_mean+val_sd, ymin=val_mean-val_sd)) + 
+    geom_line() + geom_point(size=2) + geom_linerange() +
+    facet_grid(k562+diff~donor) + 
+    scale_color_brewer(palette='Dark2') +
+    theme_minimal(base_size=18))
+}
+
+plot_by_car <- function(diff_mean_dt, title) {
+  return(ggplot(diff_mean_dt[car != 'untrans']) + 
+      geom_bar(aes(x=car, y=val_mean, fill=diff), stat='identity', position='stack') +
+      facet_grid(k562+donor~day) + 
+    theme_minimal(base_size=18) + 
+    labs(x='Day', y='% Subset', title=title) + 
+    coord_flip())
+}
+
+plot_by_day(cd62_cd45ra_diff_dt[k562=='cd19+'], 'CD62L vs CD45RA differentiation')
+plot_by_day(cd45ra_ccr7_diff_dt[k562=='cd19+'], 'CD45RA vs CCR7 differentiation')
+plot_by_day(cd45ro_ccr7_diff_dt[k562=='cd19+'], 'CD45RO vs CCR7 differentiation')
+    
+plot_by_car(cd62_cd45ra_diff_dt[k562=='cd19+'], 'CD62L vs CD45RA differentiation')
+plot_by_car(cd45ra_ccr7_diff_dt[k562=='cd19+'], 'CD45RA vs CCR7 differentiation')
+plot_by_car(cd45ro_ccr7_diff_dt[k562=='cd19+'], 'CD45RO vs CCR7 differentiation')
+
+plot_by_car(cd45ro_cd27_diff_dt[k562=='cd19+'], 'CD45RO vs CD27 differentiation')
+```
+
+```{r, fig.width=18, fig.height=14}
+plot_by_day(cd27_dt, title= '% CD27 positive')
+plot_by_car(cd27_dt, title= '% CD27 positive')
+
+line_plot_by_day(cd27_dt[diff==T & car != 'KLRG1'], title= '% CD27 positive')
+
+line_plot_by_day(cd95_dt[diff==T], title= '% CD95 positive')
+```
+
+# Plots for Kole 8/13
+
+```{r, fig.width=18, fig.height=7}
+
+cd27_dt_subset <- cd27_dt[k562=='cd19+' & diff == T &
+  car %in% c('41BB','CD28','BAFF-R','CD40','untrans')][,
+    car := factor(
+      car,
+      levels(factor(car))[c(3,1,2,4,5)],
+      labels=c(levels(factor(car))[c(3,1,2,4)],'Untransduced'))]
+
+ggplot(cd27_dt_subset) + 
+    geom_bar(aes(x=as.factor(day), y=val_mean, fill=diff), stat='identity', position='stack') +
+    facet_grid(donor~car) + 
+    theme_minimal(base_size=18) + 
+    labs(x='Day', y='Fraction of Cells', title='CD45RO vs CCR7 differentiation') +
+    scale_y_continuous(expand=c(0,0), labels = percent_format(accuracy = 1)) + 
+    scale_x_discrete(expand=c(0,0)) +
+    scale_fill_brewer('Differentiation\nSubset', palette='PiYG', direction=-1) + 
+    theme_minimal(base_size=18) + theme(panel.spacing.x = unit(3, "lines")) +
+    geom_hline(yintercept=0, size=2) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggplot(cd45ro_cd27_diff_dt[k562=='cd19+' & diff == 'CD45RO-/CD27+' & car %in% c('41BB','CD28','BAFF-R','CD40') & day == 33]) + 
+    geom_bar(aes(x=car, y=val_mean, fill=factor(donor)), stat='identity', position='dodge') +
+    theme_minimal(base_size=18) +
+    labs(x='CAR', y='Fraction of Cells', title='% CD45RO-/CD27+, Day 33') +
+    scale_y_continuous(expand=c(0,0), labels = percent_format(accuracy = 1)) + 
+    scale_x_discrete(expand=c(0,0)) +
+    scale_fill_brewer('Differentiation\nSubset', palette='Paired', direction=-1, guide=F) + 
+    theme_minimal(base_size=18) + theme(panel.spacing.x = unit(3, "lines")) +
+    geom_hline(yintercept=0, size=2) +
+    facet_wrap(~donor) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+# both donors averaged, car subset only
+# for kole 8/13
+
+cd45ro_ccr7_diff_subset_dt <- cd45ro_ccr7_diff_dt[k562=='cd19+' & 
+  car %in% c('41BB','CD28','BAFF-R','CD40','untrans')][,
+    car := factor(
+      car,
+      levels(factor(car))[c(3,1,2,4,5)],
+      labels=c(levels(factor(car))[c(3,1,2,4)],'Untransduced'))]
+
+ggplot(cd45ro_ccr7_diff_subset_dt[, val_comb := mean(val_mean, na.rm=T), by=c('day','diff','car')]) + 
+    geom_bar(aes(x=as.factor(day), y=val_comb/2, fill=diff), stat='identity', position='stack') +
+    facet_grid(.~car) + 
+    theme_minimal(base_size=18) + 
+    labs(x='Day', y='Fraction of Cells', title='CD45RO vs CCR7 differentiation') +
+    scale_y_continuous(expand=c(0,0), labels = percent_format(accuracy = 1)) + 
+    scale_x_discrete(expand=c(0,0)) +
+    scale_fill_brewer('Differentiation\nSubset', palette='PiYG', direction=-1) + 
+    theme_minimal(base_size=18) + theme(panel.spacing.x = unit(3, "lines")) +
+    geom_hline(yintercept=0, size=2) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+## UMAP
+
+### Optimize UMAP params
+
+This is slow, not running in knit.
+
+```{r, fig.height=15, fig.width=15, eval=F}
+umap_vars <- c(paste0(names(channel_map),'_t'))
+
+umap_fcs_dt <- fcs_dt[!is.na(cd4_t), .SD[sample(.N, min(.N, 50))], 
+       by=c('well', 'plate', 'day')]
+
+# subset on umap vars
+umap_fcs_dt_in <- umap_fcs_dt[, ..umap_vars]
+
+# scale each input column
+umap_fcs_dt_in[ , (names(umap_fcs_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_fcs_dt_in)]
+
+#umap parameter list
+min_dist_set <- c(0.0001, 0.005, 0.1)
+n_neighbor_set <- c(6,12,24,33)
+umap_params <- data.table(expand.grid(min_dist_set, n_neighbor_set))
+
+umap_out <- umap_params[, as.data.table(umap(umap_fcs_dt_in, min_dist=as.numeric(.BY[1]), n_neighbors=as.numeric(.BY[2]), verbose=T, n_threads=12, n_trees=50)), by=names(umap_params)]
+names(umap_out) <- c('min_dist','n_neighbor','umap_1','umap_2')
+
+umap_fcs_dt <- cbind(umap_fcs_dt[, 1:length(names(umap_fcs_dt))], umap_out)
+umap_fcs_dt[, id := 1:.N]
+
+ggplot(umap_fcs_dt) + geom_point(aes(x=umap_1, y=umap_2, color=car), size=0.1, alpha=0.2) + facet_grid(min_dist~n_neighbor)
+ggplot(umap_fcs_dt) + geom_point(aes(x=umap_1, y=umap_2, color=donor), size=0.1, alpha=0.2) + facet_grid(min_dist~n_neighbor)
+ggplot(umap_fcs_dt) + geom_point(aes(x=umap_1, y=umap_2, color=day), size=0.1, alpha=0.2) + facet_grid(min_dist~n_neighbor)
+ggplot(umap_fcs_dt) + geom_point(aes(x=umap_1, y=umap_2, color=k562), size=0.1, alpha=0.2) + facet_grid(min_dist~n_neighbor)
+
+
+```
+
+### UMAP plot of best params, clustering, var map
+
+```{r}
+
+well_sample_size <- 1000
+chosen_mindist <- 0.001
+chosen_neighbors <- 10
+
+umap_fcs_dt <- fcs_dt[!is.na(cd4_t), .SD[sample(.N, min(.N, well_sample_size))], 
+       by=c('well', 'plate', 'day')]
+
+# subset on umap vars
+umap_vars <- c(paste0(names(channel_map),'_t'))
+umap_fcs_dt_in <- umap_fcs_dt[, ..umap_vars]
+
+# scale each input column
+umap_fcs_dt_in[ , (names(umap_fcs_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_fcs_dt_in)]
+
+umap_out <- data.table(umap(umap_fcs_dt_in, min_dist=chosen_mindist, n_neighbors=chosen_neighbors,
+    verbose=T, n_threads=12, n_trees=100, ret_nn=T))
+
+nearest_neighbors <- umap_out$V1[[2]]$euclidean$idx
+neighbor_dist <- umap_out$V1[[2]]$euclidean$dist
+edge_weights <- rescale(-neighbor_dist, to=c(0,1))
+edge_weights <- edge_weights - min(edge_weights)
+umap_out <- data.table(umap_out$V1[[1]])
+
+names(umap_out) <- c('umap_1','umap_2')
+umap_fcs_dt <- cbind(umap_fcs_dt, umap_out)
+```
+
+### Leiden Clustering in Python
+
+```{r}
+library(reticulate)
+use_virtualenv('/Users/dbg/pyenvs/tcsl', required=T)
+```
+
+```{python}
+import leidenalg
+import igraph as ig
+import pandas as pd
+import numpy as np
+import math
+
+edges = []
+n_neighbors = r.nearest_neighbors.shape[1]
+for i, nn_row in enumerate(r.nearest_neighbors):
+    edge_weights = r.edge_weights[i]
+    for j in range(1, n_neighbors):
+        edges.append((int(nn_row[0]), int(nn_row[j]), edge_weights[j]))
+      
+knn_graph = ig.Graph.TupleList(edges, directed=True, weights=True)
+
+part = leidenalg.find_partition(knn_graph, leidenalg.ModularityVertexPartition, weights='weight')
+
+cluster_membership = [x for _,x in sorted(zip(knn_graph.vs['name'],part.membership))]
+
+```
+
+
+### HDSCAN in R
+
+(Not running this.)
+```{r eval=F}
+dat <- as.matrix(umap_out[, list(umap_1, umap_2)])
+hdscan.neighbors <- largeVis::randomProjectionTreeSearch(
+  t(dat), 
+  K = chosen_neighbors*2, 
+  tree_threshold = 10, 
+  max_iter = 15, 
+  threads = 12)
+hdscan.edges <- largeVis::buildEdgeMatrix(t(dat), hdscan.neighbors)
+hdscan.clusters <- largeVis::hdbscan(hdscan.edges, neighbors = hdscan.neighbors, 
+    verbose = FALSE, threads = 12, minPts = well_sample_size/2)
+
+umap_fcs_dt[, cluster := hdscan.clusters$clusters]
+```
+
+
+```{r fig.height=15, fig.width=15,}
+
+umap_fcs_dt[, cluster := factor(py$cluster_membership+1)]
+
+umap_cluster_dt <- umap_fcs_dt[, list(
+  mean_umap_1= mean(umap_1), 
+  mean_umap_2= mean(umap_2), 
+  size= .N), by=cluster]
+
+ggplot() + 
+  geom_point(data=umap_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
+  geom_label(data=umap_cluster_dt, aes(
+    x=mean_umap_1, y=mean_umap_2,
+    label=paste(cluster,size,sep='\n'), 
+    color=cluster), alpha=0.3) +
+  theme_minimal()
+
+# plot vars
+
+plot_sample_num <- 10000
+
+umap_fcs_plot <-melt(
+  umap_fcs_dt[sample(.N, min(.N, plot_sample_num))], measure.vars= melt_cols)
+
+disp_vars <- c('donor',umap_vars)
+
+# use z scale to plot params
+umap_fcs_plot[, value_scaled := scale(value), by=variable]
+
+zoom_factor = 3
+
+# zoom in on scaled
+umap_fcs_plot[, value_scaled_zoom := ifelse(abs(value_scaled) < zoom_factor, value_scaled, zoom_factor * sign(value_scaled))]
+
+ggplot(umap_fcs_plot[variable %in% disp_vars]) + 
+  geom_point(aes(x=umap_1, y=umap_2, color=value_scaled_zoom), size=0.2, alpha=0.2) + 
+  facet_wrap(~variable) + 
+  scale_color_distiller(palette = 'Spectral', limits=c(-zoom_factor,zoom_factor)) +
+  theme_minimal()
+
+max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+
+```
+
+### UMAP clusters vs params
+
+```{r, fig.width=12, fig.height=8}
+
+cluster_pct_vars <- c(paste0(names(channel_map),'_t'), 'FSC-A','SSC-A','donor')
+max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+
+umap_var_melt_dt <-melt(
+  umap_fcs_dt[!is.na(donor)], measure.vars= c(melt_cols,'donor'))
+
+# use z scale to plot params
+umap_var_melt_dt[, value_scaled := scale(value), by=variable]
+
+zoom_factor = 3
+
+# zoom in on scaled
+umap_var_melt_dt[, value_scaled_zoom := ifelse(abs(value_scaled) < zoom_factor, value_scaled, zoom_factor * sign(value_scaled))]
+
+param_cluster_pct_dt <- umap_var_melt_dt[
+  !is.na(cluster) & variable %in% cluster_pct_vars,
+  list(
+    clust_mean = mean(value_scaled),
+    clust_sd = sd(value_scaled)),
+      by=c('variable','cluster')]
+
+# zoom in on means
+param_cluster_pct_dt[, clust_mean_zoom := ifelse(
+  abs(clust_mean) < zoom_factor,
+  clust_mean,
+  zoom_factor * sign(clust_mean))]
+```
+
+```{r, fig.width=15, fig.height=20}
+
+ggplot(param_cluster_pct_dt) + 
+    geom_col(aes(x=cluster, y=clust_mean)) +
+    geom_linerange(aes(
+        x=cluster,
+        ymin=clust_mean-clust_sd, ymax=clust_mean+clust_sd)) +
+    facet_grid(variable~., scales='free_y') +
+    geom_hline(yintercept=0) +
+    theme_minimal()
+```
+
+```{r, fig.width=15, fig.height=12}
+ggplot(param_cluster_pct_dt) + 
+    geom_tile(aes(x=cluster, y=variable, fill=clust_mean_zoom), color='black') +
+    scale_fill_distiller(palette='PiYG', limits=c(-zoom_factor, +zoom_factor)) +
+    theme_minimal()
+```
+
+```{r, fig.width=15, fig.height=6}
+day_cluster_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(day,cluster))][,
+    list(day, pct=N/sum(N)), by='cluster']
+
+ggplot(day_cluster_pct_dt,
+       aes(x=factor(cluster, levels=c(1:max_cluster)), y=factor(day, levels=c(0,6,15,24,33)), fill=pct)) + 
+    geom_tile( 
+      color='black') +
+    geom_text(aes(label=round(pct*100)), size=2, alpha=0.5) +
+    scale_fill_distiller(palette='Reds', direction=1, limits=c(0, 1)) +
+    labs(title='Percent of cells in each day by cluster', subtitle='(cols sum to 100%)') +
+    theme_minimal()
+```
+
+```{r, fig.width=15, fig.height=6}
+k562_cluster_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(k562,cluster))][,
+    list(k562, pct=N/sum(N)), by='cluster']
+
+ggplot(k562_cluster_pct_dt,
+       aes(x=factor(cluster, levels=c(1:max_cluster)), y=factor(k562), fill=pct)) + 
+    geom_tile( 
+      color='black') +
+    geom_text(aes(label=round(pct*100)), size=2, alpha=0.5) +
+    scale_fill_distiller(palette='Reds', direction=1, limits=c(0, 1)) +
+    labs(title='Percent of cells in each k562 type by cluster', subtitle='(cols sum to 100%)') +
+    theme_minimal()
+```
+
+```{r, fig.width=15, fig.height=6}
+donor_cluster_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(donor,cluster))][,
+    list(donor, pct=N/sum(N)), by='cluster']
+
+ggplot(donor_cluster_pct_dt,
+       aes(x=factor(cluster, levels=c(1:max_cluster)), y=factor(donor), fill=pct)) + 
+    geom_tile( 
+      color='black') +
+    geom_text(aes(label=round(pct*100)), size=2, alpha=0.5) +
+    scale_fill_distiller(palette='Reds', direction=1, limits=c(0, 1)) +
+    labs(title='Percent of cells in each donor by cluster', subtitle='(cols sum to 100%)') +
+    theme_minimal()
+```
+
+```{r, fig.width=15, fig.height=6}
+day_cluster_total_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(day,cluster))][,
+    list(cluster, pct=N/sum(N)), by='day']
+
+ggplot(day_cluster_total_pct_dt, 
+       aes(x=factor(cluster, levels=c(1:max_cluster)), y=factor(day, levels=c(0,6,15,24,33)), fill=pct)) + 
+    geom_tile(color='black') +
+    scale_fill_distiller(palette='YlOrRd', direction=1, limits=c(0, 1)) +
+    geom_text(aes(label=round(pct*100)), size=2, alpha=0.5) +
+    labs(title='Percent of cells in each cluster by day', subtitle='(rows sum to 100%)') +
+    theme_minimal()
+```
+
+```{r fig.width=15, fig.height=9}
+
+car_cluster_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(car,cluster))][,
+    list(car, pct=N/sum(N)), by='cluster'][,
+      pct_delta := scale(pct), by=cluster]
+
+ggplot(car_cluster_pct_dt, aes(x=factor(cluster, levels=c(1:max_cluster)), y=car, fill=pct_delta)) + 
+    geom_tile(color='black') +
+    scale_fill_distiller(palette='BrBG', direction=1, limits=c(-2.8, 2.8)) +
+    theme_minimal()
+```
+
+```{r fig.width=15, fig.height=9}
+
+car_cluster_day_indiv_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(car,cluster,day))][,
+    list(car, pct=N/sum(N)), by=c('cluster','day')][,
+      pct_delta := scale(pct), by=c('cluster','day')]
+
+ggplot(car_cluster_day_indiv_pct_dt) + 
+    geom_tile(
+      aes(x=factor(cluster, levels=c(1:max_cluster)), y=car, fill=pct_delta), 
+      color='black') +
+    scale_fill_distiller(palette='BrBG', direction=1, limits=c(-2.8, 2.8)) +
+    facet_wrap(~day) +
+    theme_minimal()
+```
+
+```{r fig.width=15, fig.height=9}
+
+car_cluster_day_indiv_k562_pct_dt <- umap_fcs_dt[!is.na(donor),
+  data.table(table(car,cluster,day,k562))][,
+    list(car, pct=N/sum(N)), by=c('cluster','day','k562')][,
+      pct_delta := scale(pct), by=c('cluster','day','k562')]
+
+ggplot(car_cluster_day_indiv_k562_pct_dt) + 
+    geom_tile(
+      aes(x=factor(cluster, levels=c(1:max_cluster)), y=car, fill=pct_delta), 
+      color='black') +
+    scale_fill_distiller(palette='BrBG', direction=1, limits=c(-2.8, 2.8)) +
+    facet_grid(k562~day) +
+    theme_minimal()
+```
+
+
+```{r fig.width=15, fig.height=13}
+
+day_car_cluster_pct_dt <- umap_fcs_dt[
+  !is.na(donor) & k562 == 'cd19+',
+  data.table(table(day,cluster,car))][,
+    list(car, day, pct=N/sum(N)), by=c('cluster')]
+
+ggplot(day_car_cluster_pct_dt) + 
+  geom_line(aes(x=as.numeric(day), y=pct, color=car)) + 
+  facet_wrap(~cluster, scales='free_y', label=label_both) + 
+  scale_color_brewer(palette='Paired') + 
+  theme_minimal()
+```
