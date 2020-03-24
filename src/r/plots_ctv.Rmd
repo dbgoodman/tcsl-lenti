@@ -14,7 +14,7 @@ require(flowCore)
 require(flowWorkspace)
 require(RColorBrewer)
 library(ggridges)
-data_dir <- here::here('..','data')
+data_dir <- here::here('..','..','data')
 load(file.path(
     data_dir, 'ctv.Rdata'))
 
