@@ -13,7 +13,7 @@ library(gtable)
 library(RColorBrewer)
 
 #to make a data table with my csv 
-signaling.dt <- fread('/Users/camilliaazimi/Box\ Sync/tcsl/flow/200316\ TCSL148\ All\ files/200316\ TCSL148.csv')
+signaling.dt <- fread('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/tcsl148.csv')
 
 # to plot a bar plot to show the differing percentages of Jurkats
 ggplot(data=signaling.dt, aes(x=interaction(CAR, Hours), y=combo_mcherry_percent, fill=Line))+
@@ -21,9 +21,9 @@ ggplot(data=signaling.dt, aes(x=interaction(CAR, Hours), y=combo_mcherry_percent
       theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # to plot a bar plot to show the differing MFI of Jurkats
-ggplot(data=signaling.dt, aes(x=interaction(CAR, line), y=combo_mcherry_mfi, fill=line))+
-    geom_bar(stat="identity") + 
-    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+#ggplot(data=signaling.dt, aes(x=interaction(CAR, line), y=combo_mcherry_mfi, fill=line))+
+   # geom_bar(stat="identity") + 
+   # theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 ```
 
@@ -85,7 +85,7 @@ ggplot(signaling.dt[(Line=='4047' & Hours > 1 & Stimulation == '+' ) | (Line=='4
 
 ```
 
-```{r}
+```{r fig.width=10, fig.height=6}
 #to make individual bar graphs
 
 #pos only all lines all days
