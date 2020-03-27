@@ -1,6 +1,10 @@
 ---
 title: "TCSL148 Jurkat Signaling"
-output: html_document
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','..','html'))})
 ---
 
 ```{r setup, include=FALSE}
@@ -209,8 +213,5 @@ signaling.dt[,
         # within each group, subtract each CAR mfi from the untransduced
         combo_mcherry_mfi / combo_mcherry_mfi[CAR=='Unt'], 
     by=c('Hours','Line','Stimulation')]
-
-
-
 ```
 
