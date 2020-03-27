@@ -12,6 +12,9 @@ library(grid)
 library(gtable)
 library(RColorBrewer)
 
+#paste into terminal tab until Dan fixes this
+#s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
+
 #to make a data table with my csv 
 signaling.dt <- fread('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/tcsl148.csv')
 
@@ -150,6 +153,18 @@ ggplot(plot.signaling.dt[(Line=='4045')], aes(x=as.factor(Hours), y=combo_mcherr
     theme(axis.text.x = element_text(hjust = .5), legend.title.align=0.5, plot.title = element_text(hjust = 0.5)) +
     scale_fill_manual(values=brewer.pal(9, "Blues")[c(3,5,7,9)]) + labs(x='Hours of Stimulation', y='Percent Reporter Activity', title='TCSL148 Signaling (AP1/4045)') + ylim(0, 100)
 
+```
+
+
+```{r}
+#this is to normalize the data to untransduced from the same day
+
+#DAN LOOK HERE LOOK HERE LOOK HERE
+
+#to make a data table with stimulation of each normalized to untransduced for that day and that line
+norm.signaling.dt <- signaling.dt[, list(
+  norm.diff= combo_mcherry_percent[Stimulation=="+"] / combo_mcherry_percent[Stimulation=='none']),
+  by=c('CAR','Line','Hours')]
 
 ```
 
