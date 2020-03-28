@@ -86,7 +86,9 @@ load_fcs <- function(diff_dir, channel_map) {
   return(list(fcs_dt= fcs_dt, channel_map= channel_map))
 }
 
-load_diff_data <- function(experiment_dir, marker_pos_threshold, max_sample=Inf) {
+load_diff_data <- function(
+  experiment_dir, marker_pos_threshold, max_sample=Inf) 
+{
   
   diff_dir <- file.path(parent_folder, experiment_dir)
   
@@ -107,12 +109,14 @@ load_diff_data <- function(experiment_dir, marker_pos_threshold, max_sample=Inf)
     fcs_dt[, c(paste0(chan_name,'_t')) := flowjo_biexp()(fcs_dt[[chan_name]])] 
   }
   
-  melt_cols <- c(names(channel_map), 'SSC-A','SSC-W','SSC-H','FSC-A','FSC-H','FSC-W')
+  melt_cols <- c(names(channel_map), 
+                 'SSC-A','SSC-W','SSC-H','FSC-A','FSC-H','FSC-W')
   transformed_vars <- paste0(melt_cols,'_t')
   melt_cols <- c(melt_cols, transformed_vars)
   
   # downsample per well if specified
-  fcs_dt <- fcs_dt[, .SD[sample(.N, min(c(.N, max_sample)))], by=c('well','plate','day')]
+  fcs_dt <- fcs_dt[, .SD[sample(.N, min(c(.N, max_sample)))], 
+                   by=c('well','plate','day')]
   
   fcs_melt_dt <- melt(
     fcs_dt,
@@ -122,10 +126,13 @@ load_diff_data <- function(experiment_dir, marker_pos_threshold, max_sample=Inf)
     variable= paste0(names(marker_pos_threshold)),
     threshold= unlist(marker_pos_threshold))
   
-  fcs_melt_dt <- fcs_melt_dt[marker_thresh_dt, on='variable'][, gt_thresh := value > threshold]
+  fcs_melt_dt <- fcs_melt_dt[marker_thresh_dt, on='variable'][, 
+    gt_thresh := value > threshold]
+  
   fcs_melt_dt[, threshold := NULL]
   
-  return(list(fcs_melt_dt= fcs_melt_dt, channel_map=channel_map, melt_cols=melt_cols))
+  return(list(
+    fcs_melt_dt= fcs_melt_dt, channel_map=channel_map, melt_cols=melt_cols))
 }
 
 
@@ -140,6 +147,7 @@ cd4_marker_pos_threshold <- list(
   cd45ro_t=800,
   cd45ra_t=900,
   cd95_t=2100,
+  gfp_t=NA,
   cd_t=NA,
   zombie_t=NA,
   myc_t=NA,
@@ -151,7 +159,9 @@ cd4_marker_pos_threshold <- list(
 #AWS Version:
 cd4_dir <- "s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl105/diff"
 
-cd4_out <- load_diff_data(cd4_dir, cd4_marker_pos_threshold, max_sample=n_events_per_well)
+cd4_out <- load_diff_data(cd4_dir, 
+  cd4_marker_pos_threshold, 
+  max_sample=n_events_per_well)
 
 # CD8 ======
 
@@ -162,6 +172,7 @@ cd8_marker_pos_threshold <- list(
   cd45ro_t=800,
   cd45ra_t=900,
   cd95_t=2100,
+  gfp_t=NA,
   cd_t=NA,
   zombie_t=NA,
   myc_t=NA,
@@ -173,24 +184,46 @@ cd8_marker_pos_threshold <- list(
 #AWS Version:
 cd8_dir <- "s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl091/diff"
 
-cd8_out <- load_diff_data(cd8_dir, cd8_marker_pos_threshold, max_sample=n_events_per_well)
+cd8_out <- load_diff_data(cd8_dir,
+                          cd8_marker_pos_threshold, 
+                          max_sample=n_events_per_well)
 
 
-diff_dt <- rbind(cd8_out$fcs_melt_dt[, t_type := 'cd8'], cd4_out$fcs_melt_dt[, t_type := 'cd4'])
+diff_dt <- rbind(
+  cd8_out$fcs_melt_dt[, t_type := 'cd8'], 
+  cd4_out$fcs_melt_dt[, t_type := 'cd4'])
+
 cd4_out$fcs_melt_dt <- NULL
 cd8_out$fcs_melt_dt <- NULL
 
 diff_opt_cd4 <- cd4_out
 diff_opt_cd8 <- cd8_out
 
-save('diff_opt_cd4', 'diff_opt_cd8', 'diff_dt', file=file.path(here::here('..','data','diff.Rdata')))
+save(
+  'diff_opt_cd4', 'diff_opt_cd8',
+  file=file.path(here::here('..','data','diff.Rdata')))
+
+fwrite(diff_dt, 
+  compress='gzip', 
+  file=file.path(here::here('..','data','diff.csv.gz')))
 
 # ------
 # make a downsampled version for faster plotting and analysis
 
 n_events_per_well <- 2500
-cd8_out <- load_diff_data(cd8_dir, cd8_marker_pos_threshold, max_sample=n_events_per_well)
-cd4_out <- load_diff_data(cd4_dir, cd4_marker_pos_threshold, max_sample=n_events_per_well)
-diff_dt <- rbind(cd8_out$fcs_melt_dt[, t_type := 'cd8'], cd4_out$fcs_melt_dt[, t_type := 'cd4'])
-save('diff_opt_cd4', 'diff_opt_cd8', 'diff_dt', file=file.path(here::here('..','data','diff.sampled.Rdata')))
+cd8_out <- load_diff_data(cd8_dir, 
+                          cd8_marker_pos_threshold, max_sample=n_events_per_well)
+cd4_out <- load_diff_data(cd4_dir, 
+                          cd4_marker_pos_threshold, max_sample=n_events_per_well)
+diff_dt <- rbind(
+  cd8_out$fcs_melt_dt[, t_type := 'cd8'], 
+  cd4_out$fcs_melt_dt[, t_type := 'cd4'])
+
+save('diff_opt_cd4', 'diff_opt_cd8',
+     file=file.path(here::here('..','data','diff.sampled.Rdata')))
+
+fwrite(diff_dt, 
+       compress='gzip', 
+       file=file.path(here::here('..','data','diff.sampled.csv.gz')))
+
 

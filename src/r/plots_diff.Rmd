@@ -13,12 +13,17 @@ library(ggplot2)
 library(data.table)
 library(scales)
 library(RColorBrewer)
+library(reticulate)
+library(uwot)
+library(gridExtra)
+use_condaenv(condaenv = 'py37', required = TRUE)
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
+diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
+
 
 car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
-
 
 # map day 0 to both plus and minus
 map_day_0 <- function(df) {
@@ -32,9 +37,142 @@ map_day_0 <- function(df) {
 
 # UMAP
 
+
 For now, skip straight to high dimensional plotting.
+
+## Choose UMAP Params
 
 First, find parameters with a small sample.
 ```{r}
-umap_dt <- diff_dt[, .SD[event_id %in% sample(unique(event_id), min(50, length(unique(event_id))))], by=c('well', 'plate', 'day')]
+umap_dt <- diff_dt[!is.na(event_id), 
+  .SD[event_id %in% sample(unique(event_id), 
+    min(20, length(unique(event_id))))],
+  by=c('well', 'plate', 'day')]
+
+#grab channel map from cd4 data (cd4/8 are the same)
+channel_map <- diff_opt_cd4$channel_map
+
+# for now use all variables in the channel map
+umap_vars <- c(paste0(names(channel_map),'_t'))
+
+#cast it so variables are columns and
+#subset sample umap data on variables
+umap_cast_dt <- dcast(umap_dt, 
+  event_id + well + plate + day + t_type ~ variable, 
+  value.var='value')
+
+umap_dt_in <- umap_cast_dt[, ..umap_vars]
+
+# scale each input column
+umap_dt_in[ , 
+  (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+
+#umap parameter list
+min_dist_set <- c(0.0001, 0.005, 0.1)
+n_neighbor_set <- c(3,6,15,30)
+umap_params <- data.table(expand.grid(min_dist_set, n_neighbor_set))
+
+# run umap via uwot library
+umap_out <- umap_params[, {
+  print(paste0('Running: ',.BY)); 
+  as.data.table(umap(umap_dt_in, min_dist=as.numeric(.BY[1]),
+    n_neighbors=as.numeric(.BY[2]), verbose=F, n_threads=8, n_trees=50))
+  }, by=names(umap_params)]
+
+# rename the columns
+names(umap_out) <- c('min_dist','n_neighbor','umap_1','umap_2')
+
+# add the umap output to the input dt
+umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
+umap_fcs_dt[, id := 1:.N]
+```
+
+```{r fig.width=10, fig.height=5}
+color_points <- ggplot(umap_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
+  geom_point(size=0.1, alpha=0.1) + 
+  facet_grid(min_dist~n_neighbor)
+
+color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
+  geom_hex(bins = 70) +
+  scale_fill_continuous(
+    type = "viridis", limits=c(0,30), oob=scales::squish) +
+  facet_grid(min_dist~n_neighbor) +
+  theme_bw()
+
+grid.arrange(color_points, color_density, ncol=2)
+```
+
+Choosing neighbors == 6 and min_dist == 0.005. 
+
+## Checking UMAP Param space
+
+Scaling this to 200 events per well and checking CAR/condition separation.
+
+```{r}
+chosen_dist=0.005
+chosen_n_neighbor=6
+
+umap_dt <- diff_dt[!is.na(event_id), 
+  .SD[event_id %in% sample(unique(event_id), 
+    min(200, length(unique(event_id))))],
+  by=c('well', 'plate', 'day')]
+
+#grab channel map from cd4 data (cd4/8 are the same)
+channel_map <- diff_opt_cd4$channel_map
+
+# for now use all variables in the channel map
+umap_vars <- c(paste0(names(channel_map),'_t'))
+
+#cast it so variables are columns and
+#subset sample umap data on variables
+umap_cast_dt <- dcast(umap_dt, 
+  event_id + well + plate + day + t_type ~ variable, 
+  value.var='value')
+
+umap_dt_in <- umap_cast_dt[, ..umap_vars]
+
+# scale each input column
+umap_dt_in[ , 
+  (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+
+# run umap via uwot library
+umap_out <- as.data.table(umap(umap_dt_in, min_dist=chosen_dist,
+    n_neighbors=chosen_n_neighbor, verbose=T, n_threads=8, n_trees=50))
+  
+# rename the columns
+names(umap_out) <- c('umap_1','umap_2')
+
+# add the umap output to the input dt
+umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
+umap_fcs_dt[, id := 1:.N]
+
+# add back the annotations
+umap_fcs_dt <- unique(umap_dt[, 
+  .(donor, car, k562, t_type, day, well, event_id)])[
+    umap_fcs_dt, on=.(t_type,well,day,event_id)]
+```
+
+```{r}
+cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
+cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
+
+color_time <- ggplot(umap_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
+  geom_point(size=0.1, alpha=0.5) +
+  scale_color_manual(values=c(cd4_colors, cd8_colors)) +
+  guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
+
+color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
+  geom_hex(bins = 70) +
+  scale_fill_continuous(
+    type = "viridis", limits=c(0,150), oob=scales::squish) +
+  theme_bw()
+
+v <- ggplot(umap_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=interaction(car, k562))) +
+  geom_point(size=0.1, alpha=0.5) +
+  guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
+
+grid.arrange(color_points, color_density, color_cars, ncol=3)
 ```
