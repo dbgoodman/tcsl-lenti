@@ -23,15 +23,16 @@ measure.sum.dt <- measure.dt[, list(
     mean_area= mean('Area'!= 'none'), 
     sd_area= sd('Area'!='none')), by=c('Cage','Mouse','Day', 'Treatment')]
 
-ggplot(measure.sum.dt, 
-       aes(x=as.factor(Day), y=mean_area, color=factor(Treatment))) + 
-    geom_line(stat="identity") + 
+ggplot(measure.dt [Area != 'none'], 
+       aes(x=as.factor(Day), y=Area, group=interaction(Cage, Mouse), color=Treatment)) + 
+    geom_line(linetype="solid", size=1) + 
+    geom_point() +
     theme_minimal() +
     theme(axis.text.x = element_text(hjust = .5), 
           legend.title.align=0.5, plot.title = element_text(hjust = 
                                                                 0.5)) +
     labs(x='Days Post Tumor Injection', y='Tumor Volume', 
-         title='TCSL139 K562 Pilot') 
+         title='TCSL139 K562 Pilot')
 
 ```
 
