@@ -18,12 +18,15 @@ library(uwot)
 library(gridExtra)
 use_condaenv(condaenv = 'py37', required = TRUE)
 
-data_dir <- here::here('..','data')
+data_dir <- here::here('..','..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
 diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
 
 car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
+
+do_umap_param_search = T
+censor_negative_min = -1500
 
 # map day 0 to both plus and minus
 map_day_0 <- function(df) {
@@ -43,7 +46,7 @@ For now, skip straight to high dimensional plotting.
 ## Choose UMAP Params
 
 First, find parameters with a small sample.
-```{r}
+```{r eval=skip_umap_param_search}
 umap_dt <- diff_dt[!is.na(event_id), 
   .SD[event_id %in% sample(unique(event_id), 
     min(20, length(unique(event_id))))],
@@ -52,8 +55,9 @@ umap_dt <- diff_dt[!is.na(event_id),
 #grab channel map from cd4 data (cd4/8 are the same)
 channel_map <- diff_opt_cd4$channel_map
 
-# for now use all variables in the channel map
+# for now use all variables in the channel map except cd4/8
 umap_vars <- c(paste0(names(channel_map),'_t'))
+umap_vars <- umap_vars[umap_vars != 'cd_t']
 
 #cast it so variables are columns and
 #subset sample umap data on variables
@@ -63,9 +67,20 @@ umap_cast_dt <- dcast(umap_dt,
 
 umap_dt_in <- umap_cast_dt[, ..umap_vars]
 
+# for points that are very negative, trim the to below the cutoff
+umap_dt_in[umap_dt_in < censor_negative_min] <- censor_negative_min
+
 # scale each input column
 umap_dt_in[ , 
   (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+
+# check scales:
+ggplot(melt(cbind(umap_dt_in, id=1:nrow(umap_dt_in)), id.var='id'), 
+       aes(x=value)) +
+    geom_density() +
+    facet_grid(variable~.) +
+    scale_fill_distiller(palette='RdYlBu') +
+    theme_bw()
 
 #umap parameter list
 min_dist_set <- c(0.0001, 0.005, 0.1)
@@ -85,13 +100,19 @@ names(umap_out) <- c('min_dist','n_neighbor','umap_1','umap_2')
 # add the umap output to the input dt
 umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
 umap_fcs_dt[, id := 1:.N]
+
+umap_fcs_dt <- unique(umap_dt[, 
+  .(donor, car, k562, t_type, day, well, event_id)])[
+    umap_fcs_dt, on=.(t_type,well,day,event_id)]
 ```
 
-```{r fig.width=10, fig.height=5}
-color_points <- ggplot(umap_fcs_dt, 
-    aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
+```{r eval=skip_umap_param_search, fig.width=20, fig.height=10}
+color_points <- ggplot(umap_fcs_dt[car %in% c('CD28','41BB','KLRG1','BAFF-R','Zeta')], 
+    aes(x=umap_1, y=umap_2, color=interaction(car, t_type))) +
   geom_point(size=0.1, alpha=0.1) + 
-  facet_grid(min_dist~n_neighbor)
+  guides(colour = guide_legend(override.aes = list(alpha=1, size=3))) +
+  facet_grid(min_dist~n_neighbor) +
+  theme_bw()
 
 color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
   geom_hex(bins = 70) +
@@ -103,7 +124,7 @@ color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
 grid.arrange(color_points, color_density, ncol=2)
 ```
 
-Choosing neighbors == 6 and min_dist == 0.005. 
+Choosing neighbors == 15 and min_dist == 1e-4. 
 
 ## Checking UMAP Param space
 
@@ -111,7 +132,7 @@ Scaling this to 200 events per well and checking CAR/condition separation.
 
 ```{r}
 chosen_dist=0.005
-chosen_n_neighbor=6
+chosen_n_neighbor=15
 
 umap_dt <- diff_dt[!is.na(event_id), 
   .SD[event_id %in% sample(unique(event_id), 
@@ -153,26 +174,35 @@ umap_fcs_dt <- unique(umap_dt[,
     umap_fcs_dt, on=.(t_type,well,day,event_id)]
 ```
 
-```{r}
+```{r, fig.width=30, fig.height=20}
 cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
 cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
 
-color_time <- ggplot(umap_fcs_dt, 
+color_time <- ggplot(umap_fcs_dt[][, cd19 := (k562=='cd19+')], 
     aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
   geom_point(size=0.1, alpha=0.5) +
+  facet_grid(car~cd19) +
   scale_color_manual(values=c(cd4_colors, cd8_colors)) +
   guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
 
 color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
   geom_hex(bins = 70) +
+  facet_grid(car~cd19) +
   scale_fill_continuous(
-    type = "viridis", limits=c(0,150), oob=scales::squish) +
+    type = "viridis", limits=c(0,30), oob=scales::squish) +
   theme_bw()
 
-v <- ggplot(umap_fcs_dt, 
-    aes(x=umap_1, y=umap_2, color=interaction(car, k562))) +
-  geom_point(size=0.1, alpha=0.5) +
-  guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
+color_markers <- ggplot(
+    melt(umap_fcs_dt, measure.vars=umap_vars)[, 
+      value.scaled := scale(value), by='variable'][,
+        cd19 := (k562=='cd19+')], 
+    aes(x=umap_1, y=umap_2, z=value.scaled)) +
+  stat_summary_hex(bins = 70) +
+  facet_grid(variable~cd19) +
+  scale_fill_distiller(palette='RdYlBu', limits=c(-3, 3), oob=scales::squish) +
+  theme_bw()
 
-grid.arrange(color_points, color_density, color_cars, ncol=3)
+grid.arrange(color_time, color_density, color_markers, ncol=3)
 ```
+
+
