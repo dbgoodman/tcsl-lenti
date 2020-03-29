@@ -1,0 +1,46 @@
+---
+title: "tcsl139"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gtable)
+library(RColorBrewer)
+
+#paste into terminal tab until Dan fixes this
+#s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
+
+#to make a data table with my csv 
+measure.dt <- fread(paste0(
+  '/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/',
+  'tcsl139_tumor_measurements.csv'))
+
+# summary for each treatment type
+measure.sum.dt <- measure.dt[, list(
+    mean_area= mean('Area'!= 'none'), 
+    sd_area= sd('Area'!='none')), by=c('Cage','Mouse','Day', 'Treatment')]
+
+ggplot(measure.sum.dt, 
+       aes(x=as.factor(Day), y=mean_area, color=factor(Treatment))) + 
+    geom_line(stat="identity") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(hjust = .5), 
+          legend.title.align=0.5, plot.title = element_text(hjust = 
+                                                                0.5)) +
+    labs(x='Days Post Tumor Injection', y='Tumor Volume', 
+         title='TCSL139 K562 Pilot') 
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
