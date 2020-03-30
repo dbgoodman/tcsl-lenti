@@ -22,10 +22,10 @@ measure.dt <- fread(paste0(
 # change area to numeric - the 'none' cells confused fread, use NA instead.
 measure.dt[, Area := as.numeric(Area)]
 
-# summary for each treatment type
-measure.sum.dt <- measure.dt[, list(
-    mean_area= mean('Area'!= 'none'), 
-    sd_area= sd('Area'!='none')), by=c('Cage','Mouse','Day', 'Treatment')]
+# # summary for each treatment type
+# measure.sum.dt <- measure.dt[, list(
+#     mean_area= mean('Area'!= 'none'), 
+#     sd_area= sd('Area'!='none')), by=c('Cage','Mouse','Day', 'Treatment')]
 
 ggplot(measure.dt [Area != 'none'], 
        aes(x=as.factor(Day), y=as.numeric(Area), group=interaction(Cage, Mouse), color=Treatment)) + 
@@ -44,7 +44,26 @@ ggplot(measure.dt [Area != 'none'],
 
 ```{r}
 
+# plotting average volume
+measure.sum.dt <- measure.dt[, `:=` (avg_vol = mean(Area), std_dev = sd(Area)), 
+                             by=c('Day','Treatment')]
 
+
+ggplot(measure.sum.dt [Area != 'none'], 
+       aes(x=as.factor(Day), y=as.numeric(avg_vol), group=interaction(Cage, Mouse),
+           color=Treatment)) + 
+  geom_line(linetype="solid", size=1) + 
+  geom_point() +
+  geom_ribbon(aes(ymin=avg_vol-std_dev, ymax=avg_vol+std_dev, fill=Treatment)) +
+  theme_minimal() +
+  scale_color_npg() +
+  scale_fill_npg() +
+  theme(axis.text.x = element_text(hjust = .5), 
+        legend.title.align=0.5, 
+        plot.title = element_text(hjust = 0.5)) +
+  labs(x='Days Post Tumor Injection', 
+       y='Tumor Volume', 
+       title='TCSL139 K562 Pilot')
 
 ```
 
