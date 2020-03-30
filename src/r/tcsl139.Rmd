@@ -18,13 +18,16 @@ measure.dt <- fread(paste0(
   '/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/',
   'tcsl139_tumor_measurements.csv'))
 
+# change area to numeric - the 'none' cells confused fread, use NA instead.
+measure.dt[, Area := as.numeric(Area)]
+
 # summary for each treatment type
 measure.sum.dt <- measure.dt[, list(
     mean_area= mean('Area'!= 'none'), 
     sd_area= sd('Area'!='none')), by=c('Cage','Mouse','Day', 'Treatment')]
 
 ggplot(measure.dt [Area != 'none'], 
-       aes(x=as.factor(Day), y=Area, group=interaction(Cage, Mouse), color=Treatment)) + 
+       aes(x=as.factor(Day), y=as.numeric(Area), group=interaction(Cage, Mouse), color=Treatment)) + 
     geom_line(linetype="solid", size=1) + 
     geom_point() +
     theme_minimal() +
