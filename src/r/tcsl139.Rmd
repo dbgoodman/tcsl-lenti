@@ -45,7 +45,8 @@ ggplot(measure.dt [Area != 'none'],
 ```{r}
 
 # plotting average volume
-measure.sum.dt <- measure.dt[, `:=` (avg_vol = mean(Area), std_dev = sd(Area)), 
+measure.sum.dt <- measure.dt[, `:=` (avg_vol = mean(Area, na.rm=T), 
+                                     std_dev = sd(Area, na.rm=T)), 
                              by=c('Day','Treatment')]
 
 
@@ -54,7 +55,7 @@ ggplot(measure.sum.dt [Area != 'none'],
            color=Treatment)) + 
   geom_line(linetype="solid", size=1) + 
   geom_point() +
-  geom_ribbon(aes(ymin=avg_vol-std_dev, ymax=avg_vol+std_dev, fill=Treatment)) +
+  geom_linerange(aes(ymin=avg_vol-std_dev, ymax=avg_vol+std_dev, color=Treatment)) +
   theme_minimal() +
   scale_color_npg() +
   scale_fill_npg() +
@@ -63,7 +64,7 @@ ggplot(measure.sum.dt [Area != 'none'],
         plot.title = element_text(hjust = 0.5)) +
   labs(x='Days Post Tumor Injection', 
        y='Tumor Volume', 
-       title='TCSL139 K562 Pilot')
+       title='TCSL139 K562 Pilot - Average Tumor Volumes')
 
 ```
 
