@@ -9,6 +9,7 @@ library(ggplot2)
 library(grid)
 library(gtable)
 library(RColorBrewer)
+library(ggsci)
 
 #paste into terminal tab until Dan fixes this
 #s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
@@ -31,6 +32,7 @@ ggplot(measure.dt [Area != 'none'],
     geom_line(linetype="solid", size=1) + 
     geom_point() +
     theme_minimal() +
+    scale_color_npg() +
     theme(axis.text.x = element_text(hjust = .5), 
           legend.title.align=0.5, plot.title = element_text(hjust = 
                                                                 0.5)) +
@@ -39,12 +41,10 @@ ggplot(measure.dt [Area != 'none'],
 
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+```{r}
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
