@@ -28,14 +28,20 @@ measure.dt[, Area := as.numeric(Area)]
 #     sd_area= sd('Area'!='none')), by=c('Cage','Mouse','Day', 'Treatment')]
 
 ggplot(measure.dt [Area != 'none'], 
-       aes(x=as.factor(Day), y=as.numeric(Area), group=interaction(Cage, Mouse), color=Treatment)) + 
+       aes(x=as.factor(Day), 
+           y=as.numeric(Area), 
+           group=interaction(Cage, Mouse), 
+           color=Treatment)) + 
     geom_line(linetype="solid", size=1) + 
     geom_point() +
     theme_minimal() +
     scale_color_npg() +
-    theme(axis.text.x = element_text(hjust = .5), 
-          legend.title.align=0.5, plot.title = element_text(hjust = 
-                                                                0.5)) +
+    theme(axis.text.x = element_text(hjust = 0.5),
+          text = element_text(size=17),
+          axis.title = element_text(size=16),
+          legend.title.align = 0.5, 
+          plot.title = element_text(hjust = 0.5),
+          title = element_text(size = 16)) +
     labs(x='Days Post Tumor Injection', y='Tumor Volume', 
          title='TCSL139 K562 Pilot')
 
@@ -59,9 +65,12 @@ ggplot(measure.sum.dt [Area != 'none'],
   theme_minimal() +
   scale_color_npg() +
   scale_fill_npg() +
-  theme(axis.text.x = element_text(hjust = .5), 
+  theme(axis.text.x = element_text(hjust = 0.5), 
         legend.title.align=0.5, 
-        plot.title = element_text(hjust = 0.5)) +
+        text = element_text(size=17),
+        axis.title = element_text(size=16),
+        plot.title = element_text(hjust = 0.5),
+        title = element_text(size = 16)) +
   labs(x='Days Post Tumor Injection', 
        y='Tumor Volume', 
        title='TCSL139 K562 Pilot - Average Tumor Volumes')
