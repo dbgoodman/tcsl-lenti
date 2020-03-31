@@ -4,7 +4,7 @@ output: html_document
 knit: (function(inputFile, encoding) {
   rmarkdown::render(
   inputFile, encoding = encoding,
-  output_dir = here::here('..','..','html'))})
+  output_dir = here::here('..','html'))})
 ---
 
 ```{r setup, warning=FALSE, message=FALSE}
@@ -188,6 +188,8 @@ exh_dt <- exh_dt[
     !variable %in% c('cd4_t','cd8_t','gfp_t') &
     !is.na(car)]
 
+exh_dt[, dose := factor(dose, labels=c('4.5e6', '10e6'))]
+
 # which markers for which summary stats
 total_mfi <- c('cd39_t','myc_t', 'pd1_t')
 pos_mfi <- c('tim3_t','lag3_t','cd39_t','pd1_t')
@@ -195,30 +197,30 @@ pos_pct <- c('tim3_t','lag3_t','cd39_t', 'pd1_t')
 
 pct_pos_markers <- exh_dt[,
   list(pct_pos= sum(gt_thresh)/.N),
-  by=c('well','car','mouse','organ','variable','t_type')][, 
+  by=c('well','car','mouse','organ','variable','dose','t_type')][, 
     list(mean_pct_pos= mean(pct_pos), sd_pct_pos= sd(pct_pos)),
-    by=c('car','organ','variable','t_type')]
+    by=c('car','organ','variable','dose','t_type')]
 
 pos_mfi_markers <- exh_dt[,
   list(
-    pos_mfi_well= mean(value[gt_thresh==T]), 
-    pos_mfi_well_sd= sd(value[gt_thresh==T])), 
-  by=c('well','car','mouse','organ','variable','t_type')]
+    pos_mfi_well= mean(value), 
+    pos_mfi_well_sd= sd(value)), 
+  by=c('car','organ','variable','dose','t_type')]
     
 pct_pos_markers[, mean_diff_pct_pos := mean_pct_pos-mean(mean_pct_pos, na.rm=T), 
-    by=c('car','organ','variable','t_type')]
+    by=c('car','organ','variable','dose','t_type')]
 
 pct_pos_lbls <- pct_pos_markers[,
   list(var_mean = mean(mean_pct_pos, na.rm=T)),
-  by=c('car','organ','variable','t_type')][,
+  by=c('car','organ','variable','dose','t_type')][,
     variable := as.character(variable)]
 ```
 
 ## Plot Exh
-```{r fig.width=15, fig.height=8}
+```{r fig.width=15, fig.height=15}
 
 ggplot(exh_dt) + 
-    geom_density(aes(x=value, color=car)) + 
+    geom_density(aes(x=value, color=interaction(car, dose))) + 
     scale_x_continuous(limits=c(-1000,5000)) + 
     theme_minimal() +
     geom_vline(
@@ -227,34 +229,40 @@ ggplot(exh_dt) +
     facet_grid(organ+t_type~variable, scale='free')
 
 ggplot(pct_pos_markers) + 
-  geom_bar(aes(x=car, y=mean_pct_pos, fill=variable), stat='identity') +
+  geom_bar(aes(x=interaction(car,dose), y=mean_pct_pos, fill=variable, alpha=dose), 
+    stat='identity', position=position_dodge2(width = 1, preserve = "single")) +
+  scale_alpha_manual(values=c(.6,1)) +
   geom_linerange(aes(
-    x=car, ymin=mean_pct_pos-sd_pct_pos, ymax=mean_pct_pos+sd_pct_pos)) +
+    x=interaction(car,dose), 
+    ymin=mean_pct_pos-sd_pct_pos, ymax=mean_pct_pos+sd_pct_pos)) +
   facet_grid(organ+t_type~variable, scale='free') +
   theme_minimal(base_size=18) + 
-  scale_y_continuous(labels = percent_format(accuracy = 1)) +
-  theme(axis.text.x=element_text(angle = 90, hjust = 1)) +
-    labs(
-      x='CAR', 
-      y='% Positive', 
-      title='Pct % in Exhaustion Marker from Average CAR (All CARs)') +
-    geom_hline(yintercept=0) +
-    geom_vline(xintercept=-Inf)
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits=c(0,1)) +
+  theme(axis.text.x=element_text(angle = 90, hjust = 1), 
+    panel.grid=element_blank()) +
+  labs(
+    x='CAR', 
+    y='% Positive', 
+    title='Pct % in Exhaustion Marker from Average CAR (All CARs)') +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=-Inf)
 
-ggplot(pos_mfi_markers[,
-    list(mean_mfi_pos= mean(pos_mfi_well), sd_mfi_pos= sd(pos_mfi_well)),
-    by=c('car','organ','variable','t_type')]) + 
-  geom_bar(aes(x=car, y=mean_mfi_pos, fill=variable), stat='identity') +
+ggplot(pos_mfi_markers) + 
+  geom_bar(aes(x=interaction(car,dose), y=pos_mfi_well, fill=variable, alpha=dose), 
+    stat='identity', position=position_dodge2(width = 1, preserve = "single")) +
+  scale_alpha_manual(values=c(.6,1)) +
   geom_linerange(aes(
-    x=car, ymin=mean_mfi_pos-sd_mfi_pos, ymax=mean_mfi_pos+sd_mfi_pos)) +
+    x=interaction(car,dose), 
+    ymin=pos_mfi_well-pos_mfi_well_sd, ymax=pos_mfi_well+pos_mfi_well_sd)) +
   facet_grid(organ+t_type~variable, scale='free') +
   theme_minimal(base_size=18) + 
   scale_y_continuous() +
-  theme(axis.text.x=element_text(angle = 90, hjust = 1)) +
-    labs(
-      x='CAR', 
-      y='Mean MFI', 
-      title='Mean MFI in Exhaustion Marker from Average CAR (All CARs)') +
-    geom_hline(yintercept=0) +
-    geom_vline(xintercept=-Inf)
+  theme(axis.text.x=element_text(angle = 90, hjust = 1),
+    panel.grid=element_blank()) +
+  labs(
+    x='CAR', 
+    y='Mean MFI', 
+    title='Mean MFI in Exhaustion Marker from Average CAR (All CARs)') +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=-Inf)
 ```
