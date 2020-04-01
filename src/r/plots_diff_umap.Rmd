@@ -4,7 +4,7 @@ output:
   html_document:
     df_print: paged
 knit: (function(inputFile, encoding) {
-  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..',,'html'))})
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
 ---
 
 # Load Data 
@@ -154,7 +154,7 @@ chosen_n_neighbor=15
 
 umap_dt <- diff_dt[!is.na(event_id), 
   .SD[event_id %in% sample(unique(event_id), 
-    min(20, length(unique(event_id))))],
+    min(200, length(unique(event_id))))],
   by=c('well', 'plate', 'day')]
 
 #grab channel map from cd4 data (cd4/8 are the same)
