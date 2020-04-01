@@ -3,6 +3,8 @@ title: "CTV Plots"
 output:
   html_document:
     df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','..','html'))})
 ---
 
 ```{r}
@@ -14,7 +16,7 @@ require(flowCore)
 require(flowWorkspace)
 require(RColorBrewer)
 library(ggridges)
-data_dir <- here::here('..','..','data')
+data_dir <- here::here('..','data')
 load(file.path(
     data_dir, 'ctv.Rdata'))
 
@@ -181,19 +183,21 @@ ctv_gated_means_donormerge_dt <- ctv_gated_means_dt[, `:=`(
 ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable=='ctv1_t' & car != 'KLRG1' & k562 == 'cd19+']
 
 ggplot(ctv_gated_means_donormerge_subset,
-    aes(fill=0-value_rel_day_mean, y=factor(car, levels=rev(levels(factor(car)))), x=day)) + 
+    aes(fill=0-value_rel_day_mean, y=factor(
+      car, levels=rev(levels(factor(car)))), x=day)) + 
   geom_tile() + 
   facet_grid(k562 ~ t_type) + 
   scale_fill_viridis_c(
     'Mean proliferation, relative to mean',
-    limits = c(-1,1)*max(abs(ctv_gated_means_donormerge_subset$value_rel_day_mean)),
+    limits = c(-1,1)*max(abs(
+      ctv_gated_means_donormerge_subset$value_rel_day_mean)),
     na.value = 'darkgrey') + 
   theme_minimal() + 
   theme(
     panel.background=element_rect(fill="darkgrey", colour="darkgrey"),
     panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   scale_y_discrete(expand=c(0,0)) + 
-  scale_x_discrete(expand=c(0,0))
+  scale_x_discrete(expand=c(0,0)) 
 ```
 
 

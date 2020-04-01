@@ -16,14 +16,12 @@ library(RColorBrewer)
 library(reticulate)
 library(uwot)
 library(gridExtra)
-use_condaenv(condaenv = 'py37', required = TRUE)
+library(spatstat)
+use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 
-data_dir <- here::here('..','..','data')
+data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
 diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
-
-
-car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
 
 do_umap_param_search = T
 censor_negative_min = -1500
@@ -43,15 +41,51 @@ map_day_0 <- function(df) {
 
 For now, skip straight to high dimensional plotting.
 
+## UMAP Functions
+```{r}
+
+sample_for_umap <- function(df, sample_size) {
+  umap_dt <- diff_dt[!is.na(event_id), 
+    .SD[event_id %in% sample(unique(event_id), 
+      min(sample_size, length(unique(event_id))))],
+    by=c('well', 'plate', 'day')]
+}
+
+cast_for_umap <- function(df) {
+  #cast it so variables are columns and
+  #subset sample umap data on variables
+  umap_cast_dt <- dcast(df, 
+    event_id + well + plate + day + t_type ~ variable, 
+    value.var='value')
+  return(umap_cast_dt)
+}
+
+scale_for_umap <- function(df, umap_vars, censor_negative_min) {
+  umap_dt_in <- df[, ..umap_vars]
+  
+  # for points that are very negative, trim the to below the cutoff
+  umap_dt_in[umap_dt_in < censor_negative_min] <- censor_negative_min
+  
+  # scale each input column
+  umap_dt_in[ , 
+    (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+  
+  return(umap_dt_in)
+}
+  
+# check scales:
+# ggplot(melt(cbind(umap_dt_in, id=1:nrow(umap_dt_in)), id.var='id'), 
+#        aes(x=value)) +
+#     geom_density() +
+#     facet_grid(variable~.) +
+#     scale_fill_distiller(palette='RdYlBu') +
+#     theme_bw()
+
+```
 ## Choose UMAP Params
 
 First, find parameters with a small sample.
 ```{r eval=skip_umap_param_search}
-umap_dt <- diff_dt[!is.na(event_id), 
-  .SD[event_id %in% sample(unique(event_id), 
-    min(20, length(unique(event_id))))],
-  by=c('well', 'plate', 'day')]
-
 #grab channel map from cd4 data (cd4/8 are the same)
 channel_map <- diff_opt_cd4$channel_map
 
@@ -59,28 +93,12 @@ channel_map <- diff_opt_cd4$channel_map
 umap_vars <- c(paste0(names(channel_map),'_t'))
 umap_vars <- umap_vars[umap_vars != 'cd_t']
 
-#cast it so variables are columns and
-#subset sample umap data on variables
-umap_cast_dt <- dcast(umap_dt, 
-  event_id + well + plate + day + t_type ~ variable, 
-  value.var='value')
+# use umap canned functions
+umap_dt <- sample_for_umap(diff_dt, 20)
+umap_cast_dt <- cast_for_umap(umap_dt)
+umap_dt_in <- scale_for_umap(umap_cast_dt, umap_vars, censor_negative_min)
 
-umap_dt_in <- umap_cast_dt[, ..umap_vars]
-
-# for points that are very negative, trim the to below the cutoff
-umap_dt_in[umap_dt_in < censor_negative_min] <- censor_negative_min
-
-# scale each input column
-umap_dt_in[ , 
-  (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
-
-# check scales:
-ggplot(melt(cbind(umap_dt_in, id=1:nrow(umap_dt_in)), id.var='id'), 
-       aes(x=value)) +
-    geom_density() +
-    facet_grid(variable~.) +
-    scale_fill_distiller(palette='RdYlBu') +
-    theme_bw()
+### Run across parameter list
 
 #umap parameter list
 min_dist_set <- c(0.0001, 0.005, 0.1)
@@ -158,9 +176,26 @@ umap_dt_in[ ,
   (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
 
 # run umap via uwot library
-umap_out <- as.data.table(umap(umap_dt_in, min_dist=chosen_dist,
-    n_neighbors=chosen_n_neighbor, verbose=T, n_threads=8, n_trees=50))
-  
+umap_out <- umap(umap_dt_in, min_dist=chosen_dist,
+    n_neighbors=chosen_n_neighbor, verbose=T, n_threads=8, n_trees=50,
+    ret_nn=T)
+
+# nearest neighbors in original space
+nearest_neighbors <- umap_out$nn$euclidean$idx
+neighbor_dist <- umap_out$nn$euclidean$dist
+edge_weights <- scales::rescale(-neighbor_dist, to=c(0,1))
+edge_weights <- edge_weights - min(edge_weights)
+umap_out <- umap_out$embedding
+
+#nearest neighbors in embedding
+umap_nn <- cbind(1:nrow(umap_fcs_dt), 
+    nnwhich(umap_fcs_dt[, list(umap_1, umap_2)], k=c(1:3)))
+umap_nd <- cbind(rep(0, nrow(umap_fcs_dt)), 
+    nndist(umap_fcs_dt[, list(umap_1, umap_2)], k=c(1:3)))
+umap_ew <- scales::rescale(-umap_nd, to=c(0,1))
+umap_ew <- umap_ew - min(umap_ew)
+
+    
 # rename the columns
 names(umap_out) <- c('umap_1','umap_2')
 
@@ -205,4 +240,51 @@ color_markers <- ggplot(
 grid.arrange(color_time, color_density, color_markers, ncol=3)
 ```
 
+## Clustering via leiden/reticulate
 
+```{python}
+import leidenalg as la
+import igraph as ig
+import pandas as pd
+import numpy as np
+import math
+
+edges = []
+n_neighbors = r.umap_nn.shape[1]
+for i, nn_row in enumerate(r.umap_nn):
+    edge_weights = r.umap_ew[i]
+    for j in range(1, n_neighbors):
+        edges.append((int(nn_row[0]), int(nn_row[j]), edge_weights[j]))
+      
+knn_graph = ig.Graph.TupleList(edges, directed=True, weights=True)
+
+part = la.leidenalg.ModularityVertexPartition(knn_graph)
+optimiser = la.Optimiser()
+diff = optimiser.optimise_partition(part)
+
+part = leidenalg.find_partition(knn_graph, 
+    leidenalg.ModularityVertexPartition, weights='weight')
+#part = leidenalg.find_partition(knn_graph, 
+#    leidenalg.CPMVertexPartition, weights='weight', 
+#    resolution_parameter=0.05)
+
+cluster_membership = [x for _,x in sorted(zip(knn_graph.vs['name'],part.membership))]
+```
+
+```{r}
+umap_fcs_dt[, cluster := factor(py$cluster_membership+1)]
+
+umap_cluster_dt <- umap_fcs_dt[, list(
+  mean_umap_1= mean(umap_1), 
+  mean_umap_2= mean(umap_2), 
+  size= .N), by=cluster]
+
+ggplot() + 
+  geom_point(data=umap_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
+  geom_label(data=umap_cluster_dt, aes(
+    x=mean_umap_1, y=mean_umap_2,
+    label=paste(cluster,size,sep='\n'), 
+    color=cluster), alpha=0.3) +
+  theme_minimal()
+```
