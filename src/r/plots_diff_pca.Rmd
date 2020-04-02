@@ -1,0 +1,58 @@
+---
+title: "PCA Analysis for Differentiation Samples"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
+---
+
+
+# Load Data 
+```{r}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(reticulate)
+library(uwot)
+library(gridExtra)
+library(spatstat)
+use_condaenv(condaenv = 'r-reticulate', required = TRUE)
+
+data_dir <- here::here('..','data')
+load(file.path(data_dir, 'diff.sampled.Rdata'))
+diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
+
+# map day 0 to both plus and minus
+map_day_0 <- function(df) {
+  return(rbind(
+    df[k562!='none'],
+    df[k562=='none'][, k562 := 'cd19+'],
+    df[k562=='none'][, k562 := 'cd19-']
+  ))
+}
+```
+
+# PCA
+```{r}
+
+diff_means_dt <- diff_dt[!is.na(day) & !is.na(donor) & !is.na(value), 
+  list(m= mean(value), sd= sd(value), n= .N), 
+  by=c('day','donor','car','k562','t_type','variable')]
+
+
+diff_cast_dt <- dcast(diff_means_dt[!is.na(m) & n > 20], 
+  day + donor + car + k562 + t_type ~ variable, 
+  value.var=c('m','sd'))
+
+diff_pca <- prcomp(diff_cast_dt[,-c(1:5)], scale. = T, center = T)
+
+ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
+
+# use cbind to add PCs to original diff_cast_dt
+# use pc2/3 instead of 1/2
+# rank input vars against which PCs they contribute to
+# plot points by car, day, donor, etc
+# connect points up by day (bonus points: use directional arrows by day)
+```
