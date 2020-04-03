@@ -226,4 +226,12 @@ fwrite(diff_dt,
        compress='gzip', 
        file=file.path(here::here('..','data','diff.sampled.csv.gz')))
 
+# ------
+
+# sync output back to s3
+system('aws s3 sync \\
+  --exclude "*" \\
+  --include "*.Rdata" \\
+  --include "*.csv*" \\
+  ~/local-tcsl/data s3://roybal-tcsl//lenti_screen_compiled_data/data')
 
