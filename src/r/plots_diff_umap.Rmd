@@ -215,37 +215,6 @@ umap_fcs_dt <- unique(umap_dt[,
     umap_fcs_dt, on=.(t_type,well,day,event_id)]
 ```
 
-```{r, eval=redo_umap_clustering, fig.width=30, fig.height=20}
-cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
-cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
-
-color_time <- ggplot(umap_fcs_dt[][, cd19 := (k562=='cd19+')], 
-    aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
-  geom_point(size=0.1, alpha=0.5) +
-  facet_grid(car~cd19) +
-  scale_color_manual(values=c(cd4_colors, cd8_colors)) +
-  guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
-
-color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
-  geom_hex(bins = 70) +
-  facet_grid(car~cd19) +
-  scale_fill_continuous(
-    type = "viridis", limits=c(0,30), oob=scales::squish) +
-  theme_bw()
-
-color_markers <- ggplot(
-    melt(umap_fcs_dt, measure.vars=umap_vars)[, 
-      value.scaled := scale(value), by='variable'][,
-        cd19 := (k562=='cd19+')], 
-    aes(x=umap_1, y=umap_2, z=value.scaled)) +
-  stat_summary_hex(bins = 70) +
-  facet_grid(variable~cd19) +
-  scale_fill_distiller(palette='RdYlBu', limits=c(-3, 3), oob=scales::squish) +
-  theme_bw()
-
-grid.arrange(color_time, color_density, color_markers, ncol=3)
-```
-
 ## Clustering via leiden/reticulate
 
 ```{python, eval=redo_umap_clustering}
@@ -325,6 +294,37 @@ ggplot() +
     color=cluster), alpha=0.3) +
   facet_wrap(~cluster) +
   theme_bw()
+```
+
+```{r, fig.width=30, fig.height=20}
+cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
+cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
+
+color_time <- ggplot(umap_fcs_dt[][, cd19 := (k562=='cd19+')], 
+    aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
+  geom_point(size=0.1, alpha=0.5) +
+  facet_grid(car~cd19) +
+  scale_color_manual(values=c(cd4_colors, cd8_colors)) +
+  guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
+
+color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
+  geom_hex(bins = 70) +
+  facet_grid(car~cd19) +
+  scale_fill_continuous(
+    type = "viridis", limits=c(0,30), oob=scales::squish) +
+  theme_bw()
+
+color_markers <- ggplot(
+    melt(umap_fcs_dt, measure.vars=umap_vars)[, 
+      value.scaled := scale(value), by='variable'][,
+        cd19 := (k562=='cd19+')], 
+    aes(x=umap_1, y=umap_2, z=value.scaled)) +
+  stat_summary_hex(bins = 70) +
+  facet_grid(variable~cd19) +
+  scale_fill_distiller(palette='RdYlBu', limits=c(-3, 3), oob=scales::squish) +
+  theme_bw()
+
+grid.arrange(color_time, color_density, color_markers, ncol=3)
 ```
 
 ```{r, fig.width=15, fig.height=8}
