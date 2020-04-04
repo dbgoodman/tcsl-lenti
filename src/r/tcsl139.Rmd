@@ -35,13 +35,14 @@ ggplot(measure.dt [Area != 'none'],
     geom_line(linetype="solid", size=1) + 
     geom_point() +
     theme_minimal() +
-    scale_color_npg() +
+    scale_color_npg(breaks=c(
+      'None','10e6_Zeta','4.5e6_CD28','10e6_41BB','10e6_Unt','4.5e6_41BB')) +
     theme(axis.text.x = element_text(hjust = 0.5),
-          text = element_text(size=17),
-          axis.title = element_text(size=16),
+          text = element_text(size=22),
+          axis.title = element_text(size=20),
           legend.title.align = 0.5, 
           plot.title = element_text(hjust = 0.5),
-          title = element_text(size = 16)) +
+          title = element_text(size = 18)) +
     labs(x='Days Post Tumor Injection', y='Tumor Volume', 
          title='TCSL139 K562 Pilot')
 
@@ -63,14 +64,16 @@ ggplot(measure.sum.dt [Area != 'none'],
   geom_point() +
   geom_linerange(aes(ymin=avg_vol-std_dev, ymax=avg_vol+std_dev, color=Treatment)) +
   theme_minimal() +
-  scale_color_npg() +
-  scale_fill_npg() +
+  scale_color_npg(breaks=c(
+    'None','10e6_Zeta','4.5e6_CD28','10e6_41BB','10e6_Unt','4.5e6_41BB')) +
+  scale_fill_npg(breaks=c(
+    'None','10e6_Zeta','4.5e6_CD28','10e6_41BB','10e6_Unt','4.5e6_41BB')) +
   theme(axis.text.x = element_text(hjust = 0.5), 
         legend.title.align=0.5, 
-        text = element_text(size=17),
-        axis.title = element_text(size=16),
+        text = element_text(size=22),
+        axis.title = element_text(size=20),
         plot.title = element_text(hjust = 0.5),
-        title = element_text(size = 16)) +
+        title = element_text(size = 18)) +
   labs(x='Days Post Tumor Injection', 
        y='Tumor Volume', 
        title='TCSL139 K562 Pilot - Average Tumor Volumes')
