@@ -214,11 +214,25 @@ ggplot(diff_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) +
 # cd19 only, cd4 only, cd8 only PCA plots for comparisons
 ```{r}
 
-ggplot(cd8_cbind_dt, aes(x=PC2, y=PC3)) + 
+# connecting points by day
+# make new table for connecting points
+diff_days <- c(0, 6, 15, 24, 33)
+
+cd8_seg_1 <- cd8_cbind_dt[day != 33][, c('day', 'car', 'donor', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
+colnames(cd8_seg_1)[colnames(cd8_seg_1) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_a", "PC1_a", "PC2_a", "PC3_a")
+cd8_seg_1[, day_b := ]
+
+
+cd8_seg_2 <- cd8_cbind_dt[day != 0][, c('day', 'car', 'donor', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
+colnames(cd8_seg_2)[colnames(cd8_seg_2) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_b", "PC1_b", "PC2_b", "PC3_b")
+
+
+
+ggplot(cd8_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) + 
   geom_point(aes(color=as.factor(day), shape=as.factor(donor))) +
   scale_color_npg() +
   labs(title="CD8 only PCA") +
-  facet_grid(car ~ k562) +
+  facet_grid(k562 ~ car) +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5, size = 24),
         legend.title = element_text(size=20),
