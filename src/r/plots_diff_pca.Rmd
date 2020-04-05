@@ -25,14 +25,14 @@ data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
 #diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
-# map day 0 to both plus and minus
-map_day_0 <- function(df) {
-  return(rbind(
-    df[k562!='none'],
-    df[k562=='none'][, k562 := 'cd19+'],
-    df[k562=='none'][, k562 := 'cd19-']
-  ))
-}
+# # map day 0 to both plus and minus
+# map_day_0 <- function(df) {
+#   return(rbind(
+#     df[k562!='none'],
+#     df[k562=='none'][, k562 := 'cd19+'],
+#     df[k562=='none'][, k562 := 'cd19-']
+#   ))
+# }
 ```
 
 # PCA
@@ -53,6 +53,41 @@ diff_pca <- prcomp(diff_cast_dt[,-c(1:5)], scale. = T, center = T)
 
 ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
 
+
+# getting pca for cd19+ only, cd4 only, cd8 only with sd
+cd19_cast_dt <- diff_cast_dt[k562=='cd19+']
+cd4_cast_dt <- diff_cast_dt[t_type=='cd4']
+cd8_cast_dt <- diff_cast_dt[t_type=='cd8']
+
+cd19_pca <- prcomp(cd19_cast_dt[,-c(1:5)], scale. = T, center = T)
+cd4_pca <- prcomp(cd4_cast_dt[,-c(1:5)], scale. = T, center = T)
+cd8_pca <- prcomp(cd8_cast_dt[,-c(1:5)], scale. = T, center = T)
+
+
+# cbind these pca with original table
+diff_cbind_dt <- cbind(diff_cast_dt, data.table(diff_pca$x))
+cd19_cbind_dt <- cbind(cd19_cast_dt, data.table(cd19_pca$x))
+cd4_cbind_dt <- cbind(cd4_cast_dt, data.table(cd4_pca$x))
+cd8_cbind_dt <- cbind(cd8_cast_dt, data.table(cd8_pca$x))
+
+
+# plot these altogether w/ gridExtra
+a <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+  labs(title='general PCA')
+b <- ggplot(cd19_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+  labs(title='CD19+ only PCA')
+c <- ggplot(cd4_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+  labs(title='CD4 only PCA')
+d <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+  labs(title='CD8 only PCA')
+
+grid.arrange(a, b, c, d, ncol=2)
+
+
 # use cbind to add PCs to original diff_cast_dt
 # use pc2/3 instead of 1/2
 # rank input vars against which PCs they contribute to
@@ -66,9 +101,6 @@ ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
 
 # scree plot of different PCs -- this just checks quality(?). PC1 should have highest variance
 screeplot(diff_pca, npcs=length(diff_pca$sdev))
-
-# cbind to add PCs to diff_cast_dt
-diff_cbind_dt <- cbind(diff_cast_dt, data.table(diff_pca$x))
 
 
 # getting list of input variables as data.table
@@ -92,7 +124,8 @@ pc3_dt <- rotation_dt[, c(1,4)][order(-abs(PC3)), ]
 
 ```
 
-# plots
+
+# general PCA plots
 ```{r}
 
 # cd19+ vs. t_type
@@ -167,6 +200,25 @@ ggplot(diff_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) +
   scale_color_npg() +
   labs(title="PCA - CD19+") +
   facet_grid(t_type + k562 ~ day) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 24),
+        legend.title = element_text(size=20),
+        legend.text = element_text(size=18),
+        axis.title = element_text(size=20))
+
+
+
+```
+
+
+# cd19 only, cd4 only, cd8 only PCA plots for comparisons
+```{r}
+
+ggplot(cd8_cbind_dt, aes(x=PC2, y=PC3)) + 
+  geom_point(aes(color=as.factor(day), shape=as.factor(donor))) +
+  scale_color_npg() +
+  labs(title="CD8 only PCA") +
+  facet_grid(car ~ k562) +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5, size = 24),
         legend.title = element_text(size=20),
