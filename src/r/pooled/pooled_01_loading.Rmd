@@ -1,0 +1,359 @@
+---
+title: "pooled_01"
+author: "Daniel Goodman & Kiavash Garakani"
+date: "originally 2/9/2019, refreshed 4/4/2020"
+output: html_document
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','..','html','pooled'))})
+
+---
+
+Primary questions addressed in this notebook:
+
+- Data Quality
+  - Impact of: CAR length, CAR abundance
+- CAR Performance
+  - CAR score measurement
+  - Which CARs behave similarly?
+    - Impact of CAR length
+    - tSNE of CARs, plotted with proliferation, exhaustion, etc.
+- Sample Correlations
+  - tSNE of CAR scores
+  - Correlation plots
+
+Notebook Layout:
+
+1. Data pre-processing and quality assessment.
+2. CAR performance analysis.
+3. Sample correlation analysis.
+
+Colored bar plot
+Replicate plot
+
+# Data Pre-Processing and Quality Assessment
+
+```{r}
+library(data.table)
+library(ggplot2)
+library(knitr)
+```
+
+### User Inputs
+```{r}
+
+tcsl.dir <- here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data','ngs')
+
+dataset.name <- '2019.01.31.illumina_06'
+data.dir <- file.path(tcsl.dir, dataset.name, 'uniq')
+output.dir <- file.path(here::here('..','figs','pooled'))
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+metadata.filename <- file.path(tcsl.dir, 
+    dataset.name, paste0(dataset.name, '_layout.csv'))
+car.seq.filename <- file.path(tcsl.dir, dataset.name, 'fa/ref.csv')
+remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt')
+
+car.seq <- fread(car.seq.filename, header=F)
+names(car.seq) <- c('CAR.align','seq')
+car.seq[, len := nchar(seq)]
+car.len <- car.seq[, list(CAR.align, len)]
+
+# global options
+opts_knit$set(fig_dim= c(10,10))
+theme_set(theme_bw())
+
+# exponent base for calculating car scores from bin percents
+car.score.base.exp <- 2
+
+```
+
+### Load and Preprocess Data
+```{r}
+
+# store filenames
+read.count.filenames <- list.files(data.dir, pattern="*.ref_counts.csv")
+bad.pair.filenames <- list.files(data.dir, pattern="*.bad_read_pairs.csv")
+
+# initialize read.counts
+read.counts <- fread(file.path(data.dir, read.count.filenames[1]), 
+  col.names=c("CAR.align", "V1"))[order(CAR.align), "CAR.align"]
+
+# load and merge data to read.counts
+for (file in read.count.filenames){
+  sample.num <- strsplit(file, "_")[[1]][1]
+  counts <- fread(file.path(data.dir, file), col.names=c("CAR.align", sample.num))
+  read.counts <- merge(read.counts, counts, by="CAR.align")
+}
+
+# load metadata
+metadata <- fread(metadata.filename, header=T)[is.na(sample.num) == F]
+
+# call donors d#
+metadata[, donor := paste0('d', donor)]
+
+# melt sample and counts
+read.counts <- melt.data.table(
+    read.counts,
+    id.vars=c('CAR.align'),
+    variable.name = 'sample.num',
+    value.name='counts')
+
+# merge read.counts with metadata
+read.counts <- read.counts[metadata[,
+                  sample.num := as.factor(sample.num)], on='sample.num']
+# read.counts <- read.counts[!(CAR.align %in% remove.cars)]
+
+# make sort group
+read.counts[, sort.group := paste(batch, donor, timepoint, assay, t.type, k.type, sep='_')]
+rm("counts", "file", "sample.num")
+
+# add car lengths
+read.counts <- read.counts[car.len, on='CAR.align']
+
+
+```
+
+### Data Quality Analysis
+
+```{r}
+
+# if pct is available
+read.counts[, cell.count := as.numeric(gsub(',','',cell.count))][!is.na(pct), bin.pct := 
+                pct/sum(pct), by = .(CAR.align, sort.group)]
+# if not, use cell counts
+read.counts[is.na(pct), bin.pct := cell.count/sum(cell.count), by = .(CAR.align, sort.group)]
+
+total.bin.pct.plot <- ggplot(read.counts[!(CAR.align %in% remove.cars), 
+                                         list(bin.pct=bin.pct[1]),
+                                         by=.(batch, donor, timepoint, 
+                                              assay, t.type, k.type, bin)]) + 
+  geom_bar(aes(y=bin.pct, x=bin), stat='identity') + 
+  facet_grid(k.type~batch+timepoint+assay+t.type+donor) +
+  labs(title='Total Bin Percentages')
+
+nonaligning.reads.plot <- ggplot(read.counts[, sum(counts[CAR.align == '*'])/
+                                               sum(counts),
+                                             by=.(batch, donor, timepoint, 
+                                                  assay, t.type, k.type, bin)]) + 
+  geom_bar(aes(y=V1, x=bin), stat='identity') + 
+  facet_grid(k.type~batch+donor+timepoint+assay+t.type) + 
+  labs(title='percentage of non-aligning reads')
+
+# ggplot(read.counts[, 
+#         list(CAR_align=CAR_align[CAR_align %in% remove_cars], 
+#              pct=counts[CAR_align %in% remove_cars]/sum(counts)),
+#         by=c('sample_name','sample_num','sort_group','Bin')]) + 
+#     geom_bar(aes(y=pct, x=Bin, fill=CAR_align),
+#         stat='identity', position='dodge') + 
+#     facet_wrap(~sort_group) + 
+#     labs(title='percentages of contaminationg & nonaligning reads')
+# 
+# ggplot(read.counts[, 
+#         list(counts=sum(counts[!(CAR_align %in% remove_cars)])),
+#         by=c('sample_name','sample_num','sort_group','Bin')]) + 
+#     geom_bar(aes(y=counts, x=Bin), stat='identity') + 
+#     facet_wrap(~sort_group) + 
+#     labs(title='number of aligning reads')
+# 
+# ggplot(read.counts[, 
+#         list(counts=sum(counts[!(CAR_align %in% remove_cars)])),
+#         by=c('sample_name','sample_num','sort_group','Bin')]) + 
+#     geom_bar(aes(y=counts, x=Bin), stat='identity') + 
+#     facet_wrap(~sort_group) + scale_y_log10() +
+#     labs(title='log10 - number of aligning reads')
+
+ggsave(paste0(output.dir,'/total_bin_percentages.png'), 
+       total.bin.pct.plot, 
+       width = 60, 
+       height = 20, 
+       units = 'cm',
+       dpi = 1000)
+
+ggsave(paste0(output.dir,'/nonaligning_reads_percentages.png'), 
+       nonaligning.reads.plot, 
+       width = 60, 
+       height = 20, 
+       units = 'cm',
+       dpi = 1000)
+
+
+```
+
+On using `cell.count` vs `pct`: let's use the bin percent recorded if it is available, else let's use the cell count. Sometimes if a bin fills up we stop sorting into it, so the cell counts will not accurately reflect the bin percents.
+
+# Removing CD96 from Prolif1 D2 
+
+CD96 bin C is overwhelming the rest of the CARs for Prolif1 CTV3 D2. We will remove that CAR from that sort group before calculating CAR scoring; he likely became overamplified for some reason.
+
+```{r}
+read.counts <- read.counts[(sort.group != 'prolif1_d2_24d_CTV3_CD4_pos') | 
+  (sort.group == 'prolif1_d2_24d_CTV3_CD4_pos' & CAR.align != 'CD96')]
+```
+
+# CAR performance analysis
+
+### Calculate bin percentage estimates
+
+`car.bin.read.pct` : Percent of Reads in Bin for a CAR
+$$\displaystyle \text{car.bin.read.pct}_{car, bin} = \text{count}_{car, bin} /\sum_{bin=A,B,C,D}{\text{count}_{car, bin}}$$
+
+`car.abs.pct` : Absolute Percent of Reads in whole sort for a CAR
+$$\displaystyle \text{car.abs.pct}_{car, bin} = \text{car.bin.read.pct}_{car, bin}  \times \text{bin.pct}_{bin}$$
+
+`car.abund` : CAR percentage in the library for this sort
+$$\displaystyle \text{car.abund}_{car} = \sum_{bin}\text{car.abs.pct}_{car}$$
+
+`car.bin.pct` : Estimate of 'Real' Percentage of the CAR per bin
+$$\displaystyle \text{car.bin.pct}_{car, bin} = \text{car.abs.pct}_{car, bin} / \text{car.abund}_{car}$$
+
+```{r}
+
+read.counts <- read.counts[!(CAR.align %in% remove.cars)]
+
+# get bin percent estimates
+read.counts[, bin.reads := sum(counts, na.rm=T), by=c('sort.group','bin')]
+
+read.counts[, car.bin.read.pct := counts/bin.reads, by=c('sort.group','bin')]
+
+# car bin read pcts should sum to 1
+read.counts[, stopifnot(all.equal(sum(car.bin.read.pct), 1)), by=c('sort.group','bin')]
+
+# bin pcts should sum to 1
+read.counts[, stopifnot(all.equal(sum(bin.pct), 1)), 
+            by=c('sort.group','CAR.align')]
+
+# get car absolute pct estimates
+read.counts[, car.abs.pct := car.bin.read.pct*(bin.pct), by='sort.group']
+
+# absolute pct estimates should sum to 1
+read.counts[, stopifnot(all.equal(sum(car.abs.pct), 1)), by=c('sort.group')]
+
+# get car abund
+read.counts[, car.abund := sum(car.abs.pct), by=c('sort.group','CAR.align')]
+
+# CAR abundances should sum to 1
+read.counts[, stopifnot(all.equal(sum(car.abund), 1)),
+    by=c('sort.group','bin')]
+
+read.counts[, car.bin.pct := car.abs.pct/car.abund]
+
+# other metrics
+read.counts[, rel.car.pct := (bin.pct - mean(bin.pct)) / mean(bin.pct),
+    by=c('sort.group','CAR.align')]
+read.counts[, mean.bin.pct := mean(bin.pct),
+    by=c('sort.group','CAR.align')]
+read.counts[, sort.reads := sum(counts),
+    by=c('sort.group','CAR.align')]
+read.counts[, mean.car.abund := mean(car.abund), by=c('CAR.align')]
+read.counts[, rel.car.abund := car.abund/mean(car.abund), by='CAR.align']
+
+min.sort.reads <- 100
+
+ggplot(read.counts[sort.reads > min.sort.reads]) +
+    geom_bar(
+        aes(
+            y=car.abund,
+            x=reorder(CAR.align,car.abund)),
+        stat='identity') +
+    facet_grid(k.type ~ batch+donor+timepoint+assay+t.type) + coord_flip() +
+    labs(title='Relative CAR abundances, as fraction of reads per sort')
+
+ggplot(read.counts[sort.reads > min.sort.reads]) + 
+    geom_bar(
+        aes(
+            y=log2(rel.car.abund),
+            x=reorder(CAR.align,car.abund)),
+        stat='identity', position='dodge') + 
+    labs(title='Relative CAR abundances in each sort vs per-CAR average') +
+    facet_grid(k.type ~ batch+donor+timepoint+assay+t.type) + coord_flip()
+
+ggplot(unique(read.counts[sort.reads > min.sort.reads,
+                          mean.car.abund, by=CAR.align])) + 
+    geom_bar(
+        aes(
+            y=mean.car.abund,
+            x=reorder(CAR.align,mean.car.abund)),
+        stat='identity') +
+    coord_flip() +
+    labs(title='Mean CAR abundances as fraction of sort')
+
+ggplot(unique(read.counts[sort.reads > min.sort.reads, 
+                   mean.car.abund, by=CAR.align])) + 
+    geom_bar(
+        aes(
+            y=log10(mean.car.abund),
+            x=reorder(CAR.align, mean.car.abund)),
+        stat='identity') +
+    coord_flip() +
+    labs(title='Mean CAR abundances as fraction of sort, all CARs, log10')
+
+```
+
+# CAR Scoring
+
+To convert the bin percentages to a single score, each bin will get a relative score:
+
+For CD69, IL-2, IFNy, and IL-4:
+
+$$\text{car.score} = \sum_{\text{bin}=A,B,C,D} \text{car.score.base.exp}^{\text{bin.score}_{bin}} \times \text{bin.pct}_{bin} $$
+
+These `bin.pct` scores are reversed for CTV1, 2, and 3: $A=3, B=2, C=1, D=0$.
+
+```{r}
+
+
+
+# CAR score from bin percents
+bin.score <- data.frame(
+    bin=LETTERS[1:4], 
+    bin.score = car.score.base.exp^seq(0,3),
+    ctv.bin.score = car.score.base.exp^seq(3,0))
+
+read.counts <- merge(read.counts, bin.score, on='bin', all=T)
+
+read.counts[, CAR.score := sum(car.bin.pct*bin.score), by=c('sort.group',
+                                                            'CAR.align')]
+
+read.counts[grep('CTV', sort.group), 
+            CAR.score := sum(car.bin.pct*ctv.bin.score),
+            by=c('sort.group','CAR.align')]
+
+cd4.car.score.plot <- ggplot(read.counts[t.type == "CD4" & k.type != "NA"]) + 
+  geom_bar(aes(x=CAR.align, y=CAR.score, fill=log10(car.abund)), 
+           stat='identity') +
+  coord_flip() +
+  facet_grid(k.type ~ batch+donor+timepoint+assay) + 
+  scale_fill_distiller(palette="Spectral") +
+  labs(title='CD4 CAR Score Summary')
+
+cd8.car.score.plot <- ggplot(read.counts[t.type == "CD8" & k.type != "NA"]) + 
+  geom_bar(aes(x=CAR.align, y=CAR.score, fill=log10(car.abund)), 
+           stat='identity') +
+  coord_flip() +
+  facet_grid(k.type ~ batch+donor+timepoint+assay) + 
+  scale_fill_distiller(palette = "Spectral") +
+  labs(title='CD8 CAR Score Summary')
+
+cd4.car.score.plot
+cd8.car.score.plot
+  
+ggsave(paste0(output.dir,'/cd4_car_score_plot.pdf'), 
+  cd4.car.score.plot, 
+  width = 12, 
+  height = 12, 
+  units = 'in')
+
+ggsave(paste0(output.dir,'/cd8_car_score_plot.pdf'), 
+  cd8.car.score.plot, 
+  width = 12, 
+  height = 12, 
+  units = 'in')
+
+save(list=c('read.counts'), file=file.path(data.output.dir, 'pooled_read_counts.Rdata'))
+```
+
