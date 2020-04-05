@@ -15,14 +15,15 @@ library(data.table)
 library(scales)
 library(RColorBrewer)
 library(reticulate)
-library(uwot)
+#library(uwot)
 library(gridExtra)
-library(spatstat)
-use_condaenv(condaenv = 'r-reticulate', required = TRUE)
+#library(spatstat)
+#use_condaenv(condaenv = 'r-reticulate', required = TRUE)
+library(ggsci)
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
-diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
+#diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
 # map day 0 to both plus and minus
 map_day_0 <- function(df) {
@@ -46,7 +47,9 @@ diff_cast_dt <- dcast(diff_means_dt[!is.na(m) & n > 20],
   day + donor + car + k562 + t_type ~ variable, 
   value.var=c('m','sd'))
 
+
 diff_pca <- prcomp(diff_cast_dt[,-c(1:5)], scale. = T, center = T)
+
 
 ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
 
@@ -55,4 +58,52 @@ ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
 # rank input vars against which PCs they contribute to
 # plot points by car, day, donor, etc
 # connect points up by day (bonus points: use directional arrows by day)
+
 ```
+
+# quality checks
+```{r}
+
+# scree plot of different PCs -- this just checks quality(?). PC1 should have highest variance
+screeplot(diff_pca, npcs=18)
+
+# cbind to add PCs to diff_cast_dt
+diff_cbind_dt <- cbind(diff_cast_dt, data.table(diff_pca$x))
+
+
+# getting list of input variables as data.table
+rotation_rows <- data.table(row.names(diff_pca$rotation))
+setnames(rotation_rows, "V1", "input_var")
+
+# cbind variances with input variable names
+rotation_dt <- cbind(rotation_rows, data.table(diff_pca$rotation))
+
+
+# rank input variables against which PCs they contribute to
+# adds new column of which PC has highest rotation for each input variable
+rotation_dt[, highest_pc := names(rotation_dt[, 2:ncol(rotation_dt)])[max.col(abs(rotation_dt[, 2:ncol(rotation_dt)]))]]
+
+rotation_dt[, c("input_var", "highest_pc")]
+
+```
+
+# plots
+```{r}
+
+ggplot(diff_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) + 
+  geom_point(aes(color=car, shape=as.factor(donor), size=1)) +
+  scale_color_npg() +
+  labs(title="PCA - CD19+") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 24),
+        legend.title = element_text(size=20),
+        legend.text = element_text(size=18),
+        axis.title = element_text(size=20))
+
+
+
+
+
+
+```
+
