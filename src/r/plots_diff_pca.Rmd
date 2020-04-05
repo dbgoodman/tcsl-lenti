@@ -220,16 +220,22 @@ diff_days <- c(0, 6, 15, 24, 33)
 
 cd8_seg_1 <- cd8_cbind_dt[day != 33][, c('day', 'car', 'donor', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
 colnames(cd8_seg_1)[colnames(cd8_seg_1) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_a", "PC1_a", "PC2_a", "PC3_a")
-cd8_seg_1[, day_b := ]
+cd8_seg_1[, day_b := diff_days[match(day_a, diff_days)+1]]
 
 
 cd8_seg_2 <- cd8_cbind_dt[day != 0][, c('day', 'car', 'donor', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
 colnames(cd8_seg_2)[colnames(cd8_seg_2) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_b", "PC1_b", "PC2_b", "PC3_b")
 
 
+cd8_seg_dt <- merge(cd8_seg_1, cd8_seg_2, by=c('day_b','donor','car','k562','t_type'))
 
-ggplot(cd8_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) + 
-  geom_point(aes(color=as.factor(day), shape=as.factor(donor))) +
+
+ggplot(cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=as.factor(day), shape=as.factor(donor), size=1)) +
+  geom_segment(data=cd8_seg_dt[k562=='cd19+'], 
+               color='grey60',
+               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b),
+               arrow=arrow(length=unit(0.3,"cm"))) +
   scale_color_npg() +
   labs(title="CD8 only PCA") +
   facet_grid(k562 ~ car) +
