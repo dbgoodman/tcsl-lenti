@@ -1925,7 +1925,7 @@ cd4.indiv.pca.car.len.plots <- ggplot(pc.projected.dt[t.type == "CD4"],
   theme_bw()
 
 cd8.indiv.pca.car.score.plots <- ggplot(pc.projected.dt[t.type == "CD8"], 
-                                        aes(x = PC1, y = PC2, å
+                                        aes(x = PC1, y = PC2,
                                             label = CAR.align)) +
   scale_color_distiller(palette = 'Spectral') +
   # geom_text_repel() +
@@ -1933,7 +1933,7 @@ cd8.indiv.pca.car.score.plots <- ggplot(pc.projected.dt[t.type == "CD8"],
   facet_grid(batch + donor ~ assay) +
   labs(title = "CD8 car.bin.read.pct.norm PCA, Colored by CAR Score, CD19+") +
   theme_bw()
-e
+
 cd8.indiv.pca.car.len.plots <- ggplot(pc.projected.dt[t.type == "CD8"], 
                                       aes(x = PC1, y = PC2, 
                                           label = CAR.align)) +
@@ -4085,4 +4085,12 @@ car.abund.plot <- ggplot(abund.data) +
   scale_color_brewer('T Cell\nSubset', palette='Set1')
 
 car.abund.plot
+```
+
+```{r}
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+save(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 ```
