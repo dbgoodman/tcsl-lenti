@@ -29,8 +29,8 @@ load(file.path(data_dir, 'diff.sampled.Rdata'))
 map_day_0 <- function(df) {
   return(rbind(
     df[k562!='none'],
-    df[k562=='none'][, k562 := 'cd19+'],
-    df[k562=='none'][, k562 := 'cd19-']
+    df[day==0][, k562 := 'cd19+'],
+    df[day==0][, k562 := 'cd19-']
   ))
 }
 ```
@@ -38,58 +38,67 @@ map_day_0 <- function(df) {
 # PCA
 ```{r}
 
-diff_means_dt <- diff_dt[!is.na(day) & !is.na(donor) & !is.na(value), 
+# making new table with means & sd for each sample (across donors & replicates. no untrans.) for each variable (except for zombie & cd)
+diff_means_dt <- diff_dt[!is.na(day) & !is.na(donor) & !is.na(value) & !(variable %in% c('zombie_t','cd_t')) & car!='untrans', 
   list(m= mean(value), sd= sd(value), n= .N), 
-  by=c('day','donor','car','k562','t_type','variable')]
+  by=c('day','car','k562','t_type','variable')]
 
-
+# dcast = opposite of melt
 diff_cast_dt <- dcast(diff_means_dt[!is.na(m) & n > 20], 
-  day + donor + car + k562 + t_type ~ variable, 
+  day + car + k562 + t_type ~ variable, 
   value.var=c('m','sd'))
+
+diff_cast_dt <- map_day_0(diff_cast_dt)
 
 # diff_cast_m <- dcast(diff_means_dt[!is.na(m) & n > 20], 
 #   day + donor + car + k562 + t_type ~ variable, 
 #   value.var=c('m'))
 
-
+# actual principal component analysis
 diff_pca <- prcomp(diff_cast_dt[,-c(1:5)], scale. = T, center = T)
 
 
 ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
 
 
-# getting pca for cd19+ only, cd4 only, cd8 only with sd
-cd19_cast_dt <- diff_cast_dt[k562=='cd19+']
-cd4_cast_dt <- diff_cast_dt[t_type=='cd4']
-cd8_cast_dt <- diff_cast_dt[t_type=='cd8']
+# getting pca for cd19- only, cd19+ only, cd4 cd19+ only, cd8 cd19+ only with sd
+neg_cast_dt <- diff_cast_dt[k562=='cd19-']
+pos_cast_dt <- diff_cast_dt[k562=='cd19+']
+cd4_cast_dt <- diff_cast_dt[t_type=='cd4' & k562=='cd19+']
+cd8_cast_dt <- diff_cast_dt[t_type=='cd8' & k562=='cd19+']
 
-cd19_pca <- prcomp(cd19_cast_dt[,-c(1:5)], scale. = T, center = T)
+neg_pca <- prcomp(neg_cast_dt[,-c(1:5)], scale. = T, center = T)
+pos_pca <- prcomp(pos_cast_dt[,-c(1:5)], scale. = T, center = T)
 cd4_pca <- prcomp(cd4_cast_dt[,-c(1:5)], scale. = T, center = T)
 cd8_pca <- prcomp(cd8_cast_dt[,-c(1:5)], scale. = T, center = T)
 
 
 # cbind these pca with original table
 diff_cbind_dt <- cbind(diff_cast_dt, data.table(diff_pca$x))
-cd19_cbind_dt <- cbind(cd19_cast_dt, data.table(cd19_pca$x))
+neg_cbind_dt <- cbind(neg_cast_dt, data.table(neg_pca$x))
+pos_cbind_dt <- cbind(pos_cast_dt, data.table(pos_pca$x))
 cd4_cbind_dt <- cbind(cd4_cast_dt, data.table(cd4_pca$x))
 cd8_cbind_dt <- cbind(cd8_cast_dt, data.table(cd8_pca$x))
 
 
 # plot these altogether w/ gridExtra
 a <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+  geom_point(aes(color=car)) +
   labs(title='general PCA')
-b <- ggplot(cd19_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+b <- ggplot(pos_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car)) +
   labs(title='CD19+ only PCA')
-c <- ggplot(cd4_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+c <- ggplot(neg_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car)) +
+  labs(title='CD19- only PCA')
+d <- ggplot(cd4_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car)) +
   labs(title='CD4 only PCA')
-d <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(aes(color=car, shape=k562, alpha=as.factor(donor))) +
+e <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car)) +
   labs(title='CD8 only PCA')
 
-grid.arrange(a, b, c, d, ncol=2)
+grid.arrange(a, b, c, d, e, ncol=2)
 
 
 # use cbind to add PCs to original diff_cast_dt
@@ -105,6 +114,10 @@ grid.arrange(a, b, c, d, ncol=2)
 
 # scree plot of different PCs -- this just checks quality(?). PC1 should have highest variance
 screeplot(diff_pca, npcs=length(diff_pca$sdev))
+screeplot(pos_pca, npcs=length(pos_pca$sdev))
+screeplot(neg_pca, npcs=length(neg_pca$sdev))
+screeplot(cd4_pca, npcs=length(cd4_pca$sdev))
+screeplot(cd8_pca, npcs=length(cd8_pca$sdev))
 
 
 # getting list of input variables as data.table
@@ -163,8 +176,8 @@ ggplot(cd8_rot_dt, aes(x=reorder(input_var, PC1), y=PC1)) +
 ```{r}
 
 # cd19+ vs. t_type
-ggplot(diff_cbind_dt[k562=='cd19+' & t_type=='cd4'], aes(x=PC2, y=PC3)) + 
-  geom_point(aes(color=car, shape=as.factor(donor), size=1)) +
+ggplot(diff_cbind_dt[k562=='cd19+' & t_type=='cd4'], aes(x=PC1, y=PC2)) + 
+  geom_point(aes(color=car, size=1)) +
   scale_color_npg() +
   labs(title="PCA - CD4 CD19+") +
   theme_bw() +
@@ -245,7 +258,7 @@ ggplot(diff_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) +
 ```
 
 
-# cd19 only, cd4 only, cd8 only PCA plots for comparisons
+# cd19- only, cd19+ only, cd4 only, cd8 only PCA plots for comparisons
 ```{r}
 
 # connecting points by day
@@ -253,21 +266,25 @@ ggplot(diff_cbind_dt[k562=='cd19+'], aes(x=PC2, y=PC3)) +
 diff_days <- c(0, 6, 15, 24, 33)
 
 # using function map_day_0 to add in day 0 points
+diff_cbind_dt <- map_day_0(diff_cbind_dt)
+neg_cbind_dt <- map_day_0(neg_cbind_dt)
+pos_cbind_dt <- map_day_0(pos_cbind_dt)
+cd4_cbind_dt <- map_day_0(cd4_cbind_dt)
 cd8_cbind_dt <- map_day_0(cd8_cbind_dt)
 
 # new tables for geom_segment
-cd8_seg_1 <- cd8_cbind_dt[day != 33][, c('day', 'car', 'donor', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
+cd8_seg_1 <- cd8_cbind_dt[day != 33][, c('day', 'car', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
 colnames(cd8_seg_1)[colnames(cd8_seg_1) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_a", "PC1_a", "PC2_a", "PC3_a")
 cd8_seg_1[, day_b := diff_days[match(day_a, diff_days)+1]]
 
-cd8_seg_2 <- cd8_cbind_dt[day != 0][, c('day', 'car', 'donor', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
+cd8_seg_2 <- cd8_cbind_dt[day != 0][, c('day', 'car', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
 colnames(cd8_seg_2)[colnames(cd8_seg_2) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_b", "PC1_b", "PC2_b", "PC3_b")
 
-cd8_seg_dt <- merge(cd8_seg_1, cd8_seg_2, by=c('day_b','donor','car','k562','t_type'))
+cd8_seg_dt <- merge(cd8_seg_1, cd8_seg_2, by=c('day_b','car','k562','t_type'))
 
 
 ggplot(cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
-  geom_point(aes(color=as.factor(day), shape=as.factor(donor), size=1)) +
+  geom_point(aes(color=as.factor(day), size=1)) +
   geom_segment(data=cd8_seg_dt[k562=='cd19+'], 
                color='grey70',
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b),
