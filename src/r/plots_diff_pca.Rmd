@@ -254,6 +254,9 @@ colnames(diff_seg_2)[colnames(diff_seg_2) %in% c("day", "PC1", "PC2", "PC3")] <-
 
 diff_seg_dt <- merge(diff_seg_1, diff_seg_2, by=c('day_b','car','k562','t_type'))
 
+diff_seg_dt[k562=='cd19+', lt := "solid"]
+diff_seg_dt[k562=='cd19-', lt := "dashed"]
+
 
 ggplot(cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=as.factor(day), size=1)) +
@@ -349,11 +352,13 @@ neg_legend <- cowplot::get_legend(neg_arr)
 neg_arr
 
 
+
 diff_arr <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(data=diff_cbind_dt[day==0], aes(color=car, size=1, shape=interaction(t_type, k562))) +
-  geom_segment(data=diff_seg_dt[k562=='cd19+'], 
-               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
+  geom_point(data=diff_cbind_dt[day==0], aes(color=car, size=1, shape=t_type)) +
+  geom_segment(data=diff_seg_dt, 
+               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1, linetype=k562),
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
+    scale_linetype_manual(values=c("dashed", "solid"))+
   scale_color_igv() +
   labs(title="General PCA") +
   theme_bw() +
