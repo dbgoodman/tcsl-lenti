@@ -4,7 +4,7 @@ author: "Daniel Goodman & Kiavash Garakani"
 date: "originally 3/28/2019, refreshed 4/4/2020"
 output: html_document
 knit: (function(inputFile, encoding) {
-  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','..','html','pooled'))})
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html','pooled'))})
 ---
 
 ```{r, message=FALSE, warning=FALSE}
