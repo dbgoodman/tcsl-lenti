@@ -46,7 +46,7 @@ diff_means_dt <- diff_dt[!is.na(day) & !is.na(donor) & !is.na(value) & !(variabl
 # dcast = opposite of melt
 diff_cast_dt <- dcast(diff_means_dt[!is.na(m) & n > 20], 
   day + car + k562 + t_type ~ variable, 
-  value.var=c('m','sd'))
+  value.var=c('m'))
 
 diff_cast_dt <- map_day_0(diff_cast_dt)
 
@@ -55,7 +55,7 @@ diff_cast_dt <- map_day_0(diff_cast_dt)
 #   value.var=c('m'))
 
 # actual principal component analysis
-diff_pca <- prcomp(diff_cast_dt[,-c(1:5)], scale. = T, center = T)
+diff_pca <- prcomp(diff_cast_dt[,-c(1:4)], scale. = T, center = T)
 
 
 ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
@@ -125,8 +125,8 @@ screeplot(cd8_pca, npcs=length(cd8_pca$sdev))
 rotation_rows <- data.table(row.names(diff_pca$rotation))
 setnames(rotation_rows, "V1", "input_var")
 # 
-# cd4_rotation_rows <- data.table(row.names(cd4_pca$rotation))
-# cd8_rotation_rows <- data.table(row.names(cd8_pca$rotation))
+cd4_rotation_rows <- data.table(row.names(cd4_pca$rotation))
+cd8_rotation_rows <- data.table(row.names(cd8_pca$rotation))
 # cd19_rotation_rows <- data.table(row.names(cd19_pca$rotation))
 # 
 # # function to change column name of V1 to input_var
@@ -141,8 +141,8 @@ input_names <- function(df) {
 # 
 # # cbind variances with input variable names
 rotation_dt <- cbind(rotation_rows, data.table(diff_pca$rotation))
-# cd4_rot_dt <- cbind(cd4_rotation_rows, data.table(cd4_pca$rotation))
-# cd8_rot_dt <- cbind(cd8_rotation_rows, data.table(cd8_pca$rotation))
+cd4_rot_dt <- cbind(cd4_rotation_rows, data.table(cd4_pca$rotation))
+cd8_rot_dt <- cbind(cd8_rotation_rows, data.table(cd8_pca$rotation))
 # cd19_rot_dt <- cbind(cd19_rotation_rows, data.table(cd19_pca$rotation))
 # 
 # # rank input variables against which PCs they contribute to
@@ -151,11 +151,33 @@ rotation_dt[, highest_pc := names(rotation_dt[, 2:ncol(rotation_dt)])[max.col(ab
 # 
 rotation_dt[, c("input_var", "highest_pc")]
 # 
+
 # # ordering input variables for top 3 PCs by absolute value
 pc1_dt <- rotation_dt[, 1:2][order(-abs(PC1)), ]
 pc2_dt <- rotation_dt[, c(1,3)][order(-abs(PC2)), ]
 pc3_dt <- rotation_dt[, c(1,4)][order(-abs(PC3)), ]
 # 
+
+cd4_pc1_dt <- cd4_rot_dt[, 1:2]
+setnames(cd4_pc1_dt, "PC1", "value")
+cd4_pc1_dt[, PC := 1][order(-abs(value)), ]
+
+cd4_pc2_dt <- cd4_rot_dt[, c(1,3)]
+setnames(cd4_pc2_dt, "PC2", "value")
+cd4_pc2_dt[, PC := 2][order(-abs(value)), ]
+
+cd4_pc_dt <- rbind(cd4_pc1_dt, cd4_pc2_dt)[order(-abs(value), PC)]
+
+cd8_pc1_dt <- cd8_rot_dt[, 1:2]
+setnames(cd8_pc1_dt, "PC1", "value")
+cd8_pc1_dt[, PC := 1][order(-abs(value)), ]
+
+cd8_pc2_dt <- cd8_rot_dt[, c(1,3)]
+setnames(cd8_pc2_dt, "PC2", "value")
+cd8_pc2_dt[, PC := 2][order(-abs(value)), ]
+
+cd8_pc_dt <- rbind(cd8_pc1_dt, cd8_pc2_dt)[order(-abs(value), PC)]
+
 # 
 # # plot each PC to see what input variables contribute to which PC
 # ggplot() + 
@@ -291,13 +313,14 @@ cd8_arr <- ggplot(cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) +
   geom_segment(data=cd8_seg_dt[k562=='cd19+'], 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
-  scale_color_igv() +
+  scale_color_brewer(palette="Paired") +
   labs(title="CD8 CD19+ only PCA") +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5, size = 24),
         legend.title = element_text(size=20),
         legend.text = element_text(size=18),
-        axis.title = element_text(size=20))
+        axis.title = element_text(size=20)) +
+  guides(alpha=F, size=F)
 
 cd8_arr
 
@@ -308,15 +331,19 @@ cd4_arr <- ggplot(cd4_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) +
   geom_segment(data=cd4_seg_dt[k562=='cd19+'], 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
-  scale_color_igv() +
+  scale_color_brewer(palette="Paired") +
   labs(title="CD4 CD19+ only PCA") +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5, size = 24),
         legend.title = element_text(size=20),
         legend.text = element_text(size=18),
-        axis.title = element_text(size=20))
+        axis.title = element_text(size=20)) +
+  guides(alpha=F, size=F)
 
 cd4_arr
+
+
+grid.arrange(cd4_arr, cd8_arr, ncol=2)
 
 
 pos_arr <- ggplot(pos_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
@@ -373,6 +400,60 @@ diff_arr
 
 
 # plot_grid(pos_arr, neg_arr, neg_legend, cd4_arr, cd8_arr, NULL, diff_arr, diff_legend, ncol=3)
+
+```
+
+
+```{r}
+
+cd4_cd8_cbind_dt <- rbind(cd4_cbind_dt, cd8_cbind_dt)
+
+cd4_cd8_seg_dt <- rbind(cd4_seg_dt, cd8_seg_dt)
+
+ggplot(cd4_cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
+  geom_point(data=cd4_cd8_cbind_dt[day==0], aes(color=car, size=1)) +
+  geom_segment(data=cd4_cd8_seg_dt[k562=='cd19+'], 
+               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
+               arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
+  facet_grid(. ~ t_type) +
+  scale_color_brewer(palette="Paired") +
+  labs(title="CD19+ only PCA") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 24),
+        legend.title = element_text(size=20),
+        legend.text = element_text(size=18),
+        axis.title = element_text(size=20)) +
+  guides(alpha=F, size=F)
+
+
+# plots to show top 3 input variables for cd4 and cd8 pc1/2
+
+cd4_pc_plot <- ggplot(cd4_pc_dt[1:6,], aes(x=V1, y=value)) +
+  geom_bar(stat="identity") +
+  facet_grid(. ~ PC, scales="free") +
+  geom_hline(aes(yintercept=0)) +
+  theme_bw(base_size=16) +
+  theme(axis.text.x = element_text(angle=90, hjust=1),
+        plot.title = element_text(hjust=0.5)) +
+  labs(title="CD4 CD19+ PCA - Top 3 Input Variables in Each PC",
+       x="Input Variable",
+       y="Variance")
+
+
+cd8_pc_plot <- ggplot(cd8_pc_dt[1:6,], aes(x=V1, y=value)) +
+  geom_bar(stat="identity") +
+  facet_grid(. ~ PC, scales="free") +
+  geom_hline(aes(yintercept=0)) +
+  theme_bw(base_size=16) +
+  theme(axis.text.x = element_text(angle=90, hjust=1),
+        plot.title = element_text(hjust=0.5)) + 
+  labs(title="CD8 CD19+ PCA - Top 3 Input Variables in Each PC",
+       x="Input Variable",
+       y="Variance")
+
+
+
+
 
 ```
 
