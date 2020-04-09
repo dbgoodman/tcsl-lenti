@@ -4087,6 +4087,112 @@ car.abund.plot <- ggplot(abund.data) +
 car.abund.plot
 ```
 
+### 2020.04.09 tile plot with car scores
+
+Copied from Banff tile plot, switched to scaled CAR score
+```{r}
+
+tiles_combined <- melt.deseq.dt[(variable %in% c('A.CD') & assay != 'CTV3' | t.type == 'CD4') | 
+  (variable == 'ABCD.base' & assay == 'CTV3' & t.type == 'CD8')][,
+    combined_var := paste(variable, assay)][,
+      `:=`(rank.LFC= NULL, mean.rank.LFC= NULL)]
+
+tiles_combined[, scale.LFC := scale(LFC), by = .(t.type, assay, variable)]
+
+tiles_combined[, mean.scale.LFC := mean(scale.LFC), by = .(t.type, CAR.align)]
+tiles_combined[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+
+scale.lfc.tile.plot <- ggplot(tiles_combined) + 
+  geom_tile(aes(x = combined_var, y = reorder(car.axis, mean.scale.LFC), 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller(palette = 'Spectral') +
+  facet_wrap(~ t.type, nrow = 1, scales = 'free') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Ranked Shrunken Log Fold Change, CD19+') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+scale.lfc.tile.plot
+```
+
+Next, add cytokines and CD69, skipping IL4. Check different metrics.
+```{r}
+cytokine_ranks <- melt(
+  read.counts[batch == 'post-cytof' & assay != 'IL4'], 
+  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','CAR.score'))[
+    bin == 'A' & k.type == 'pos']
+cytokine_ranks[variable != 'CAR.score',]
+cytokine_ranks[, value.scale := scale(value), by=.(sort.group,variable,t.type)]
+cytokine_ranks[, mean.value.scale := mean(value.scale), by = .(t.type, CAR.align)]
+cytokine_ranks[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+cytokine_ranks[, 
+  combined.var := paste(assay,variable, sep='.'), by=.(t.type)]
+
+# cytokine measure comparison
+cytokine.rank.plot <- ggplot(cytokine_ranks) + 
+  geom_tile(aes(x = combined.var, y = reorder(car.axis, mean.value.scale), 
+                fill = value.scale), colour = "black", size = .20) + 
+  scale_fill_distiller(palette = 'Spectral') +
+  facet_wrap(~ t.type, nrow = 1, scales = 'free_y') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Ranked Shrunken Log Fold Change, CD19+') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+cytokine.rank.plot
+```
+
+Use CAR score for cytokine ranking. Combine with tile plot above:
+
+### This is in the same style as bank, ranked separately
+
+```{r fig.height=4, fig.width=2.5, units='inches'}
+library(ggforce)
+
+total_combined <- rbind(
+  tiles_combined[, -'mean.LFC', with=F],
+  cytokine_ranks[variable == 'CAR.score', c(names(tiles_combined)[1:7], 'value','combined.var','value.scale','mean.value.scale'), with=F],
+  use.names=F)
+
+# relabel x axis assays
+total_combined[, assay := factor(assay, 
+  labels=c('CTV1','CTV2','CTV3','CD69','IFNy','IL2'))]
+
+rank.lfc.tile.plot <- ggplot(total_combined) + 
+  geom_tile(aes(x = assay, y = reorder(car.axis, mean.scale.LFC), 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller('Z-score', palette = 'YlGnBu', direction = -1) +
+  facet_row(~ t.type, scales = 'free', space='free') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Receptors Ranked Across Metrics') + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+
+rank.lfc.tile.plot
+
+```
+
+### No ranking, dendrogram
+
+
 ```{r}
 data.output.dir <- file.path(here::here(
   '..','..',

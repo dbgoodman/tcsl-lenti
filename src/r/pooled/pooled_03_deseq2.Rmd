@@ -27,19 +27,19 @@ data.output.dir <- file.path(here::here(
   '..','..',
   's3-roybal-tcsl',
   'lenti_screen_compiled_data','data'))
+load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 
 # set this to true to re-run, else will load from s3
 rerun_deseq <- F
 ```
 
-## Run DESeq2 across all bin combos.
+## DESeq2 Function
 
 ```{r, eval=rerun_deseq}
-load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 
 run_deseq <- function(data.dt, ref_bin, test_bin, 
     control_replicates = T,                      
-    interaction = F, group.control = F, weight.bins = F) 
+    interaction = T, group.control = F, weight.bins = F) 
 {
   
   # identify inputs
@@ -150,39 +150,65 @@ run_deseq <- function(data.dt, ref_bin, test_bin,
     rep = data.table(t(sapply(strsplit(c(
       names(ref.bin.dt)[-1], 
       names(test.bin.dt)[-1]),"_"), `[`, c(1,2))))[,
-        paste(V1, V2, sep = '_'), by = seq(.N)]$V1,
+        paste(V1, V2, sep='_')],
     bin = sapply(strsplit(c(
       names(ref.bin.dt)[-1], 
       names(test.bin.dt)[-1]),"_"), `[`, 7),
     row.names = c(names(ref.bin.dt)[-1], names(test.bin.dt)[-1]))
   
-  print(design(dds))
-  print(coldata)
-  
   dds <- DESeqDataSetFromMatrix(countData = cts,
                                 colData = coldata,
                                 design =  ~ condition + rep)
+  
+  print(coldata)
   
   # pre-filtering
   keep <- rowSums(counts(dds)) >= 10
   dds <- dds[keep,]
   
-  if (control_replicates) {
-      design(dds) <- ~ condition + rep
-  }
+  # try various designs of decreasing complexity, since we don't have a full
+  # matrix for every example deseq run.
   
-  #check unique bins before using bins as contrast
-  n_uniq_bins <- length(unique(coldata$bin))
+  try_designs <- function(designs, dds) tryCatch({
+    message(paste("trying design:",as.character(designs[[1]]),"\n"))
+    DESeq2::design(dds) <- designs[[1]]
+    return(DESeq2::DESeq(dds)) }, error= function(e) {
+      dds <- try_designs(designs[c(-1)], dds)
+      message(e)
+      message('getting here\n')
+      return(dds)
+    }
+  )
+      
+  try_designs(
+    designs=c(
+      ~ condition + condition:rep + condition:bin,
+      ~ condition + rep + bin,
+      ~ condition + rep,
+      ~ condition
+    ),
+    dds
+  )
   
-  if (n_uniq_bins == 1 & interaction == T) {
-    warning('Cannot use bin contrast, only one bin level.')
-  }
+  # if (control_replicates) {
+  #     design(dds) <- ~ condition + rep
+  # }
+  # 
+  # #check unique bins before using bins as contrast
+  # n_uniq_bins <- length(unique(coldata$bin))
+  # 
+  # if (n_uniq_bins == 1 & interaction == T) {
+  #   warning('Cannot use bin contrast, only one bin level.')
+  # }
+  # 
+  # if (interaction == T & group.control == T & n_uniq_bins > 1) {
+  #   design(dds) <- ~ condition + condition:rep + condition:bin
+  # } else if (interaction == T & n_uniq_bins > 1) {
+  #   design(dds) <- ~ condition + rep + bin
+  # }
+  
+ 
 
-  if (interaction == T & group.control == T & n_uniq_bins > 1) {
-    design(dds) <- ~ condition + condition:rep + condition:bin
-  } else if (interaction == T & n_uniq_bins > 1) {
-    design(dds) <- ~ condition + rep + bin
-  }
     
   # set reference
   dds$condition <- relevel(dds$condition, ref = "reference")
@@ -201,7 +227,11 @@ run_deseq <- function(data.dt, ref_bin, test_bin,
   
   return(results.dt)
 }
+```
 
+## Run DESeq2 on all comparisons
+
+```{r}
 test_ref_sets <- c(ref=list(), test=list())
 
 # A/B/AB vs C/D/CD
@@ -228,14 +258,15 @@ for (set_i in seq_along(test_ref_sets$ref)) {
   
   deseq.results.dt <- read.counts[batch != 'post-cytof' & !is.na(k.type),
     {
-      message(paste(c(ref_str, test_str, inter, .BY[1]), collapse= ' - '));
+      message(paste(c(ref_str, test_str, inter, .BY[1],"\n"), collapse= ' - '));
       tryCatch(
         run_deseq(
           data.dt = .SD, 
           ref_bin = ref_set,
           test_bin = test_set,
-          interaction = inter),
-        error= function(e) {e; return(data.table())}
+          interaction = inter,
+          group.control = T),
+        error= function(e) {message(e); return(data.table())}
       )
     },
     by = .(group)]
@@ -250,9 +281,11 @@ for (set_i in seq_along(test_ref_sets$ref)) {
   
   all.deseq.results.dt <- rbind(
     all.deseq.results.dt,
-    deseq.results.dt)
+    deseq.results.dt, fill=T)
 }
+```
 
+```{r, eval=rerun_deseq}
 save(list=c('all.deseq.results.dt'),
      file=file.path(data.output.dir, 'pooled_deseq2_data.Rdata'))
 ```
@@ -321,7 +354,7 @@ make_cd4_cd8 <- function(data.dt) {
   ggplot(
     dcast(data.dt, 
     CAR.align + assay + k.type + ref_set + test_set + inter + CAR.type ~ t.type, 
-    value.var = c("log2FoldChange", "padj")), 
+    value.var = c("log2FoldChange", "padj.disp")), 
   aes(y=log2FoldChange_CD8, x=log2FoldChange_CD4,
       color=CAR.type,
       label=CAR.align,
@@ -341,7 +374,7 @@ make_pos_neg <- function(data.dt) {
   ggplot(
     dcast(data.dt, 
     CAR.align + assay + t.type + ref_set + test_set + inter + CAR.type ~ k.type, 
-    value.var = c("lfc.disp", "padj")), 
+    value.var = c("lfc.disp", "padj.disp")), 
   aes(y=lfc.disp_pos, x=lfc.disp_neg,
       color=CAR.type,
       label=CAR.align,
@@ -401,4 +434,71 @@ ggplotly(make_pos_neg(all.deseq.results.dt[
 ggplotly(make_pos_neg(all.deseq.results.dt[
   ref_set != 'baseline']), 
   tooltip = "label", session='knitr')
+```
+
+### Figs for 2020.04.08 meeting
+```{r}
+
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+
+load(
+  file=file.path(data.output.dir, 'pooled_deseq2_data.Rdata'))
+
+
+all.deseq.results.dt[, padj.disp := -log10(padj)]
+all.deseq.results.dt[, lfc.disp := log2FoldChange]
+all.deseq.results.dt[padj.disp > 10, padj.disp := Inf]
+all.deseq.results.dt[abs(lfc.disp) > 5, lfc.disp := sign(lfc.disp) * Inf]
+
+data.dt <- all.deseq.results.dt
+
+# mask receptor names except for known ones
+control_domains <- c('41BB','CD28')
+chosen_domains <- c('BAFF-R','CD40','TACI','TNR8')
+neg_domain <- c('KLRG1')
+
+
+data.dt[, CAR.type := 'other']
+data.dt[CAR.align == '41BB', CAR.type := '41BB']
+data.dt[CAR.align == 'CD28', CAR.type := 'CD28']
+data.dt[, CAR.type := factor(
+  CAR.type,levels=c('other','41BB','CD28'))]
+
+data.dt <- all.deseq.results.dt
+
+# mask receptor names except for known ones
+control_domains <- c('41BB','CD28')
+chosen_domains <- c('BAFF-R','CD40','TACI','TNR8')
+neg_domain <- c('KLRG1')
+
+
+data.dt[, CAR.type := 'other']
+data.dt[CAR.align == '41BB', CAR.type := '41BB']
+data.dt[CAR.align == 'CD28', CAR.type := 'CD28']
+data.dt[, CAR.type := factor(
+  CAR.type,levels=c('other','41BB','CD28'))]
+
+ggplot(data.dt[
+  k.type == 'pos' & ref_set == 'CD' & test_set == 'A' & k.type == 'pos'], 
+  aes(
+    x=log2FoldChange, y=-log10(padj), 
+    color=CAR.type,
+    label=CAR.align,
+    size=CAR.type)) + 
+  geom_point() +
+  facet_grid(t.type ~ assay) +
+  scale_color_manual('',
+    labels=c('New Receptors', '41BB', 'CD28'),
+    values=c('grey50', RColorBrewer::brewer.pal(5, 'Paired')[c(2,4,5)])) +
+  scale_size_manual('',
+    labels=c('New Receptors', '41BB', 'CD28'),
+    values=c(1,3,3,3)) +
+  geom_hline(yintercept=-log10(0.05), linetype = 'dashed') +
+  labs(x='Log2 Fold Change in Proliferation', y='-log10(P-value)') + 
+  theme_minimal() +
+  theme(panel.border=element_rect(fill=NA))
+
 ```
