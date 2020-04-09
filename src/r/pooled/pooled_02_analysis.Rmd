@@ -4092,7 +4092,8 @@ car.abund.plot
 Copied from Banff tile plot, switched to scaled CAR score
 ```{r}
 
-tiles_combined <- melt.deseq.dt[(variable %in% c('A.CD') & assay != 'CTV3' | t.type == 'CD4') | 
+tiles_combined <- melt.deseq.dt[(
+    variable %in% c('A.D') & (assay != 'CTV3' | t.type == 'CD4')) | 
   (variable == 'ABCD.base' & assay == 'CTV3' & t.type == 'CD8')][,
     combined_var := paste(variable, assay)][,
       `:=`(rank.LFC= NULL, mean.rank.LFC= NULL)]
@@ -4191,6 +4192,62 @@ rank.lfc.tile.plot
 ```
 
 ### No ranking, dendrogram
+
+copied from ggheatmap on github.
+
+```{r, fig.height=8, fig.width=4}
+
+library(ggdendro)
+library(cowplot)
+
+# Make dendrogram
+car_mean_cast <- dcast(
+  total_combined, 
+  CAR.align ~ assay + t.type, 
+  value.var='scale.LFC')
+
+car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
+rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
+dendro_vars <- as.dendrogram(hclust(d = dist(x = car_dendro_m)))
+
+# Create dendrogram plot
+dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
+  theme(axis.text.y = element_text(size = 6))
+
+# row order
+var_order <- order.dendrogram(dendro_vars)
+var_names <- row.names(car_dendro_m[var_order, ])
+total_combined$CAR.align <- factor(
+    total_combined$CAR.align,
+    levels = var_names)
+
+# heatmap
+var_heatmap <- ggplot(total_combined) + 
+  geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller('Z-score', 
+    palette='PiYG', limits=c(-3,3), oob=scales::squish) +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Receptors Ranked Across Metrics') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+# col dendro
+dendro_data_col <- dendro_data(dendro_vars, type = "rectangle")
+
+dendro_col <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
+  geom_segment(data = segment(dendro_data_col), 
+      aes(x = x, y = y, xend = xend, yend = yend)) +
+    coord_flip()
+plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
+  dendro_col, grid::unit(0.2, "null"), position = "right")
+ggdraw(plot_dendroheat)
+```
 
 
 ```{r}
