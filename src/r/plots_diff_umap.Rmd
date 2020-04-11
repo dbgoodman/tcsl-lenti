@@ -55,8 +55,9 @@ For now, skip straight to high dimensional plotting.
 channel_map <- diff_opt_cd4$channel_map
 
 # for now use all variables in the channel map except cd4/8
+# removing zombie and cd_t (there is no var to differentiate cd4 and cd8 here)
 umap_vars <- c(paste0(names(channel_map),'_t'))
-umap_vars <- umap_vars[umap_vars != 'cd_t']
+umap_vars <- umap_vars[umap_vars != c('cd_t', 'zombie_t')]
 
 sample_for_umap <- function(df, sample_size) {
   umap_dt <- diff_dt[!is.na(event_id), 
@@ -94,7 +95,6 @@ scale_for_umap <- function(df, umap_vars, censor_negative_min) {
 #     facet_grid(variable~.) +
 #     scale_fill_distiller(palette='RdYlBu') +
 #     theme_bw()
-
 ```
 ## Choose UMAP Params
 
@@ -156,12 +156,12 @@ Choosing neighbors == 15 and min_dist == 1e-4.
 Scaling this to 200 events per well and checking CAR/condition separation.
 
 ```{r, eval=redo_umap_clustering}
-chosen_dist=0.005
-chosen_n_neighbor=30 # default is 15
+chosen_dist=0.0001
+chosen_n_neighbor=100 # default is 15
 
 umap_dt <- diff_dt[!is.na(event_id), 
   .SD[event_id %in% sample(unique(event_id), 
-    min(400, length(unique(event_id))))], #modify minimum parameter for points per well
+    min(1000, length(unique(event_id))))], #modify minimum parameter for points per well
   by=c('well', 'plate', 'day')]
 
 #grab channel map from cd4 data (cd4/8 are the same)
@@ -169,6 +169,9 @@ channel_map <- diff_opt_cd4$channel_map
 
 # for now use all variables in the channel map
 umap_vars <- c(paste0(names(channel_map),'_t'))
+
+# removing cd_t and zombie_t from umap_vars
+umap_vars <- umap_vars[umap_vars != c('cd_t', 'zombie_t')]
 
 #cast it so variables are columns and
 #subset sample umap data on variables
@@ -182,9 +185,9 @@ umap_dt_in <- umap_cast_dt[, ..umap_vars]
 umap_dt_in[ , 
   (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
 
-# run umap via uwot library
+# run umap via uwot library (added learning rate and n_sgd_threads=1)
 umap_out <- umap(umap_dt_in, min_dist=chosen_dist,
-    n_neighbors=chosen_n_neighbor, verbose=T, n_threads=8, n_trees=50,
+    n_neighbors=chosen_n_neighbor, learning_rate=0.5, verbose=T, n_threads=8, n_trees=100, n_sgd_threads=1,
     ret_nn=T)
 
 # nearest neighbors in original space
@@ -580,7 +583,7 @@ ggplot(car_cluster_day_indiv_k562_pct_dt[k562=='cd19+']) +
       #limits=c(-2.8, 2.8), 
       na.value=min_col) +
     labs(title='CAR enrichment\nper cluster', y='CAR',
-      subtitle='CAR enrichment in cluster\n(z-score)') +
+      subtitle='CAR enrichment in cluster\n(z-score) (summed across cols)') +
     theme_minimal()
 ```
 #### summed across rows
@@ -602,6 +605,6 @@ ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) +
       #limits=c(-2.8, 2.8), 
       na.value=min_col) +
     labs(title='CAR enrichment\nper cluster', y='CAR',
-      subtitle='CAR enrichment in cluster\n(z-score)') +
-    theme_minimal()x
+      subtitle='CAR enrichment in cluster\n(z-score) (summed across rows)') +
+    theme_minimal()
 ```
