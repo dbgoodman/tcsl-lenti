@@ -1,0 +1,82 @@
+---
+title: "tcsl139"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# install.packages("rJava")
+# install.packages("UpSetR")
+# install.packages("tidyverse")
+# install.packages("venneuler")
+# install.packages("grid")
+
+
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gtable)
+library(RColorBrewer)
+library(ggsci)
+library(rJava)
+library(UpSetR)
+library(tidyverse)
+library(venneuler)
+library(tidyr)
+
+#paste into terminal tab until Dan fixes this
+#s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
+
+
+rawSets <- fread(paste0('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/fig1_expression_binary.csv'), header = TRUE, sep = ",", stringsAsFactors = FALSE)
+
+rawSets[is.na(rawSets)] <- na
+
+#turning the spreadsheet into a vertical spreadsheet with only one column. 
+vennSet <- pivot_longer(rawSets, cols = ends_with("cell"), names_to = "Expression", names_repair = "check_unique", values_to = "count", values_drop_na = TRUE)
+
+vennSet
+
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]}
+
+final <- delete.na(vennSet)
+
+final
+
+dim(final)
+
+v <- venneuler(data.frame(final))
+
+
+```
+
+
+```{r}
+
+#IGNORE THIS IS THE GIRLS CODE THAT I TOOK FOR THE EXAMPLE
+
+
+rawSets <- read.csv(
+  file = "https://raw.githubusercontent.com/lgellis/MiscTutorial/master/sets/seniorTransportation.csv",
+  header = TRUE, sep = ",", stringsAsFactors = FALSE
+)
+
+rawSets[is.na(rawSets)] <- 0
+
+sets <- rawSets %>%
+  rename(TTC = ttcTransportation, Walk = walkTransportation, Drive = driveTransportation, Cycle = cycleTransportation, Taxi = taxiTransportation, `Community Ride` = communityRideTransportation, `Wheel Trans` = wheelTransTransportation, Friends = friendsTransportation)
+
+dim(sets)
+
+head(sets)
+
+vennSets <- sets %>%
+  gather(transportation, binary,6:13) %>% # take all binary mappings and convert to be a the set indicator
+  filter(binary == 1 & transportation != 'TTC') %>% # only include set matches
+  select(ID, transportation) %>% # only include ID and set category
+  mutate(transportation = factor(transportation)) # set the transportation column as a factor
+
+vennSets
+
+```
+
