@@ -45,8 +45,20 @@ final
 
 dim(final)
 
-v <- venneuler(data.frame(final))
+#remove the column that includes the marker of 1 from the original binary data
+final$count <- NULL
 
+v <- venneuler(data.frame(final))
+par(cex = 0.7) 
+plot(v, main = "Costim Expression by Cell Type", cex.main = 1.5)
+grid.text( "CSA",
+  x = 0.52,
+  y = 0.15,
+  gp = gpar(
+    fontsize = 1,
+    fontface = 1
+  )
+)
 
 ```
 
@@ -78,5 +90,17 @@ vennSets <- sets %>%
 
 vennSets
 
+v <- venneuler(data.frame(vennSets)) 
+par(cex = 0.7) 
+plot(v, main = "Modes of Senior Transportation (Toronto 2017 Survey)", cex.main = 1.5)
+grid.text(
+  "@littlemissdata",
+  x = 0.52,
+  y = 0.15,
+  gp = gpar(
+    fontsize = 10,
+    fontface = 3
+  )
+)
 ```
 
