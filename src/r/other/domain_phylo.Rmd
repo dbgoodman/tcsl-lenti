@@ -7,6 +7,13 @@ Plot domain phylogeny and presence of motifs.
 
 ```{r setup, include=FALSE}
 library(phytools)
+library(data.table)
+library(dplyr)
+library(ggdendro)
+library(seqinr)
+library(ggplot2)
+library(phylogram)
+library(ggtree)
 ```
 
 ## Alignment
@@ -75,7 +82,6 @@ motif_table <- domain_annot[domain_names,
   on=c(mnemonic='uniprot'), nomatch=NA][
     source != 'ens_protvar'][,
       .N, by='orig_name']
-data.table(real_names=row.names(unlist(domain_seqs), seq=unlist(domain_seqs)))
 
 motif_groupings <- c(
   'MAPK','PP2A','ITIM','ITSM','PDZ','PTB',
@@ -100,20 +106,24 @@ motif_annot_subset[, source := factor(
   ordered=T)]
 
 motif_annot_subset[, max_source := min(source), by=.(motif_group, fasta_name)]
+motif_annot_subset[, predicted := max_source=='elm_predict', by=.(motif_group, fasta_name)]
+motif_annot_subset[, predicted := factor(predicted, labels=c('curated','predicted'))]
 
 motif_heatmap <- ggplot(
-    tidyr::complete(motif_annot_subset, motif_group, label)) + 
-  geom_tile(aes(x=motif_group, y=factor(tip.label.clean, levels=tree$tip.label.clean), 
-    fill=max_source), color='gray80') +
+    tidyr::complete(motif_annot_subset[label %in% d$label], motif_group, label)) + 
+  geom_tile(aes(
+    x=factor(motif_group, labels=gsub('_',', ',unique(motif_group))),
+    y=factor(label, levels=d$label, labels=d$tip.label.clean), 
+    fill=predicted), color='gray80') +
   scale_fill_manual(na.value = 'white',
-    values=c(
-      uniprot='darkorange',netphos='blue4',elm_curated='cornsilk4', elm_predict='cornsilk2')) +
+    values=c(curated='cornsilk4',predicted='cornsilk2')) +
   theme_bw() +
-  theme(axis.text.x=element_text(angle = -90, hjust = 0))
+  theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+  labs(y='Domain Sequence Phylogeny', x='Presence of Signaling Motif')
 
 ```
 
-```{r}
+```{r, fig.height=8, fig.width=6}
 
 library(ggdendro)
 library(cowplot)
@@ -125,11 +135,13 @@ tree_plot <- ggtree(tree) %<+% d +
   xlim(NA, 1.5)
 
 # col dendro
+# https://github.com/tleonardi/ggheatmap/blob/master/R/ggheatmap.R
 dendro_data_row <- dendro_data(dendro_cars, type = "rectangle")
-dendro_row <- axis_canvas(motif_heatmap, axis = "x") + 
+dendro_row <- axis_canvas(motif_heatmap, axis = "y", coord_flip=T) + 
     geom_segment(data = segment(dendro_data_row), 
-        aes(x = x, y = y, xend = xend, yend = yend))
-plot_motifheat <- insert_xaxis_grob(motif_heatmap, 
-            dendro_col, grid::unit(0.2, "null"), position = "top")
+        aes(x = x, y = -y, xend = xend, yend = -yend)) + 
+    coord_flip()
+plot_motifheat <- insert_yaxis_grob(motif_heatmap, 
+            dendro_row, grid::unit(0.2, "null"), position = "left")
 ggdraw(plot_motifheat)
 ```
