@@ -20,6 +20,7 @@ library(gridExtra)
 #library(spatstat)
 #use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 library(ggsci)
+library(plotly)
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
@@ -67,10 +68,10 @@ pos_cast_dt <- diff_cast_dt[k562=='cd19+']
 cd4_cast_dt <- diff_cast_dt[t_type=='cd4' & k562=='cd19+']
 cd8_cast_dt <- diff_cast_dt[t_type=='cd8' & k562=='cd19+']
 
-neg_pca <- prcomp(neg_cast_dt[,-c(1:5)], scale. = T, center = T)
-pos_pca <- prcomp(pos_cast_dt[,-c(1:5)], scale. = T, center = T)
-cd4_pca <- prcomp(cd4_cast_dt[,-c(1:5)], scale. = T, center = T)
-cd8_pca <- prcomp(cd8_cast_dt[,-c(1:5)], scale. = T, center = T)
+neg_pca <- prcomp(neg_cast_dt[,-c(1:4)], scale. = T, center = T)
+pos_pca <- prcomp(pos_cast_dt[,-c(1:4)], scale. = T, center = T)
+cd4_pca <- prcomp(cd4_cast_dt[,-c(1:4)], scale. = T, center = T)
+cd8_pca <- prcomp(cd8_cast_dt[,-c(1:4)], scale. = T, center = T)
 
 
 # cbind these pca with original table
@@ -100,6 +101,11 @@ e <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) +
 
 grid.arrange(a, b, c, d, e, ncol=2)
 
+p <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2, text=paste("Costim:", car, "<br>Day:", day, "<br>K562:", k562))) +
+  geom_point(aes(color=as.factor(day), shape=k562, size=1)) +
+  labs(title='general PCA')
+
+ggplotly(p, tooltip=c("text"))
 
 # use cbind to add PCs to original diff_cast_dt
 # use pc2/3 instead of 1/2
