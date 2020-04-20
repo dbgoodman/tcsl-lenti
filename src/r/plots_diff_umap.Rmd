@@ -455,7 +455,7 @@ dendro_col_cd19 <- axis_canvas(var_heatmap_cd19, axis = "x") +
         aes(x = x, y = y, xend = xend, yend = yend))
 plot_dendroheat_cd19 <- insert_xaxis_grob(var_heatmap_cd19, 
             dendro_col_cd19, grid::unit(0.2, "null"), position = "top")
-ggdraw(plot_dendroheat_cd19)
+ggdraw(plot_dendroheat_cd19) + draw_label('CD19+', x=0.9,y=0.9)
 
 
 ```
@@ -506,7 +506,7 @@ dendro_col_cd19n <- axis_canvas(var_heatmap_cd19n, axis = "x") +
         aes(x = x, y = y, xend = xend, yend = yend))
 plot_dendroheat_cd19n <- insert_xaxis_grob(var_heatmap_cd19n,
             dendro_col_cd19n, grid::unit(0.2, "null"), position = "top")
-ggdraw(plot_dendroheat_cd19n)
+ggdraw(plot_dendroheat_cd19n) + draw_label('CD19-', x=0.9,y=0.9)
 
 ```
 
@@ -565,46 +565,107 @@ day_cluster_total_pct_dt %>% head()
 #### summed across cols
 ```{r, echo=F, fig.width=15, fig.height=8}
 car_cluster_day_indiv_k562_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(car,cluster,k562,t_type))][,
-    list(car, pct=N/sum(N)), by=c('cluster','k562','t_type')][,
-      pct_delta := scale(pct), by=c('cluster','k562','t_type')]
+  data.table(table(car,cluster,k562,t_type, day))][,
+    list(car, pct=N/sum(N)), by=c('cluster','k562','t_type','day')][,
+      pct_delta := scale(pct), by=c('cluster','k562','t_type', 'day')]
 
 car_cluster_day_indiv_k562_pct_dt[,
   cluster := factor(cluster, levels = cluster_names)]
 
+car_cluster_day_indiv_k562_pct_dt$day <- factor(car_cluster_day_indiv_k562_pct_dt$day, levels=c('0','6','15','24','33'))
+
 min_col <- brewer.pal(name='BrBG', n=11)[2]
+
+car_cluster_day_indiv_k562_pct_dt %>% head(100)
 
 ggplot(car_cluster_day_indiv_k562_pct_dt[k562=='cd19+']) + 
     geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
-    facet_grid(k562+t_type~., scales='free') +
+    facet_grid(k562+t_type~day, scales='free') +
     scale_fill_distiller('',
       palette='BrBG', 
       direction=1,
       #limits=c(-2.8, 2.8), 
       na.value=min_col) +
-    labs(title='CAR enrichment\nper cluster', y='CAR',
+    labs(title='CAR enrichment\nper day per cluster', y='CAR',
       subtitle='CAR enrichment in cluster\n(z-score) (summed across cols)') +
     theme_minimal()
 ```
-#### summed across rows
+##### summed across rows
 ```{r, echo=F, fig.width=15, fig.height=8}
 car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(car,cluster,k562,t_type))][,
-    list(cluster, pct=N/sum(N)), by=c('car','k562','t_type')][,
-      pct_delta := scale(pct), by=c('car','k562','t_type')]
+  data.table(table(car,cluster,k562,t_type,day))][,
+    list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
+      pct_delta := scale(pct), by=c('car','k562','t_type','day')]
 
 car_cluster_day_indiv_k562_total_pct_dt[,
 cluster := factor(cluster, levels = cluster_names)]
 
+car_cluster_day_indiv_k562_total_pct_dt$day <- factor(car_cluster_day_indiv_k562_total_pct_dt$day, levels=c('0','6','15','24','33'))
+
+car_cluster_day_indiv_k562_total_pct_dt %>% head(100)
+
 ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) + 
     geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
-    facet_grid(k562+t_type~., scales='free') +
+    facet_grid(k562+t_type~day, scales='free') +
     scale_fill_distiller('',
       palette='BrBG', 
       direction=1,
       #limits=c(-2.8, 2.8), 
       na.value=min_col) +
-    labs(title='CAR enrichment\nper cluster', y='CAR',
+    labs(title='CAR enrichment\nper day per cluster', y='CAR',
       subtitle='CAR enrichment in cluster\n(z-score) (summed across rows)') +
     theme_minimal()
+```
+
+#### Bar charts showing how each CAR changes cluster by day
+```{r}
+car_cluster_day_indiv_k562_bar_pct_dt <- map_day_0(umap_fcs_dt)[,
+  data.table(table(car,cluster,k562,t_type,day))][,
+    list(day, pct=N/sum(N)), by=c('car','k562','t_type','cluster')][,
+      pct_delta := scale(pct), by=c('car','k562','t_type','cluster')]
+
+car_cluster_day_indiv_k562_bar_pct_dt[,
+cluster := factor(cluster, levels = cluster_names)]
+
+car_cluster_day_indiv_k562_bar_pct_dt$day <- factor(car_cluster_day_indiv_k562_bar_pct_dt$day, levels=c('0','6','15','24','33'))
+
+# data exploration
+car_cluster_day_indiv_k562_bar_pct_dt %>% 
+  filter(k562=='cd19+', t_type=='cd8', car=='zeta') %>% arrange(day) %>% head(100)
+  
+#filter for CD4+, CD19+, only CARs > 10% in a cluster in a given day
+car_cluster_day_indiv_k562_bar_pct_dt %>% 
+  filter(k562=='cd19+', t_type=='cd4', pct > 0.10) %>%
+  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
+    facet_grid(car~day, scales='free_x', space='free_x') +
+    labs(title='CD4 CAR enrichment (>10%)\nper cluster per day', y='CAR',
+      subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)')
+
+#filter for CD8+, CD19+, only CARs > 10% in a cluster in a given day
+car_cluster_day_indiv_k562_bar_pct_dt %>% 
+  filter(k562=='cd19+', t_type=='cd8', pct > 0.10) %>%
+  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
+    facet_grid(car~day, scales='free_x', space='free_x') +
+    labs(title='CD8 CAR enrichment (>10%)\nper cluster per day', y='CAR',
+      subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)')
+```
+
+#### Bar charts showing distribution of each CAR in clusters per day 
+```{r}
+#filter for CD4+, CD19+, only CARs > 10% in a cluster in a given day
+car_cluster_day_indiv_k562_total_pct_dt %>% 
+  filter(k562=='cd19+', t_type=='cd4', pct > 0.10) %>%
+  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
+    facet_grid(car~day, scales='free_x', space='free_x') +
+    labs(title='CD4 CAR enrichment (>10%)\nper day per cluster', y='CAR',
+      subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))')
+
+#filter for CD8+, CD19+, only CARs > 10% in a cluster in a given day
+car_cluster_day_indiv_k562_total_pct_dt %>% 
+  filter(k562=='cd19+', t_type=='cd8', pct>.10) %>%
+  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
+    facet_grid(car~day, scales='free_x', space='free_x') +
+    labs(title='CD8 CAR enrichment (>10%)\nper day per cluster', y='CAR',
+      subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))')
+
 ```
