@@ -24,6 +24,7 @@ library(plotly)
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
+#load(file.path(data_dir, 'exh.sampled.Rdata'))
 #diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
 # map day 0 to both plus and minus
@@ -49,26 +50,24 @@ diff_cast_dt <- dcast(diff_means_dt[!is.na(m) & n > 20],
   day + car + k562 + t_type ~ variable, 
   value.var=c('m'))
 
+
+# use function to make day 0 k562 as cd19+ and cd19- instead of none
 diff_cast_dt <- map_day_0(diff_cast_dt)
 
 
-# actual principal component analysis
-diff_pca <- prcomp(diff_cast_dt[,-c(1:4)], scale. = T, center = T)
-
-
-ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
-
-
-# getting pca for cd19- only, cd19+ only, cd4 cd19+ only, cd8 cd19+ only with sd
+# getting pca for all, cd19- only, cd19+ only, cd4 cd19+ only, cd8 cd19+ only with sd
 
 define_pca <- function(df, target=c('cd19+','cd19-'), tcell=c('cd4','cd8')) {
   return(prcomp(df[k562 %in% target & t_type %in% tcell][,-c(1:4)], scale. = T, center = T))
 }
 
+diff_pca <- define_pca(diff_cast_dt)
 neg_pca <- define_pca(diff_cast_dt, target='cd19-')
 pos_pca <- define_pca(diff_cast_dt, target='cd19+')
 cd4_pca <- define_pca(diff_cast_dt, target='cd19+', tcell='cd4')
 cd8_pca <- define_pca(diff_cast_dt, target='cd19+', tcell='cd8')
+
+ggplot(data.table(diff_pca$x), aes(x=PC1, y=PC2)) + geom_point()
 
 
 # cbind these pca with data table
@@ -140,7 +139,7 @@ cd8_rot_dt <- input_variance_col(cd8_pca)
 ggplot() +
   geom_bar(data=melt(cd8_rot_dt, id.vars='input_var', variable.name='PC', value.name='value'),
            aes(x=reorder(input_var, value), y=value), stat="identity") +
-  facet_wrap(~ PC) +
+  facet_wrap(~ PC, scales="free") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # just PC1 in ascending order, but we care about max abs values (i.e. leftmost & rightmost) b/c that contributes most to the variance
@@ -185,11 +184,11 @@ diff_days <- c(0, 6, 15, 24, 33)
 # new tables for geom_segment
 
 arr_by_day <- function(df) {
-  seg_1 <- df[day != 33][, c('day', 'car', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
-  colnames(seg_1)[colnames(seg_1) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_a", "PC1_a", "PC2_a", "PC3_a")
+  seg_1 <- df[day != 33][, c('day', 'car', 'k562', 't_type', 'PC1', 'PC2')]
+  colnames(seg_1)[colnames(seg_1) %in% c("day", "PC1", "PC2")] <- c("day_a", "PC1_a", "PC2_a")
   seg_1[, day_b := diff_days[match(day_a, diff_days)+1]]
-  seg_2 <- df[day != 0][, c('day', 'car', 'k562', 't_type', 'PC1', 'PC2', 'PC3')]
-  colnames(seg_2)[colnames(seg_2) %in% c("day", "PC1", "PC2", "PC3")] <- c("day_b", "PC1_b", "PC2_b", "PC3_b")
+  seg_2 <- df[day != 0][, c('day', 'car', 'k562', 't_type', 'PC1', 'PC2')]
+  colnames(seg_2)[colnames(seg_2) %in% c("day", "PC1", "PC2")] <- c("day_b", "PC1_b", "PC2_b")
   return(merge(seg_1, seg_2, by=c('day_b','car','k562','t_type')))
 }
 
@@ -199,8 +198,6 @@ cd4_seg_dt <- arr_by_day(cd4_cbind_dt)
 cd8_seg_dt <- arr_by_day(cd8_cbind_dt)
 pos_seg_dt <- arr_by_day(pos_cbind_dt)
 neg_seg_dt <- arr_by_day(neg_cbind_dt)
-
-
 
 
 diff_seg_dt[k562=='cd19+', lt := "solid"]
@@ -298,26 +295,26 @@ neg_arr <- ggplot(neg_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) +
         axis.title = element_text(size=20)) +
   guides(size=F, alpha=F, color=guide_legend(ncol=2))
 
-neg_legend <- cowplot::get_legend(neg_arr)
+# neg_legend <- cowplot::get_legend(neg_arr)
 
 neg_arr
 
 
 
 diff_arr <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(data=diff_cbind_dt[day==0], aes(color=car, size=1, shape=t_type)) +
-  geom_segment(data=diff_seg_dt, 
-               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1, linetype=k562),
+  geom_point(data=diff_cbind_dt[day==0 & k562=='cd19+'], aes(color=car, size=1, shape=t_type)) +
+  geom_segment(data=diff_seg_dt[k562=='cd19+'], 
+               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
     scale_linetype_manual(values=c("dashed", "solid"))+
   scale_color_igv() +
-  labs(title="General PCA") +
+  labs(title="General PCA - CD19+ only") +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5, size = 24),
         axis.title = element_text(size=20)) +
   guides(alpha=F, size=F, color=guide_legend(ncol=2))
 
-diff_legend <- cowplot::get_legend(diff_arr)
+# diff_legend <- cowplot::get_legend(diff_arr)
 
 diff_arr
 
@@ -330,29 +327,48 @@ diff_arr
 
 ```{r}
 
-cd4_cd8_cbind_dt <- rbind(cd4_cbind_dt, cd8_cbind_dt)
-
-cd4_cd8_seg_dt <- rbind(cd4_seg_dt, cd8_seg_dt)
-
-ggplot(cd4_cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
-  geom_point(data=cd4_cd8_cbind_dt[day==0], aes(color=car, size=1)) +
-  geom_segment(data=cd4_cd8_seg_dt[k562=='cd19+'], 
-               aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
-               arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
-  facet_grid(. ~ t_type) +
-  scale_color_brewer(palette="Paired") +
-  labs(title="CD19+ only PCA") +
-  theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, size = 24),
-        legend.title = element_text(size=20),
-        legend.text = element_text(size=18),
-        axis.title = element_text(size=20)) +
-  guides(alpha=F, size=F)
+# cd4_cd8_cbind_dt <- rbind(cd4_cbind_dt, cd8_cbind_dt)
+# 
+# cd4_cd8_seg_dt <- rbind(cd4_seg_dt, cd8_seg_dt)
+# 
+# ggplot(cd4_cd8_cbind_dt[k562=='cd19+'], aes(x=PC1, y=PC2)) + 
+#   geom_point(data=cd4_cd8_cbind_dt[day==0], aes(color=car, size=1)) +
+#   geom_segment(data=cd4_cd8_seg_dt[k562=='cd19+'], 
+#                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
+#                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
+#   facet_grid(. ~ t_type) +
+#   scale_color_brewer(palette="Paired") +
+#   labs(title="CD19+ only PCA") +
+#   theme_bw() +
+#   theme(plot.title = element_text(hjust = 0.5, size = 24),
+#         legend.title = element_text(size=20),
+#         legend.text = element_text(size=18),
+#         axis.title = element_text(size=20)) +
+#   guides(alpha=F, size=F)
 
 
 # plots to show top 3 input variables for cd4 and cd8 pc1/2
 
-cd4_pc_plot <- ggplot(cd4_pc_dt[1:6,], aes(x=V1, y=value)) +
+input_var_rank <- function(df) {
+  pc1 <- df[, c("input_var", "PC1")]
+  setnames(pc1, "PC1", "value")
+  pc1[, PC := 1]
+  pc2 <- df[, c("input_var", "PC2")]
+  setnames(pc2, "PC2", "value")
+  pc2[, PC := 2]
+  return(rbind(pc1, pc2)[order(-abs(value), PC)])
+}
+
+
+diff_rank_var <- input_var_rank(diff_rot_dt)
+cd4_rank_var <- input_var_rank(cd4_rot_dt)
+cd8_rank_var <- input_var_rank(cd8_rot_dt)
+neg_rank_var <- input_var_rank(neg_rot_dt)
+pos_rank_var <- input_var_rank(pos_rot_dt)
+
+
+
+cd4_pc_plot <- ggplot(cd4_rank_var[1:6], aes(x=input_var, y=value)) +
   geom_bar(stat="identity") +
   facet_grid(. ~ PC, scales="free") +
   geom_hline(aes(yintercept=0)) +
@@ -363,20 +379,21 @@ cd4_pc_plot <- ggplot(cd4_pc_dt[1:6,], aes(x=V1, y=value)) +
        x="Input Variable",
        y="Variance")
 
+cd4_pc_plot
 
-cd8_pc_plot <- ggplot(cd8_pc_dt[1:6,], aes(x=V1, y=value)) +
+
+cd8_pc_plot <- ggplot(cd8_rank_var[1:6], aes(x=input_var, y=value)) +
   geom_bar(stat="identity") +
   facet_grid(. ~ PC, scales="free") +
   geom_hline(aes(yintercept=0)) +
   theme_bw(base_size=16) +
   theme(axis.text.x = element_text(angle=90, hjust=1),
-        plot.title = element_text(hjust=0.5)) + 
+        plot.title = element_text(hjust=0.5)) +
   labs(title="CD8 CD19+ PCA - Top 3 Input Variables in Each PC",
        x="Input Variable",
        y="Variance")
 
-
-
+cd8_pc_plot
 
 
 ```
