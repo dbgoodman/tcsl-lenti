@@ -19,6 +19,7 @@ library(gridExtra)
 library(spatstat)
 library(ggdendro)
 library(cowplot)
+library(tidyverse)
 use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 
 data_dir <- here::here('..','data')
@@ -156,11 +157,11 @@ Scaling this to 200 events per well and checking CAR/condition separation.
 
 ```{r, eval=redo_umap_clustering}
 chosen_dist=0.005
-chosen_n_neighbor=15
+chosen_n_neighbor=30 # default is 15
 
 umap_dt <- diff_dt[!is.na(event_id), 
   .SD[event_id %in% sample(unique(event_id), 
-    min(200, length(unique(event_id))))],
+    min(400, length(unique(event_id))))], #modify minimum parameter for points per well
   by=c('well', 'plate', 'day')]
 
 #grab channel map from cd4 data (cd4/8 are the same)
@@ -295,6 +296,10 @@ ggplot() +
   facet_wrap(~cluster) +
   theme_bw()
 ```
+###UMAP data exploration (NAP)
+```{r}
+umap_fcs_dt %>% head()
+```
 
 ```{r, fig.width=30, fig.height=20}
 cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
@@ -389,13 +394,125 @@ dendro_col <- axis_canvas(var_heatmap, axis = "x") +
 plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
             dendro_col, grid::unit(0.2, "null"), position = "top")
 ggdraw(plot_dendroheat)
+```
+
+####cd19+ dendrogram
+```{r}
+param_cluster_cd19_pct_dt <- umap_var_melt_dt[
+  !is.na(cluster) & variable %in% cluster_pct_vars,
+  list(
+    clust_mean = mean(value_scaled),
+    clust_sd = sd(value_scaled)),
+      by=c('variable','cluster', 'cd19')]
+
+param_cluster_cd19_pos_pct_dt <- param_cluster_cd19_pct_dt %>% filter(cd19 == TRUE)
+param_cluster_cd19_neg_pct_dt <- param_cluster_cd19_pct_dt %>% filter(cd19 == FALSE)
+
+# Make dendrogram
+cluster_mean_cd19_cast <- dcast(
+  param_cluster_cd19_pos_pct_dt, 
+  variable ~ cluster, 
+  value.var='clust_mean')
+
+cluster_dendro_cd19_m <- as.matrix(cluster_mean_cd19_cast[, -c(1)])
+rownames(cluster_dendro_cd19_m) <- unlist(cluster_mean_cd19_cast[,1])
+dendro_cd19_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_cd19_m))))
+dendro_cd19_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_cd19_m)))
+
+# Create dendrogram plot
+dendro_cd19_vars_plot <- ggdendrogram(data = dendro_cd19_vars, rotate = TRUE) + 
+  theme(axis.text.y = element_text(size = 6))
+dendro_cd19_clusters_plot <- ggdendrogram(data = dendro_cd19_clusters, rotate = TRUE) + 
+  theme(axis.text.y = element_text(size = 6))
+
+# column order
+cluster_order_cd19 <- order.dendrogram(dendro_cd19_clusters)
+cluster_names_cd19 <- colnames(cluster_dendro_cd19_m[, cluster_order_cd19])
+param_cluster_cd19_pos_pct_dt <- as.data.table(param_cluster_cd19_pos_pct_dt)
+param_cluster_cd19_pos_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
+
+
+# row order
+var_order_cd19 <- order.dendrogram(dendro_cd19_vars)
+var_names_cd19 <- row.names(cluster_dendro_cd19_m[var_order_cd19, ])
+param_cluster_cd19_pos_pct_dt$variable <- factor(
+    param_cluster_cd19_pos_pct_dt$variable,
+    levels = var_names_cd19)
+
+# heatmap
+var_heatmap_cd19 <- ggplot(param_cluster_cd19_pos_pct_dt) + 
+    geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
+    scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
+    theme_minimal()
+
+# col dendro
+dendro_data_col_cd19 <- dendro_data(dendro_cd19_clusters, type = "rectangle")
+dendro_col_cd19 <- axis_canvas(var_heatmap_cd19, axis = "x") + 
+    geom_segment(data = segment(dendro_data_col_cd19), 
+        aes(x = x, y = y, xend = xend, yend = yend))
+plot_dendroheat_cd19 <- insert_xaxis_grob(var_heatmap_cd19, 
+            dendro_col_cd19, grid::unit(0.2, "null"), position = "top")
+ggdraw(plot_dendroheat_cd19)
+
 
 ```
+
+####cd19- dendrogram
+```{r}
+# Make dendrogram
+cluster_mean_cd19n_cast <- dcast(
+  param_cluster_cd19_neg_pct_dt,
+  variable ~ cluster,
+  value.var='clust_mean')
+
+cluster_dendro_cd19n_m <- as.matrix(cluster_mean_cd19n_cast[, -c(1)])
+rownames(cluster_dendro_cd19n_m) <- unlist(cluster_mean_cd19n_cast[,1])
+dendro_cd19n_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_cd19n_m))))
+dendro_cd19n_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_cd19n_m)))
+
+# Create dendrogram plot
+dendro_cd19n_vars_plot <- ggdendrogram(data = dendro_cd19n_vars, rotate = TRUE) +
+  theme(axis.text.y = element_text(size = 6))
+dendro_cd19n_clusters_plot <- ggdendrogram(data = dendro_cd19n_clusters, rotate = TRUE) +
+  theme(axis.text.y = element_text(size = 6))
+
+# column order
+cluster_order_cd19n <- order.dendrogram(dendro_cd19n_clusters)
+cluster_names_cd19n <- colnames(cluster_dendro_cd19n_m[, cluster_order_cd19n])
+param_cluster_cd19_neg_pct_dt <- as.data.table(param_cluster_cd19_neg_pct_dt)
+param_cluster_cd19_neg_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
+
+
+# row order
+var_order_cd19n <- order.dendrogram(dendro_cd19n_vars)
+var_names_cd19n <- row.names(cluster_dendro_cd19n_m[var_order_cd19n, ])
+param_cluster_cd19_neg_pct_dt$variable <- factor(
+    param_cluster_cd19_neg_pct_dt$variable,
+    levels = var_names_cd19n)
+
+# heatmap
+var_heatmap_cd19n <- ggplot(param_cluster_cd19_neg_pct_dt) +
+    geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
+    scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
+    theme_minimal()
+
+# col dendro
+dendro_data_col_cd19n <- dendro_data(dendro_cd19n_clusters, type = "rectangle")
+dendro_col_cd19n <- axis_canvas(var_heatmap_cd19n, axis = "x") +
+    geom_segment(data = segment(dendro_data_col_cd19n),
+        aes(x = x, y = y, xend = xend, yend = yend))
+plot_dendroheat_cd19n <- insert_xaxis_grob(var_heatmap_cd19n,
+            dendro_col_cd19n, grid::unit(0.2, "null"), position = "top")
+ggdraw(plot_dendroheat_cd19n)
+
+```
+
+
 
 ### Percent of cells in day, by cluster
 
 ```{r, echo=F, fig.width=15, fig.height=8}
-day_cluster_pct_dt <- umap_fcs_dt[,
+day_cluster_pct_dt <- map_day_0(umap_fcs_dt)[,
   data.table(table(day,cluster, t_type, k562))][,
     list(day, pct=N/sum(N)), by=c('k562','cluster','t_type')]
 
@@ -410,7 +527,7 @@ ggplot(day_cluster_pct_dt[k562=='cd19+'], aes(
   geom_text(aes(label=round(pct*100)), size=3, color='white') +
   facet_grid(k562+t_type~., scales='free') +
   scale_fill_viridis_b(direction=1, limits=c(0, 1)) +
-  labs(title='Percent of cells in each day by cluster',  y='Day', 
+  labs(title='Percent of cells in each cluster by day',  y='Day', 
        subtitle='(cols sum to 100%)') +
   theme_minimal()
 ```
@@ -435,19 +552,22 @@ ggplot(day_cluster_total_pct_dt[k562=='cd19+'], aes(
   labs(title='Percent of cells in each day by cluster', y='Day',
     subtitle='(rows sum to 100%)') +
   theme_minimal()
+
+day_cluster_pct_dt %>% head()
+day_cluster_total_pct_dt %>% head()
+
 ```
 
 ### CAR differences per cluster
-
+#### summed across cols
 ```{r, echo=F, fig.width=15, fig.height=8}
 car_cluster_day_indiv_k562_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(car,cluster,day,k562,t_type))][,
+  data.table(table(car,cluster,k562,t_type))][,
     list(car, pct=N/sum(N)), by=c('cluster','k562','t_type')][,
       pct_delta := scale(pct), by=c('cluster','k562','t_type')]
 
 car_cluster_day_indiv_k562_pct_dt[,
   cluster := factor(cluster, levels = cluster_names)]
-
 
 min_col <- brewer.pal(name='BrBG', n=11)[2]
 
@@ -459,7 +579,29 @@ ggplot(car_cluster_day_indiv_k562_pct_dt[k562=='cd19+']) +
       direction=1,
       limits=c(-2.8, 2.8), 
       na.value=min_col) +
-    labs(title='CAR enrichment\nper cluster', y='Day',
+    labs(title='CAR enrichment\nper cluster', y='CAR',
+      subtitle='CAR enrichment in cluster\n(z-score)') +
+    theme_minimal()
+```
+#### summed across rows
+```{r, echo=F, fig.width=15, fig.height=8}
+car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
+  data.table(table(car,cluster,k562,t_type))][,
+    list(cluster, pct=N/sum(N)), by=c('car','k562','t_type')][,
+      pct_delta := scale(pct), by=c('car','k562','t_type')]
+
+car_cluster_day_indiv_k562_total_pct_dt[,
+cluster := factor(cluster, levels = cluster_names)]
+
+ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) + 
+    geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
+    facet_grid(k562+t_type~., scales='free') +
+    scale_fill_distiller('',
+      palette='BrBG', 
+      direction=1,
+      #limits=c(-4, 4), 
+      na.value=min_col) +
+    labs(title='CAR enrichment\nper cluster', y='CAR',
       subtitle='CAR enrichment in cluster\n(z-score)') +
     theme_minimal()
 ```

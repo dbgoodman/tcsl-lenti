@@ -353,6 +353,12 @@ ggplotly(ggplot(dcast(unique(read.counts[assay != 'baseline' & k.type == 'pos' &
 ggplotly(ggplot(dcast(unique(read.counts[assay != 'baseline' & k.type == 'pos' & t.type == 'CD4',
   .(CAR.align, sort.group, k.type, t.type, batch, assay, donor, CAR.score.norm)]),CAR.align ~ sort.group, value.var='CAR.score.norm')) + geom_point(aes(x=prolif1_d2_24d_CTV3_CD4_pos, y=prolif2_d1_24d_CTV3_CD4_pos)))
 
+# dbg april 2020, testing for new replicate comparison plots
+ggplot(dcast(unique(read.counts[assay != 'baseline' & k.type == 'pos',
+                                .(CAR.align, sort.group, k.type, t.type, batch, assay, donor, CAR.score.norm)])[,
+                                                                                                                .(CAR.align, sort.group, CAR.score.norm, CAR.score.rank = frank(CAR.score.norm)),
+                                                                                                                by = .(k.type, t.type, batch, assay, donor)],CAR.align + t.type + assay + donor ~ batch+k.type, value.var='CAR.score.norm')) + geom_point(aes(x=prolif2_pos, y=prolif1_pos)) + facet_grid(assay+donor~t.type)
+
 ```
 
 # Measurements based on relative abundance
