@@ -100,8 +100,8 @@ grid.arrange(a, b, c, d, e, ncol=2)
 
 # ggplotly of general PCA, colored by day
 
-p <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2, text=paste("Costim:", car, "<br>Day:", day, "<br>K562:", k562))) +
-  geom_point(aes(color=as.factor(day), shape=k562, size=1)) +
+p <- ggplot(pos_cbind_dt, aes(x=PC1, y=PC2, text=paste("Costim:", car, "<br>Day:", day, "<br>K562:", k562))) +
+  geom_point(aes(color=as.factor(day), shape=t_type, size=1)) +
   labs(title='general PCA')
 
 ggplotly(p, tooltip=c("text"))
