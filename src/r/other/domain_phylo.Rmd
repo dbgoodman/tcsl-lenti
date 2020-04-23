@@ -83,9 +83,15 @@ motif_table <- domain_annot[domain_names,
     source != 'ens_protvar'][,
       .N, by='orig_name']
 
+#original motif groupings
+# motif_groupings <- c(
+#   'MAPK','PP2A','ITIM','ITSM','PDZ','PTB',
+#   'SH2_GRB2','SH2_SRC','SH2_STAT5','SH3',
+#   'TRAF2','TRAF6','PKB')
+
+# reduced set
 motif_groupings <- c(
-  'MAPK','PP2A','ITIM','ITSM','PDZ','PTB',
-  'SH2_GRB2','SH2_SRC','SH2_STAT5','SH3',
+  'ITIM','ITSM','SH2_GRB2','SH2_SRC','SH3',
   'TRAF2','TRAF6','PKB')
 
 motif_annot_subset <- domain_annot[domain_names,
@@ -115,15 +121,18 @@ motif_heatmap <- ggplot(
     x=factor(motif_group, labels=gsub('_',', ',unique(motif_group))),
     y=factor(label, levels=d$label, labels=d$tip.label.clean), 
     fill=predicted), color='gray80') +
-  scale_fill_manual(na.value = 'white',
-    values=c(curated='cornsilk4',predicted='cornsilk2')) +
+  scale_fill_manual('', na.value = 'white',
+    values=c(curated='cornsilk4',predicted='cornsilk2'),
+    labels=c(curated='Curated', predicted='Predicted')) +
   theme_bw() +
-  theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+  theme(
+    axis.text.x=element_text(angle = -90, hjust = 0), 
+    axis.ticks.y = element_blank()) +
   labs(y='Domain Sequence Phylogeny', x='Presence of Signaling Motif')
 
 ```
 
-```{r, fig.height=8, fig.width=6}
+```{r, fig.height=8, fig.width=4}
 
 library(ggdendro)
 library(cowplot)
@@ -142,6 +151,12 @@ dendro_row <- axis_canvas(motif_heatmap, axis = "y", coord_flip=T) +
         aes(x = x, y = -y, xend = xend, yend = -yend)) + 
     coord_flip()
 plot_motifheat <- insert_yaxis_grob(motif_heatmap, 
-            dendro_row, grid::unit(0.2, "null"), position = "left")
-ggdraw(plot_motifheat)
+            dendro_row, grid::unit(0.3, "null"), position = "left")
+grob_motif_heat <- ggdraw(plot_motifheat)
+grob_motif_heat
+
+ggsave(here::here('..','figs','domain_phylo_motif.pdf'), 
+  grob_motif_heat, height=8, width=4, useDingbats=FALSE)
+
+
 ```
