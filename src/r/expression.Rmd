@@ -172,7 +172,9 @@ grid.text( "CSA",
 )
 
 #replot with euler
+final_min2 <- as.data.frame(final_min2)
 
+plot(euler(final_min2, shape = "ellipse"), quantities = TRUE)
 
 ```
 
