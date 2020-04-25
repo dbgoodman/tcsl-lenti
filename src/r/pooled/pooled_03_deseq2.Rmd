@@ -298,6 +298,10 @@ save(list=c('all.deseq.results.dt'),
 if (!rerun_deseq) load(
   file=file.path(data.output.dir, 'pooled_deseq2_data.Rdata'))
 
+#add back CAR scores
+cols_to_add <- c('CAR.score','sort.group','donor','batch')
+cols_to_join <- c('group', 'CAR.align', 'assay', 'k.type', 't.type')
+
 
 all.deseq.results.dt[, padj.disp := -log10(padj)]
 all.deseq.results.dt[, lfc.disp := log2FoldChange]
@@ -394,7 +398,29 @@ make_pos_neg <- function(data.dt) {
 }
 ```
 
-# Bin vs baseline measurements
+# Replicates comparisons
+
+Comparisons on x/y, all combos
+```{r}
+
+x_group <- 'prolif2_d1_3d_CTV1_CD4_neg'
+y_group <- 'prolif2_d1_3d_CTV1_CD4_pos'
+
+cast_comparison <- function(
+    comp.df, x_group, y_group, col='CAR.score', xycols=c('x','y')) {
+  cast_groups <- dcast(
+    unique(comp.df[sort.group %in% c(x_group, y_group), 
+        list(CAR.align, sort.group, CAR.score)]), 
+    CAR.align ~ sort.group, value.var = col)[, 
+      comparison := paste(x_group, y_group, sep=' vs ')]
+   names(cast_groups)[c(2,3)] <- xycols
+}
+
+```
+
+
+
+## Bin vs baseline measurements
 
 ```{r, fig.height=8, fig.width=10}
 ggplotly(make_volcanoes(all.deseq.results.dt[
@@ -520,7 +546,7 @@ cast_4v8[CAR.type == 'other' &
     (2^(-padj.disp_CD8) < 0.05 & log2FoldChange_CD8 > 0)), 
   CAR.type.size := 'other_sig']
 
-prolif_4v8 <- ggplot(cast_4v8, 
+prolif_4v8 <- ggsaplot(cast_4v8, 
   aes(y=log2FoldChange_CD8, x=log2FoldChange_CD4,
       color=CAR.type,
       label=CAR.align,
