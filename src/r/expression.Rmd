@@ -8,6 +8,8 @@ output: html_document
 # install.packages("tidyverse")
 # install.packages("venneuler")
 # install.packages("grid")
+# install.packages("eulerr")
+
 library(data.table)
 library(ggplot2)
 library(grid)
@@ -19,6 +21,7 @@ library(UpSetR)
 library(tidyverse)
 library(venneuler)
 library(tidyr)
+
 #paste into terminal tab until Dan fixes this
 #s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
 
@@ -93,8 +96,18 @@ dim(final_min)
 #remove the column that includes the marker of 1 from the original binary data
 final_min$count <- NULL
 
+#removes the words _cell from each data point so granulocyte_cell becomes granulocyte and make the T_cell look more natural 
+final_min$Expression <- gsub("_cell", "", final_min$Expression)
+final_min$Expression <- gsub("T", "T cell", final_min$Expression)
+final_min$Expression <- gsub("B", "B cell", final_min$Expression)
+final_min$Expression <- gsub("NK", "NK cell", final_min$Expression)
+final_min$Expression <- gsub("NK cellT cell", "NKT", final_min$Expression)
+
 #plot the venn diagram
 v_min <- venneuler(data.frame(final_min))
+
+#changes the names in an easier way. Be careful to run this though because it is not in order of the spreadsheet. 
+v_min$labels <- c("T cell", "B cell", "NK", "Granulocyte", "DC", "Macrophage", "NKT", "Microglia")
 
 par(cex = 0.7)
 
@@ -111,6 +124,57 @@ grid.text( "CSA",
 
 ```
 
+```{r}
+#remove cell types from data
+library(eulerr)
+
+rawSets_min2 <- fread(paste0('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/fig1_expression_binary_min2.csv'), header = TRUE, sep = ",", stringsAsFactors = FALSE)
+
+rawSets_min2[is.na(rawSets_min2)] <- NA
+
+#turning the spreadsheet into a vertical spreadsheet with only one column.
+vennSet_min2 <- pivot_longer(rawSets_min2, cols = ends_with("cell"), names_to = "Expression", names_repair = "check_unique", values_to = "count", values_drop_na = TRUE)
+
+vennSet_min2
+
+#get rid of NA rows
+delete.na <- function(DF, n=0) {
+  DF[rowSums(is.na(DF)) <= n,]}
+
+final_min2 <- delete.na(vennSet_min2)
+
+final_min2
+dim(final_min2)
+
+#remove the column that includes the marker of 1 from the original binary data
+final_min2$count <- NULL
+
+#removes the words _cell from each data point so granulocyte_cell becomes granulocyte and make the T_cell look more natural 
+final_min2$Expression <- gsub("_cell", "", final_min2$Expression)
+final_min2$Expression <- gsub("T", "T cell", final_min2$Expression)
+final_min2$Expression <- gsub("B", "B cell", final_min2$Expression)
+final_min2$Expression <- gsub("NK", "NK cell", final_min2$Expression)
+final_min2$Expression <- gsub("NK cellT cell", "NKT", final_min2$Expression)
+
+#plot the venn diagram
+v_min2 <- venneuler(data.frame(final_min2))
+
+par(cex = 0.7)
+
+plot(v_min2, main = "Costim Expression by Cell Type", cex.main = 1.5)
+grid.text( "CSA",
+  x = 0.52,
+  y = 0.15,
+  gp = gpar(
+    fontsize = 1,
+    fontface = 1
+  )
+)
+
+#replot with euler
+
+
+```
 
 ```{r}
 
