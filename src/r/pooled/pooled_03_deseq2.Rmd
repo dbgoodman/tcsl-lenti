@@ -18,6 +18,7 @@ library(DESeq2)
 library(rnaseqGene)
 library(plotly)
 library(Rtsne)
+library(scales)
 
 rm(list = ls())
 
@@ -407,14 +408,136 @@ x_group <- 'prolif2_d1_3d_CTV1_CD4_neg'
 y_group <- 'prolif2_d1_3d_CTV1_CD4_pos'
 
 cast_comparison <- function(
-    comp.df, x_group, y_group, col='CAR.score', xycols=c('x','y')) {
+    comp.df, x_group, y_group, col='CAR.score', xycols=c('x','y'),
+    rescale= 'combined') {
+  
+  message(paste(x_group, y_group, sep=', '))
   cast_groups <- dcast(
     unique(comp.df[sort.group %in% c(x_group, y_group), 
         list(CAR.align, sort.group, CAR.score)]), 
     CAR.align ~ sort.group, value.var = col)[, 
       comparison := paste(x_group, y_group, sep=' vs ')]
-   names(cast_groups)[c(2,3)] <- xycols
+  names(cast_groups)[c(2,3)] <- xycols
+  
+  stopifnot(rescale %in% c('combined','separate'))
+  
+  # rescle == combined:
+  # rescale both x and y to (0,1) on same scale
+  xy_scalemin = cast_groups[, min(c(x,y), na.rm=T)]
+  xy_scalemax = cast_groups[, max(c(x,y), na.rm=T)]
+  tryCatch({
+    cast_groups[, x_scaled_comb := rescale(x, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
+    cast_groups[, y_scaled_comb := rescale(y, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
+  }, error = function(e) {
+    message(e)
+    cast_groups[, x_scaled := NaN]
+    cast_groups[, y_scaled := NaN]}
+  )
+    
+  # rescle == separate:
+  # rescale x and y to (0,1) on individual scales
+  tryCatch({
+    cast_groups[, x_scaled_sep := rescale(x)]
+    cast_groups[, y_scaled_sep := rescale(y)]
+  }, error = function(e) {
+    message(e)
+    cast_groups[, x_scaled := NaN]
+    cast_groups[, y_scaled := NaN]}
+  )
 }
+
+# remove prolif1.d2.ctv3 for now - CD4 has only 1 bin, D, 
+# and KLRG1 is on top for CD19+ ...need to check this more
+
+pos_neg_comparisons <- read.counts[grepl('CTV', assay), {
+  if (length(unique(sort.group)) == 2)
+    cast_comparison(
+      .SD,
+      unique(sort.group[k.type == 'neg']),
+      unique(sort.group[k.type == 'pos']))
+  },
+  by=c('donor','assay','batch','t.type')][
+    !(donor == 'd2' & batch == 'prolif1' & assay == 'CTV3')]
+
+ggplot(pos_neg_comparisons[, prolif_donor := interaction(batch, donor)], 
+       aes(x=x_scaled_comb, y=y_scaled_comb, label=CAR.align)) + 
+    geom_point() + 
+    facet_grid(prolif_donor+t.type~assay) + 
+    geom_text_repel(data=pos_neg_comparisons[, 
+                                             prolif_donor := interaction(batch, donor)][
+                                                 CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40')]) +
+    labs(x='CD19- Proliferation (scaled for replicate)', 
+         y='CD19+ Proliferation (scaled for replicate)')
+
+ggplot(pos_neg_comparisons[, prolif_donor := interaction(batch, donor)], 
+       aes(x=x_scaled_comb/y_scaled_comb, y=y_scaled_sep, label=CAR.align)) + 
+    geom_point() + 
+    facet_grid(prolif_donor+t.type~assay) + 
+    geom_text_repel(data=pos_neg_comparisons[, 
+                                             prolif_donor := interaction(batch, donor)][
+                                                 CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40')]) +
+    labs(x='CD19+ Proliferation (scaled for replicate)', 
+         y='CD19- : CD19+ Proliferation Ratio')
+
+pos_neg_comparisons_melt <- melt(
+  pos_neg_comparisons[, 
+    xy_ratio := x_scaled_comb/y_scaled_comb], measure.vars= grep(
+  '^[xy]', names(pos_neg_comparisons), perl=T, value=T)
+  )[, 
+    `:=`(var_mean= mean(value, na.rm=T), var_sd= sd(value, na.rm=T)), 
+    by=c('t.type','assay','CAR.align','variable')]
+
+cast_left <- paste(names(pos_neg_comparisons_melt)[1:6], collapse = ' + ')
+cast_right <- 'variable'
+cast_formula <- paste(cast_left, cast_right, sep= ' ~ ')
+
+pos_neg_assay_avg <- dcast(
+  pos_neg_comparisons_melt, cast_formula, value.var='var_mean')
+
+pos_neg_assay_plot <- unique(
+  pos_neg_assay_avg[, list(t.type, assay, xy_ratio, y_scaled_sep, CAR.align)])
+pos_neg_assay_plot[, label.few := '']
+pos_neg_assay_plot[
+  CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40'),
+  label.few := CAR.align]
+
+
+ggplot(pos_neg_assay_plot, 
+    aes(x=xy_ratio, y=y_scaled_sep, label=label.few)) + 
+  geom_point() + 
+  facet_wrap(t.type ~ assay) + 
+  geom_text_repel() +
+  labs(
+    title='Average Prolifertation and -/+ ratio across replicates',
+    y='CD19+ Proliferation (scaled for replicate)', 
+    x='CD19- : CD19+ Proliferation Ratio')
+
+ggplotly(ggplot(pos_neg_assay_plot, 
+     aes(x=xy_ratio, y=y_scaled_sep, label=CAR.align)) + 
+  geom_point() + 
+  facet_wrap(t.type ~ assay) + 
+  labs(
+      title='Average Prolifertation and -/+ ratio across replicates (interactive)',
+      y='CD19+ Proliferation (scaled for replicate)', 
+      x='CD19- : CD19+ Proliferation Ratio'))
+  
+ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot, 
+       aes(x=xy_ratio, y=y_scaled_sep, label=label.few)) + 
+    geom_point() + 
+    facet_grid(t.type ~ assay) + 
+    scale_x_continuous(labels=percent) +
+    geom_text_repel(size=2.5) +
+    geom_vline(xintercept = -Inf) + geom_hline(yintercept = -Inf) +
+    theme_minimal() +
+    labs(
+        title='Average Prolifertation and -/+ ratio across replicates',
+        y='CD19+ Proliferation (Scaled)', 
+        x='Relative Nonspecific Proliferation')
+
+ggplot_pos_neg_assay
+
+ggsave(here::here('..','figs','pooled','relative_prolif.pdf'), 
+       ggplot_pos_neg_assay, height=4, width=7, useDingbats=FALSE)
 
 ```
 
