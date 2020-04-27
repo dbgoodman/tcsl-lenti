@@ -46,20 +46,20 @@ markers_list <- c('cd62l_t', 'cd27_t', 'ccr7_t', 'cd45ro_t', 'cd45ra_t', 'cd95_5
 # making new table with means & sd for each sample (across donors & replicates. no untrans.) for each variable (except for zombie & cd)
 diff_means_dt <- diff_dt[!is.na(day) & !is.na(donor) & !is.na(value) & variable %in% markers_list & car!='untrans', 
   list(m= mean(value, na.rm=T), sd= sd(value, na.rm=T), n= .N), 
-  by=c('day','donor','car','k562','t_type','variable')]
+  by=c('day','car','k562','t_type','variable')]
 
 exh_means_dt <- exh_dt[!is.na(day) & !is.na(donor) & !is.na(value) & variable %in% markers_list & car!='untrans', 
   list(m= mean(value, na.rm=T), sd= sd(value, na.rm=T), n= .N), 
-  by=c('day','donor','car','k562','t_type','variable')]
+  by=c('day','car','k562','t_type','variable')]
 
 # dcast = opposite of melt. we are averaging across the two donors. using only mean and not including sdev.
 diff_cast_dt <- dcast(diff_means_dt[!is.na(m) & n > 20], 
-                      day + donor + car + k562 + t_type ~ variable,
+                      day + car + k562 + t_type ~ variable,
                       value.var=c('m'))
 setnames(diff_cast_dt, "myc_t", "diff_myc_t")
 
 exh_cast_dt <- dcast(exh_means_dt[!is.na(m) & n > 20],
-                     day + donor + car + k562 + t_type ~ variable, 
+                     day + car + k562 + t_type ~ variable, 
                      value.var=c('m'))
 setnames(exh_cast_dt, "myc_t", "exh_myc_t")
 
@@ -69,7 +69,7 @@ diff_cast_dt <- map_day_0(diff_cast_dt)
 exh_cast_dt <- map_day_0(exh_cast_dt)
 
 exp_cast_dt <- merge(diff_cast_dt, exh_cast_dt, 
-                     by=c("donor","day","car","k562","t_type"))
+                     by=c("day","car","k562","t_type"))
 
 
 # getting pca for all, cd19- only, cd19+ only, cd4 cd19+ only, cd8 cd19+ only with sd
@@ -114,10 +114,6 @@ e <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) +
 
 grid.arrange(a, b, c, d, e, ncol=2)
 
-ggplot(pos_cbind_dt, aes(x=PC1, y=PC2)) +
-  geom_point(aes(color=as.factor(day), shape=as.factor(donor), size=1)) +
-  facet_grid(t_type ~ car)
-
 # ggplotly of general PCA, colored by day
 
 p <- ggplot(pos_cbind_dt, aes(x=PC1, y=PC2, text=paste("Costim:", car, "<br>Day:", day, "<br>K562:", k562))) +
@@ -147,7 +143,7 @@ input_variance_col <- function(df) {
 }
 
 
-diff_rot_dt <- input_variance_col(diff_pca)
+tot_rot_dt <- input_variance_col(tot_pca)
 pos_rot_dt <- input_variance_col(pos_pca)
 neg_rot_dt <- input_variance_col(neg_pca)
 cd4_rot_dt <- input_variance_col(cd4_pca)
@@ -213,15 +209,15 @@ arr_by_day <- function(df) {
 }
 
 
-diff_seg_dt <- arr_by_day(diff_cbind_dt)
+tot_seg_dt <- arr_by_day(tot_cbind_dt)
 cd4_seg_dt <- arr_by_day(cd4_cbind_dt)
 cd8_seg_dt <- arr_by_day(cd8_cbind_dt)
 pos_seg_dt <- arr_by_day(pos_cbind_dt)
 neg_seg_dt <- arr_by_day(neg_cbind_dt)
 
 
-diff_seg_dt[k562=='cd19+', lt := "solid"]
-diff_seg_dt[k562=='cd19-', lt := "dashed"]
+tot_seg_dt[k562=='cd19+', lt := "solid"]
+tot_seg_dt[k562=='cd19-', lt := "dashed"]
 
 
 ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
@@ -321,9 +317,9 @@ neg_arr
 
 
 
-diff_arr <- ggplot(diff_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(data=diff_cbind_dt[day==0 & k562=='cd19+'], aes(color=car, size=1, shape=t_type)) +
-  geom_segment(data=diff_seg_dt[k562=='cd19+'], 
+diff_arr <- ggplot(tot_cbind_dt, aes(x=PC1, y=PC2)) + 
+  geom_point(data=tot_cbind_dt[day==0 & k562=='cd19+'], aes(color=car, size=1, shape=t_type)) +
+  geom_segment(data=tot_seg_dt[k562=='cd19+'], 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
     scale_linetype_manual(values=c("dashed", "solid"))+
@@ -380,15 +376,20 @@ input_var_rank <- function(df) {
 }
 
 
-diff_rank_var <- input_var_rank(diff_rot_dt)
+tot_rank_var <- input_var_rank(tot_rot_dt)
 cd4_rank_var <- input_var_rank(cd4_rot_dt)
 cd8_rank_var <- input_var_rank(cd8_rot_dt)
 neg_rank_var <- input_var_rank(neg_rot_dt)
 pos_rank_var <- input_var_rank(pos_rot_dt)
 
+tot_rank_var
+cd4_rank_var
+cd8_rank_var
+neg_rank_var
+pos_rank_var
 
 
-cd4_pc_plot <- ggplot(cd4_rank_var[1:6], aes(x=input_var, y=value)) +
+cd4_pc_plot <- ggplot(cd4_rank_var[1:8], aes(x=input_var, y=value)) +
   geom_bar(stat="identity") +
   facet_grid(. ~ PC, scales="free") +
   geom_hline(aes(yintercept=0)) +
