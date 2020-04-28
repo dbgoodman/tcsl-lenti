@@ -249,6 +249,7 @@ cd8_arr <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) +
   geom_point(data=cd8_cbind_dt[day==0], aes(color=car, size=1)) +
   geom_segment(data=cd8_seg_dt, 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
+               size=2,
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
   scale_color_brewer(palette="Paired") +
   labs(title="CD8 CD19+ only PCA") +
@@ -267,6 +268,7 @@ cd4_arr <- ggplot(cd4_cbind_dt, aes(x=PC1, y=PC2)) +
   geom_point(data=cd4_cbind_dt[day==0], aes(color=car, size=1)) +
   geom_segment(data=cd4_seg_dt, 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
+               size=2,
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
   scale_color_brewer(palette="Paired") +
   labs(title="CD4 CD19+ only PCA") +
