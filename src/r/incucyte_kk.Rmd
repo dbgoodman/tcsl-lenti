@@ -172,10 +172,10 @@ plot_grid(cd4_banff, cd8_banff, ncol=1)
 bb28z_dt <- incucyte_dt[car %in% c('41BB','CD28','zeta') & k562 != 'none' & car!='none' & noise==F]
 names(bb28z_dt)[11] <- "ctrl_car"
 
-cross_75_dt <- incucyte_dt[noise==F][, list(
+cross_75_dt <- incucyte_dt[, list(
     t_75_left = Elapsed[which.min(abs(mean_value_norm-0.25))], 
     cross_75 = min(mean_value_norm)<0.75), 
-  by=c('car','k562','donor','measurement','day','t_type')][cross_75==T]
+  by=c('car','k562','donor','measurement','day','t_type','noise')][noise==F & cross_75==T]
 
 cross_50_dt <- incucyte_dt[noise==F][, list(
   t_50_left = Elapsed[which.min(abs(mean_value_norm-0.5))],
@@ -187,26 +187,79 @@ cross_75_dt[, day_f := factor(cross_75_dt$day, levels=c('0','8','15','22', '29')
 cross_50_dt[, day_f := factor(cross_50_dt$day, levels=c('0','8','15','22', '29'))]
 
 
-# plots showing vertical line where red (area/intensity/count) reaches 0.25 of starting
+# plots showing vertical line where red (area/intensity/count) reaches 0.75 of starting
+# separate cd4/cd8 plots
 
-ggplot(incucyte_dt[measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
+ggplot(incucyte_dt[t_type=='cd4' & measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
   geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
   geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
-  geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19'], aes(xintercept=t_75_left)) +
+  geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19' & t_type=='cd4'], aes(xintercept=t_75_left)) +
   facet_grid(car~day_f+donor)  +
-  geom_line(data=bb28z_dt[measurement=='redarea' & k562=='mkate_cd19'], 
+  geom_line(data=bb28z_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], 
             aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
             color='gray') +
-  geom_text(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
-  ggtitle("Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
-  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
-  theme(plot.title = element_text(size = 20)) + 
-  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_text(data=cross_75_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
+  ggtitle("CD4 - Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
+  theme_minimal(base_size=20) + 
+  geom_vline(xintercept=0) + 
+  geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
   labs(y='Change in Red Area (Normalized to Starting)',
        fill='Donor',
        color='Donor',
        linetype='Controls')
 
+
+ggplot(incucyte_dt[t_type=='cd8' & measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
+  geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
+  geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
+  geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19' & t_type=='cd8'], aes(xintercept=t_75_left)) +
+  facet_grid(car~day_f+donor)  +
+  geom_line(data=bb28z_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], 
+            aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
+            color='gray') +
+  geom_text(data=cross_75_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
+  ggtitle("CD8 - Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
+  theme_minimal(base_size=20) + 
+  geom_vline(xintercept=0) + 
+  geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+  labs(y='Change in Red Area (Normalized to Starting)',
+       fill='Donor',
+       color='Donor',
+       linetype='Controls')
+
+
+
+
+ggplot(cross_75_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=car, y=t_75_left, fill=car)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  facet_grid(donor~day_f) +
+  theme_minimal(base_size=20) + geom_hline(yintercept=-Inf) + geom_vline(xintercept=-Inf) + scale_y_continuous(expand=c(0,0)) +
+  scale_fill_brewer(palette='Reds') +
+  theme(plot.title = element_text(size=20)) +
+  theme(plot.title = element_text(hjust=0.5)) +
+  theme(panel.spacing=unit(2, "lines")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title='CD4 - Time When Red Area Reaches 75% of Starting',
+       x='CAR',
+       y='Hours When 75% Red Area Remains',
+       fill='CAR')
+
+
+ggplot(cross_75_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=car, y=t_75_left, fill=car)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  facet_grid(donor~day_f) +
+  theme_minimal(base_size=20) + geom_hline(yintercept=-Inf) + geom_vline(xintercept=-Inf) + scale_y_continuous(expand=c(0,0)) +
+  scale_fill_brewer(palette='Reds') +
+  theme(plot.title = element_text(size=20)) +
+  theme(plot.title = element_text(hjust=0.5)) +
+  theme(panel.spacing=unit(2, "lines")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title='CD8 - Time When Red Area Reaches 75% of Starting',
+       x='CAR',
+       y='Hours When 75% Red Area Remains',
+       fill='CAR')
 
 
 ```
