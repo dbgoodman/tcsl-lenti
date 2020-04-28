@@ -1,0 +1,213 @@
+---
+title: "Incucyte Plots - KK"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+
+data_dir <- here::here('..','data')
+load(file.path(data_dir, 'incucyte.Rdata'))
+incucyte_dt[, day_f := factor(day_f, levels=sort(as.numeric(levels(day_f))))]
+
+car_set <- c('41BB','CD28','BAFF-R','CD40','TACI','TNR8','KLRG1','zeta')
+chosen_measure <- 'redintensity'
+```
+
+## Killing, CD4 and CD8 separately
+
+```{r fig.width=16, fig.height=8}
+#4 and 8 separate
+ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & measurement == chosen_measure & car %in% car_set][, 
+    car := factor(car, levels=car_set)], 
+  aes(x=Elapsed, y=mean_value_norm, group=interaction(car, day_f,donor), fill=car)) + 
+  geom_line(aes(color=car)) + 
+  geom_ribbon(aes(ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error), alpha=0.3) +
+  facet_grid(t_type+donor~day_f) + 
+  ggtitle("Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 25)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
+  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to starting)',
+    limits=c(1e-2,1e1), trans=log10_trans()) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_brewer(palette='Set1') + 
+  scale_fill_brewer(palette='Set1') + 
+  theme(panel.spacing = unit(2, "lines"))
+
+
+ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement == chosen_measure & car %in% car_set][, 
+    car := factor(car, levels=car_set)], 
+  aes(x=Elapsed, y=mean_value_norm, group=interaction(car, day_f,donor), fill=car)) + 
+  geom_line(aes(color=car)) + 
+  geom_ribbon(aes(ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error), alpha=0.3) +
+  facet_grid(t_type+donor~day_f) + 
+  ggtitle("Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 25)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,70)) +
+  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to starting)',
+    limits=c(1e-2,1e1), trans=log10_trans()) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_brewer(palette='Set1') + 
+  scale_fill_brewer(palette='Set1') + 
+  theme(panel.spacing = unit(2, "lines"))
+
+```
+
+## Killing, normalized to no-car controls
+
+```{r fig.width=16, fig.height=8}
+
+ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & measurement == chosen_measure], 
+  aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=car)) + 
+  geom_line(aes(color=car)) + 
+  facet_grid(t_type+donor~day_f) + 
+  ggtitle("Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 25)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
+  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+    limits=c(1e-2,1e1), trans=log10_trans()) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_brewer(palette='Set1') + 
+  scale_fill_brewer(palette='Set1') + 
+  theme(panel.spacing = unit(2, "lines"))
+
+ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement == chosen_measure], 
+  aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=car)) + 
+  geom_line(aes(color=car)) + 
+  facet_grid(t_type+donor~day_f) + 
+  ggtitle("Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 25)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,70)) +
+  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+    limits=c(1e-2,1e1), trans=log10_trans()) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_brewer(palette='Set1') + 
+  scale_fill_brewer(palette='Set1') + 
+  theme(panel.spacing = unit(2, "lines"))
+```
+
+
+## Smoothed, not ribbon for banff 
+
+```{r}
+
+# 
+# incucyte_dt[, value_norm := value/value[Elapsed==0], by=c('well','day','donor','car','measurement','k562','image')]
+# incucyte_dt[, mean_value_norm := mean(value_norm), by=c('day','donor','car','Elapsed','measurement','k562')]
+# incucyte_dt[, std_dev := sd(value_norm), by=c('day','donor','car','Elapsed','measurement','k562')]
+# incucyte_dt[, std_error := std_dev/sqrt(.N), by=c('day','donor','car','Elapsed','measurement','k562')]
+
+car_set <- c('41BB','CD28','BAFF-R','KLRG1','TACI', 'none')
+colors <- c(brewer.pal(9,'Blues')[c(6,8)], brewer.pal(9,'Greens')[c(5,7,9)], 'grey30')
+
+incucyte_dt_subset <- incucyte_dt[
+  k562=='mkate_cd19' & !noise & t_type == 'cd4' & 
+  measurement == chosen_measure & car %in% car_set 
+  & donor < 3 ][, 
+    car := factor(
+      car, 
+      levels=c('CD28', '41BB', 'BAFF-R', 'KLRG1', 'TACI', 'none'), 
+      labels=c('CD28', '41BB', 'Receptor 1', 'Receptor 3', 'Receptor 4', 'No T cells')
+    )]
+
+cd4_banff <- ggplot(incucyte_dt_subset, 
+       aes(x=Elapsed, y=mean_value_norm, group=interaction(car, day_f,donor), fill=car)) + 
+    geom_smooth(aes(color=car), method='loess', se=T) + 
+    facet_grid(t_type+donor~day_f) +
+    theme_minimal(base_size=18) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+    theme(plot.title = element_text(size = 25)) + 
+    scale_x_continuous(expand=c(0,0), limits=c(0,150), breaks=c(0, 40, 80, 120)) +
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to starting)',
+                       limits=c(1e-2,1e1), trans=log10_trans(), labels = scales::percent_format(accuracy = 1)) +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_color_manual(values=colors) + 
+    scale_fill_manual(values=colors) + 
+    theme(panel.spacing = unit(0.5, "lines"))
+
+incucyte_dt_subset <- incucyte_dt[
+  k562=='mkate_cd19' & !noise & t_type == 'cd8' & 
+  measurement == chosen_measure & car %in% car_set 
+  & donor < 3 ][, 
+    car := factor(
+      car, 
+      levels=c('CD28', '41BB', 'BAFF-R', 'KLRG1', 'TACI', 'none'), 
+      labels=c('CD28', '41BB', 'Receptor 1', 'Receptor 3', 'Receptor 4', 'No T cells')
+    )]
+
+cd8_banff <- ggplot(incucyte_dt_subset, 
+       aes(x=Elapsed, y=mean_value_norm, group=interaction(car, day_f,donor), fill=car)) + 
+    geom_smooth(aes(color=car), method='loess', se=T) + 
+    facet_grid(t_type+donor~day_f) +
+    theme_minimal(base_size=18) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+    theme(plot.title = element_text(size = 25)) + 
+    scale_x_continuous(expand=c(0,0), limits=c(0,65), breaks=c(0, 15, 30, 45)) +
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to starting)',
+                       limits=c(1e-2,1e1), trans=log10_trans(), labels = scales::percent_format(accuracy = 1)) +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_color_manual(values=colors) + 
+    scale_fill_manual(values=colors) + 
+    theme(panel.spacing = unit(0.5, "lines"))
+
+library(cowplot)
+plot_grid(cd4_banff, cd8_banff, ncol=1)
+
+``` 
+
+
+## % killing plots
+
+```{r}
+
+bb28z_dt <- incucyte_dt[car %in% c('41BB','CD28','zeta') & k562 != 'none' & car!='none' & noise==F]
+names(bb28z_dt)[11] <- "ctrl_car"
+
+cross_75_dt <- incucyte_dt[noise==F][, list(
+    t_75_left = Elapsed[which.min(abs(mean_value_norm-0.25))], 
+    cross_75 = min(mean_value_norm)<0.75), 
+  by=c('car','k562','donor','measurement','day','t_type')][cross_75==T]
+
+cross_50_dt <- incucyte_dt[noise==F][, list(
+  t_50_left = Elapsed[which.min(abs(mean_value_norm-0.5))],
+  cross_50 = min(mean_value_norm)<0.5),
+  by=c('car','k562','donor','measurement','day','t_type')][cross_50==T]
+
+
+cross_75_dt[, day_f := factor(cross_75_dt$day, levels=c('0','8','15','22', '29'))]
+cross_50_dt[, day_f := factor(cross_50_dt$day, levels=c('0','8','15','22', '29'))]
+
+
+# plots showing vertical line where red (area/intensity/count) reaches 0.25 of starting
+
+ggplot(incucyte_dt[measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
+  geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
+  geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
+  geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19'], aes(xintercept=t_75_left)) +
+  facet_grid(car~day_f+donor)  +
+  geom_line(data=bb28z_dt[measurement=='redarea' & k562=='mkate_cd19'], 
+            aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
+            color='gray') +
+  geom_text(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
+  ggtitle("Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 20)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(y='Change in Red Area (Normalized to Starting)',
+       fill='Donor',
+       color='Donor',
+       linetype='Controls')
+
+
+
+```
+
