@@ -73,6 +73,26 @@ grid.text(
 
 
 ```{r}
+#this is the section I am trying to make barplots showing the cell type expression of costims
+
+rawSets_sum <- fread(paste0('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/fig1_expression_binary_min_sum.csv'), header = TRUE, sep = ",", stringsAsFactors = FALSE)
+rawSets_sum[is.na(rawSets_sum)] <- NA
+
+celltypecount <- count(rawSets_sum, vars=sum)
+
+
+ggplot(celltypecount) + 
+  geom_bar(aes(x=factor(vars), y=n), stat='identity', width=1) +
+  scale_fill_brewer('Number of Cell Types Each Costim is Expressed In', palette='YlOrRd') + 
+  theme_minimal() +
+  labs(x="Number of Cell Types", y='Number of Costims')
+
+
+```
+
+
+
+```{r}
 #remove cell types from data
 
 rawSets_min <- fread(paste0('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/fig1_expression_binary_min.csv'), header = TRUE, sep = ",", stringsAsFactors = FALSE)
