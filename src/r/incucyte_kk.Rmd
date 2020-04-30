@@ -12,6 +12,7 @@ library(ggplot2)
 library(data.table)
 library(scales)
 library(RColorBrewer)
+library(ggrepel)
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'incucyte.Rdata'))
@@ -169,22 +170,105 @@ plot_grid(cd4_banff, cd8_banff, ncol=1)
 
 ```{r}
 
-bb28z_dt <- incucyte_dt[car %in% c('41BB','CD28','zeta') & k562 != 'none' & car!='none' & noise==F]
-names(bb28z_dt)[11] <- "ctrl_car"
-
-cross_75_dt <- incucyte_dt[, list(
-    t_75_left = Elapsed[which.min(abs(mean_value_norm-0.25))], 
-    cross_75 = min(mean_value_norm)<0.75), 
-  by=c('car','k562','donor','measurement','day','t_type','noise')][noise==F & cross_75==T]
-
-cross_50_dt <- incucyte_dt[noise==F][, list(
-  t_50_left = Elapsed[which.min(abs(mean_value_norm-0.5))],
-  cross_50 = min(mean_value_norm)<0.5),
-  by=c('car','k562','donor','measurement','day','t_type')][cross_50==T]
+bb28z_dt <- incucyte_dt[car %in% c('41BB','CD28','zeta') & k562 != 'none' & noise==F]
+setnames(bb28z_dt, "car", "ctrl_car")
 
 
-cross_75_dt[, day_f := factor(cross_75_dt$day, levels=c('0','8','15','22', '29'))]
-cross_50_dt[, day_f := factor(cross_50_dt$day, levels=c('0','8','15','22', '29'))]
+
+# function to get elapsed time at which red measurement crosses threshold and 
+# get some plots out
+
+k562_thresh <- function(incucyte_dt, pct_rem){
+  
+  cross_dt <- incucyte_dt[, list(
+      t_cross = Elapsed[which.min(abs(mean_value_none-(pct_rem/100)))],
+      cross_thresh = min(mean_value_none)<(pct_rem/100)),
+    by=c('car','k562','donor','measurement','day','t_type','noise')][
+      noise==F & cross_thresh==T]
+  cross_dt[, day_f := factor(cross_dt$day, levels=c('0','8','15','22','29'))]
+  
+  cd4_thresh <- ggplot(incucyte_dt[t_type=='cd4' & measurement==chosen_measure &
+                                   noise==F & k562=='mkate_cd19' & car!='none']) +
+    geom_line(aes(x=Elapsed, y=mean_value_none, 
+                  group=interaction(well,day,donor), 
+                  color=as.factor(donor))) +
+    geom_ribbon(aes(x=Elapsed, 
+                    ymin=mean_value_none-std_err_value_none_log, 
+                    ymax=mean_value_none+std_err_value_none_log, 
+                    fill=as.factor(donor)), alpha=0.3) +
+    geom_vline(data=cross_dt[measurement==chosen_measure & k562=='mkate_cd19' & 
+                               t_type=='cd4' & car!='none'], 
+               aes(xintercept=t_cross)) +
+    facet_grid(car~day_f+donor)  +
+    geom_line(data=bb28z_dt[t_type=='cd4' & measurement==chosen_measure & 
+                            k562=='mkate_cd19'], 
+              aes(x=Elapsed, y=mean_value_none, 
+                  group=interaction(well,day,donor,ctrl_car), 
+                  linetype=ctrl_car), 
+              color='gray') +
+    geom_text(data=cross_dt[t_type=='cd4' & measurement==chosen_measure & 
+                              k562=='mkate_cd19' & car!='none'], 
+              aes(x=t_cross-8, y=1.5, label=t_cross)) +
+    scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+                       limits=c(1e-2,1e1), trans=log10_trans()) +
+    theme_minimal(base_size=20) + 
+    geom_vline(xintercept=0) + 
+    geom_hline(yintercept=0) +
+    theme(plot.title = element_text(size = 20, hjust = 0.5))+
+    labs(title=paste0("CD4 - Time When ", chosen_measure, " Reaches ", pct_rem, 
+                      "% of Starting"),
+         fill='Donor',
+         color='Donor',
+         linetype='Controls')
+  
+  cd8_thresh <- ggplot(incucyte_dt[t_type=='cd8' & measurement==chosen_measure &
+                                   noise==F & k562=='mkate_cd19' & car!='none']) +
+    geom_line(aes(x=Elapsed, y=mean_value_none, 
+                  group=interaction(well,day,donor), 
+                  color=as.factor(donor))) +
+    geom_ribbon(aes(x=Elapsed, 
+                    ymin=mean_value_none-std_err_value_none_log, 
+                    ymax=mean_value_none+std_err_value_none_log, 
+                    fill=as.factor(donor)), alpha=0.3) +
+    geom_vline(data=cross_dt[measurement==chosen_measure & k562=='mkate_cd19' & 
+                             t_type=='cd8' & car!='none'], 
+               aes(xintercept=t_cross)) +
+    facet_grid(car~day_f+donor)  +
+    geom_line(data=bb28z_dt[t_type=='cd8' & measurement==chosen_measure & 
+                            k562=='mkate_cd19'], 
+              aes(x=Elapsed, y=mean_value_none, 
+                  group=interaction(well,day,donor,ctrl_car), 
+                  linetype=ctrl_car), 
+              color='gray') +
+    geom_text(data=cross_dt[t_type=='cd8' & measurement==chosen_measure & 
+                            k562=='mkate_cd19' & car!='none'], 
+              aes(x=t_cross-8, y=1.5, label=t_cross)) +
+    scale_x_continuous(expand=c(0,0), limits=c(0,150)) + 
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+                       limits=c(1e-2,1e1), trans=log10_trans()) +
+    theme_minimal(base_size=20) + 
+    geom_vline(xintercept=0) + 
+    geom_hline(yintercept=0) +
+    theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+    labs(title=paste0("CD8 - Time When ", chosen_measure, " Reaches ", pct_rem, 
+                      "% of Starting"),
+         fill='Donor',
+         color='Donor',
+         linetype='Controls')
+  
+  new_list <- list(cross_dt, cd4_thresh, cd8_thresh)
+  return(new_list)
+}
+
+
+
+```
+
+
+
+```{r}
+
 
 
 # plots showing vertical line where red (area/intensity/count) reaches 0.75 of starting
