@@ -40,7 +40,7 @@ output.dir <- file.path(here::here('..','figs','pooled'))
 metadata.filename <- file.path(tcsl.dir, 
     dataset.name, paste0(dataset.name, '_layout.csv'))
 car.seq.filename <- file.path(tcsl.dir, dataset.name, 'fa/ref.csv')
-remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt')
+remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt','TIIM1')
 
 car.seq <- fread(car.seq.filename, header=F)
 names(car.seq) <- c('CAR.align','seq')
@@ -4222,7 +4222,7 @@ car_mean_cast <- dcast(
 
 car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
 rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
-dendro_vars <- as.dendrogram(hclust(d = dist(x = car_dendro_m)))
+dendro_vars <- rev(as.dendrogram(hclust(d = dist(x = car_dendro_m))))
 
 # Create dendrogram plot
 dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
@@ -4240,7 +4240,7 @@ var_heatmap <- ggplot(total_combined) +
   geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
                 fill = scale.LFC), colour = "black", size = .20) + 
   scale_fill_distiller('Z-score', 
-    palette='PiYG', limits=c(-3,3), oob=scales::squish) +
+    palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
   scale_x_discrete(expand=c(0,0)) +
   scale_y_discrete(labels= (
       function (breaks)
@@ -4250,6 +4250,8 @@ var_heatmap <- ggplot(total_combined) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1),
       axis.title.x = element_blank(),
       axis.title.y = element_blank())
+
+
 
 # col dendro
 dendro_data_col <- dendro_data(dendro_vars, type = "rectangle")
@@ -4269,5 +4271,6 @@ data.output.dir <- file.path(here::here(
   '..','..',
   's3-roybal-tcsl',
   'lenti_screen_compiled_data','data'))
-save(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
+save(list=ls(),
+  file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 ```

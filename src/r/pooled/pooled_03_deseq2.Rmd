@@ -237,7 +237,7 @@ run_deseq <- function(data.dt, ref_bin, test_bin,
 
 ## Run DESeq2 on all comparisons
 
-```{r, eval=run_deseq2}
+```{r, eval=rerun_deseq}
 test_ref_sets <- c(ref=list(), test=list())
 
 # A/B/AB vs C/D/CD
@@ -314,7 +314,7 @@ all.deseq.results.dt[padj.disp > 10, padj.disp := Inf]
 all.deseq.results.dt[abs(lfc.disp) > 5, lfc.disp := sign(lfc.disp) * Inf]
 
 # mask receptor names except for known ones
-control_domains <- c('41BB','CD28')
+control_domains <- c('4-1BB','CD28')
 chosen_domains <- c('BAFF-R','CD40','TACI','TNR8')
 neg_domain <- c('KLRG1')
 
@@ -334,10 +334,10 @@ make_volcanoes <- function(data.dt) {
   geom_point() +
   facet_grid(test_set + ref_set ~ t.type + assay + k.type) +
   scale_color_manual('',
-    labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+    labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
     values=c('grey50', RColorBrewer::brewer.pal(5, 'Paired')[c(2,4,5)])) +
   scale_size_manual('',
-    labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+    labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
     values=c(1,3,3,3)) +
   labs(x='Log2 FC', y='-log10(P-value)', title='Assay Volcano Plots')
 }
@@ -353,10 +353,10 @@ make_timeseries <- function(data.dt) {
     geom_line() +
     facet_grid(t.type ~ test_set + ref_set) +
     scale_color_manual('',
-      labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+      labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
       values=c('grey50', RColorBrewer::brewer.pal(5, 'Paired')[c(2,4,5)])) +
     scale_size_manual('',
-      labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+      labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
       values=c(0.5,1,1,1)) +
     labs(y='Log2 FC', x='Assay', title='Log fold change across assays')
 
@@ -374,10 +374,10 @@ make_cd4_cd8 <- function(data.dt) {
   geom_point() +
   facet_grid(test_set + ref_set ~  assay + k.type) +
   scale_color_manual('',
-    labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+    labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
     values=c('grey50', RColorBrewer::brewer.pal(5, 'Paired')[c(2,4,5)])) +
   scale_size_manual('',
-    labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+    labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
     values=c(1,3,3,3)) +
   labs(x='CD4', y='CD8', title='Log fold change, CD4 vs CD8')
 }
@@ -394,10 +394,10 @@ make_pos_neg <- function(data.dt) {
   geom_point() +
   facet_grid(test_set + ref_set ~ t.type + assay) +
   scale_color_manual('',
-    labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+    labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
     values=c('grey50', RColorBrewer::brewer.pal(5, 'Paired')[c(2,4,5)])) +
   scale_size_manual('',
-    labels=c('Other Receptors', 'CD28/41BB', 'New Receptors','Negative'),
+    labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
     values=c(1,3,3,3)) +
   labs(x='CD19-', y='CD19+', title='Log fold change, CD19+ vs CD19-')
 }
@@ -469,7 +469,7 @@ ggplot(pos_neg_comparisons[, prolif_donor := interaction(batch, donor)],
     facet_grid(prolif_donor+t.type~assay) + 
     geom_text_repel(data=pos_neg_comparisons[, 
       prolif_donor := interaction(batch, donor)][
-         CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40')]) +
+         CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')]) +
     labs(x='CD19- Proliferation (+/- scaled together, per replicate)', 
          y='CD19+ Proliferation (+/- scaled together, per replicate)')
 
@@ -479,7 +479,7 @@ ggplot(pos_neg_comparisons[, prolif_donor := interaction(batch, donor)],
     facet_grid(prolif_donor+t.type~assay) + 
     geom_text_repel(data=pos_neg_comparisons[, 
       prolif_donor := interaction(batch, donor)][
-         CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40')]) +
+         CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')]) +
     labs(x='CD19+ Proliferation (+ scaled alone, per replicate)', 
          y='CD19- : CD19+ Proliferation Ratio')
 
@@ -502,7 +502,7 @@ pos_neg_assay_plot <- unique(
   pos_neg_assay_avg[, list(t.type, assay, xy_ratio, y_scaled_sep, CAR.align)])
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
-  CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40'),
+  CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),
   label.few := CAR.align]
 
 
@@ -570,7 +570,7 @@ pos_neg_assay_plot <- unique(
   pos_neg_assay_avg[, list(t.type, xy_ratio, y_scaled_sep, CAR.align)])
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
-  CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40'),
+  CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),
   label.few := CAR.align]
 
 ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot, 
@@ -614,7 +614,7 @@ pos_neg_assay_plot <- unique(
   pos_neg_assay_avg[, list(t.type, x_scaled_comb, y_scaled_comb, CAR.align)])
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
-  CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40'),
+  CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),
   label.few := CAR.align]
 
 # simpler plot
@@ -677,7 +677,7 @@ pos_neg_assay_plot <- unique(
   pos_neg_assay_avg[, list(t.type, x_scaled_comb, y_scaled_comb, CAR.align, assay)])
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
-  CAR.align %in% c('BAFF-R','TNR8','41BB','TACI','CD28','KLRG1','CD40'),
+  CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),
   label.few := CAR.align]
 
 ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot[assay == 'CTV1'], 
@@ -744,7 +744,7 @@ ggplotly(make_pos_neg(all.deseq.results.dt[
   tooltip = "label", session='knitr')
 ```
 
-### Figure 2 Panels
+# Figure 2 Panels
 ```{r}
 
 data.output.dir <- file.path(here::here(
@@ -764,17 +764,17 @@ all.deseq.results.dt[abs(lfc.disp) > 5, lfc.disp := sign(lfc.disp) * Inf]
 data.dt <- all.deseq.results.dt
 
 data.dt[, CAR.type := 'other']
-data.dt[CAR.align == '41BB', CAR.type := '41BB']
+data.dt[CAR.align == '4-1BB', CAR.type := '4-1BB']
 data.dt[CAR.align == 'CD28', CAR.type := 'CD28']
 data.dt[, CAR.type := factor(
-  CAR.type,levels=c('other','41BB','CD28'))]
+  CAR.type,levels=c('other','4-1BB','CD28'))]
 ```
 
 #### Interbin Volcano
 
 ```{r fig.width=7, fig.height=4}
 
-#CD28 and 41BB Colors
+#CD28 and 4-1BB Colors
 receptor_cols <- RColorBrewer::brewer.pal(9, 'YlGnBu')[c(6,8)]
 
 # label significant hits
@@ -800,29 +800,35 @@ data.subset.dt[, assay := factor(assay,
              'Proliferation after 1 week\n(d8-d16)', 
              'Cumulative Proliferation\n(d0-d24)'))]
 
+# max out at log10-15
+data.subset.dt[, padj.disp := -log10(padj)]
+data.subset.dt[padj.disp > 15, padj.disp := Inf]
+
 interbin_volcano <- ggplot(data.subset.dt, 
   aes(
-    x=log2FoldChange, y=-log10(padj), 
+    x=log2FoldChange, y=padj.disp, 
     color=CAR.type,
     label=CAR.label.sig,
     size=CAR.type.size)) + 
   geom_point() +
   facet_grid(t.type ~ assay) +
   scale_color_manual('',
-    labels=c('New Receptors', '41BB', 'CD28'),
+    labels=c('New Receptors', '4-1BB', 'CD28'),
     values=c('grey50', receptor_cols),
     guide=F) +
   scale_size_manual('',
-    labels=c('New Receptors', '41BB', 'CD28', 'New Receptors'),
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors'),
     values=c(0.8,3,3,2.5), guide=F) +
   geom_hline(yintercept=-log10(0.05), linetype = 'dashed') +
   labs(x='Relative Proliferation,\nLog2 Fold Change from Mean', 
        y='-log10(P-value)') + 
-  scale_y_continuous(limits=c(0, 22)) +
+  scale_y_continuous(limits=c(0, 15)) +
   geom_text_repel() +
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA))
   
+interbin_volcano
+
 ggsave(here::here('..','figs','pooled','interbin_volcano.pdf'), 
        interbin_volcano, height=4, width=7, useDingbats=FALSE)
 ```
@@ -836,7 +842,7 @@ cast_4v8 <- dcast(data.dt[
         (ref_set == 'D' & test_set == 'A' & assay == 'CTV1'))], 
       CAR.align + assay + CAR.type ~ t.type, 
     value.var = c("log2FoldChange", "padj.disp"))
-    
+
 # rename facets
 cast_4v8[, assay := factor(assay, 
     labels=c('Initial Proliferation\n(d0-d3/d4)', 
@@ -846,24 +852,30 @@ cast_4v8[, assay := factor(assay,
 # label significant hits
 cast_4v8[, CAR.type.size := CAR.type]
 cast_4v8[CAR.type == 'other' & 
-    ((-padj.disp_CD4 < 0.05 & log2FoldChange_CD4 > 0) | 
-    (-padj.disp_CD8 < 0.05 & log2FoldChange_CD8 > 0)), 
+    ((padj.disp_CD4 < -log10(0.05) & log2FoldChange_CD4 > 0) | 
+    (padj.disp_CD8 < -log10(0.05) & log2FoldChange_CD8 > 0)), 
   CAR.type.size := 'other_sig']
 
-prolif_4v8 <- ggsaplot(cast_4v8, 
+cast_4v8[, CAR.label.sig := '']
+cast_4v8[CAR.type.size != 'other',
+    CAR.label.sig := CAR.align]
+    
+
+prolif_4v8 <- ggplot(cast_4v8, 
   aes(y=log2FoldChange_CD8, x=log2FoldChange_CD4,
       color=CAR.type,
-      label=CAR.align,
+      label=CAR.label.sig,
       size=CAR.type.size)) + 
   geom_point() +
   facet_grid(. ~  assay) +
   scale_color_manual('',
-    labels=c('New Receptors', '41BB', 'CD28'),
+    labels=c('New Receptors', '4-1BB', 'CD28'),
     values=c('grey50', receptor_cols)) +
   scale_size_manual('',
-    labels=c('New Receptors', '41BB', 'CD28', 'New Receptors'),
-    values=c(0.8,3,3,2)) +
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors'),
+    values=c(0.8,3,3,2.5)) +
   geom_abline(linetype='dashed') +
+  geom_text_repel() +
   theme_minimal() + 
   labs(x='CD4, relative log2 fold change', 
        y='CD8, relative log2 fold change') +
@@ -905,10 +917,10 @@ prolif_posneg <- ggplot(cast_posneg,
   geom_point() +
   facet_grid(t.type ~  assay) +
   scale_color_manual('',
-    labels=c('New Receptors', '41BB', 'CD28'),
+    labels=c('New Receptors', '4-1BB', 'CD28'),
     values=c('grey50', receptor_cols)) +
   scale_size_manual('',
-    labels=c('New Receptors', '41BB', 'CD28', 'New Receptors'),
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors'),
     values=c(0.8,3,3,2)) +
   geom_abline(linetype='dashed') +
   theme_minimal() + 

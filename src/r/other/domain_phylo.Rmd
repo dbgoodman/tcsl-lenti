@@ -37,7 +37,7 @@ tree <- ggtree::read.tree(text=paste(c(readLines(
   collapse="\n"))
 
 #changing tip label names
-tree$tip.label.clean <- 
+#tree$tip.label.clean <- 
 
 # set xlim
 #https://guangchuangyu.github.io/2016/10/xlim_tree-set-x-axis-limits-for-only-tree-panel/
@@ -51,18 +51,16 @@ d <- data.frame(
 
 ```{r}
 
-csv.dir <- tcsl.dir <- here::here(
+csv.dir <- here::here(
   '..','..',
   's3-roybal-tcsl',
   'lenti_screen_compiled_data','data','csv')
-
 
 # domain annotations from larger library
 domain_annot <- fread(file.path(csv.dir, 'domain_annotations.csv'))
 
 # names of domains to get uniprot IDs
 domain_names <- fread(file.path(csv.dir, 'costim_table.csv'), fill=T)
-domain_names <- merge(domain_names, d, on='fasta_name', all=T)
 
 # get domain sequences for annotation matching
 domain_seqs <- fread(file.path(csv.dir, 'all_domains.csv'))

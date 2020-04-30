@@ -56,7 +56,8 @@ data.output.dir <- file.path(here::here(
 metadata.filename <- file.path(tcsl.dir, 
     dataset.name, paste0(dataset.name, '_layout.csv'))
 car.seq.filename <- file.path(tcsl.dir, dataset.name, 'fa/ref.csv')
-remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt')
+remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt','TIIM1')
+
 
 car.seq <- fread(car.seq.filename, header=F)
 names(car.seq) <- c('CAR.align','seq')
@@ -115,12 +116,32 @@ rm("counts", "file", "sample.num")
 # add car lengths
 read.counts <- read.counts[car.len, on='CAR.align']
 
+# map back to actual names from costim table - we want to rename some
+# use correct names, from costim table
+csv.dir <- here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data','csv')
+
+# names of domains to map onto actual car names
+domain_names <- fread(file.path(csv.dir, 'costim_table.csv'), fill=T)[,
+  list(CAR.orig=r_name, CAR.new=real_name)]
+
+read.counts <- merge(read.counts, domain_names,
+  by.x='CAR.align', by.y='CAR.orig', all=T)
+
+#rename CARs, save old name as CAR.orig
+read.counts[, CAR.orig := CAR.align]
+read.counts[, CAR.align := CAR.new]
+
 
 ```
 
 ### Data Quality Analysis
 
 ```{r}
+
+read.counts <- read.counts[!(CAR.orig %in% remove.cars)]
 
 # if pct is available
 read.counts[, cell.count := as.numeric(gsub(',','',cell.count))][!is.na(pct), bin.pct := 
@@ -136,10 +157,9 @@ total.bin.pct.plot <- ggplot(read.counts[!(CAR.align %in% remove.cars),
   facet_grid(k.type~batch+timepoint+assay+t.type+donor) +
   labs(title='Total Bin Percentages')
 
-nonaligning.reads.plot <- ggplot(read.counts[, sum(counts[CAR.align == '*'])/
-                                               sum(counts),
-                                             by=.(batch, donor, timepoint, 
-                                                  assay, t.type, k.type, bin)]) + 
+nonaligning.reads.plot <- ggplot(read.counts[, 
+    sum(counts[CAR.align == '*'])/sum(counts),
+    by=.(batch, donor, timepoint, assay, t.type, k.type, bin)]) + 
   geom_bar(aes(y=V1, x=bin), stat='identity') + 
   facet_grid(k.type~batch+donor+timepoint+assay+t.type) + 
   labs(title='percentage of non-aligning reads')
@@ -212,9 +232,6 @@ $$\displaystyle \text{car.abund}_{car} = \sum_{bin}\text{car.abs.pct}_{car}$$
 $$\displaystyle \text{car.bin.pct}_{car, bin} = \text{car.abs.pct}_{car, bin} / \text{car.abund}_{car}$$
 
 ```{r}
-
-read.counts <- read.counts[!(CAR.align %in% remove.cars)]
-
 # get bin percent estimates
 read.counts[, bin.reads := sum(counts, na.rm=T), by=c('sort.group','bin')]
 
