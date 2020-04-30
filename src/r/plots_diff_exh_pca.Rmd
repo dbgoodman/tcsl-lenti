@@ -25,7 +25,7 @@ library(plotly)
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'diff.sampled.Rdata'))
 load(file.path(data_dir, 'exh.sampled.Rdata'))
-diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
+#diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
 # map day 0 to both plus and minus
 map_day_0 <- function(df) {
@@ -49,23 +49,23 @@ run_pca <- function(vars_dt, markers_list,
                         day + car + k562 + t_type ~ variable,
                         value.var=c('m'))
 
-  # use function to make day 0 k562 as cd19+ and cd19- instead of none
-  vars_cast_dt <- map_day_0(vars_cast_dt)
-
   # getting pca for all, cd19- only, cd19+ only, cd4 cd19+ only, cd8 cd19+ 
   # only with sd & make sure the -c(1:4) or -c(1:5) is correct for the table
   define_pca <- function(df) { 
-
     return(prcomp(df[k562 %in% target & t_type %in% tcell][,
       c(markers_list), with=F], scale. = T, center = T))
   }
   
   pca <- define_pca(vars_cast_dt)
-  
+  rotation_dt <- data.table(row.names(pca$rotation))
+  setnames(rotation_dt, "V1", "input_var")
+  rotation_dt <- cbind(rotation_dt, data.table(pca$rotation))
   #add back original vars 
   pca <- cbind(vars_cast_dt, data.table(pca$x))
   
-  return(pca)
+  newlist <- list(pca, rotation_dt)
+  
+  return(newlist)
 }
 ```
 
@@ -76,7 +76,9 @@ run_pca <- function(vars_dt, markers_list,
 # get rid of myc and gfp, because they occur in both 
 # (and because they may confuse)
 markers_list <- c('cd62l_t', 'cd27_t', 'ccr7_t', 'cd45ro_t', 'cd45ra_t', 
-  'cd95_t', 'tim3_t', 'lag3_t', 'pd1_t', 'cd39_t')
+                  'cd95_t','tim3_t', 'lag3_t', 'pd1_t', 'cd39_t')
+# diff = 'cd62l_t', 'cd27_t', 'ccr7_t', 'cd45ro_t', 'cd45ra_t', 'cd95_t'
+# exh = 'tim3_t', 'lag3_t', 'pd1_t', 'cd39_t'
 
 # making new table with means & sd for each sample (across donors & replicates. 
 # no untrans.) for each variable (except for zombie & cd)
@@ -92,35 +94,37 @@ exh_means_dt <- exh_dt[!is.na(day) & !is.na(donor) &
 
 means_dt <- rbind(diff_means_dt, exh_means_dt)
 
-pca_result <- run_pca(means_dt, markers_list)
+# use function to make day 0 k562 as cd19+ and cd19- instead of none
+means_dt <- map_day_0(means_dt)
+
+tot_pca <- run_pca(means_dt, markers_list)
+pos_pca <- run_pca(means_dt[k562=='cd19+'], markers_list, target='cd19+')
+neg_pca <- run_pca(means_dt[k562=='cd19-'], markers_list, target='cd19-')
+cd4_pca <- run_pca(means_dt[k562=='cd19+' & t_type=='cd4'], markers_list, 
+                   target='cd19+', tcell='cd4')
+cd8_pca <- run_pca(means_dt[k562=='cd19+' & t_type=='cd8'], markers_list, 
+                   target='cd19+', tcell='cd8')
         
-ggplot(run_pca(means_dt, markers_list), aes(x=PC1, y=PC2)) + geom_point()
+ggplot(run_pca(means_dt, markers_list)[[1]], aes(x=PC1, y=PC2)) + geom_point()
 ```
 
 ```{r}
 
-# cbind these pca with data table
-tot_cbind_dt <- cbind(exp_cast_dt, data.table(tot_pca$x))
-neg_cbind_dt <- cbind(exp_cast_dt[k562=='cd19-'], data.table(neg_pca$x))
-pos_cbind_dt <- cbind(exp_cast_dt[k562=='cd19+'], data.table(pos_pca$x))
-cd4_cbind_dt <- cbind(exp_cast_dt[t_type=='cd4' & k562=='cd19+'], data.table(cd4_pca$x))
-cd8_cbind_dt <- cbind(exp_cast_dt[t_type=='cd8' & k562=='cd19+'], data.table(cd8_pca$x))
-
 
 # plot these altogether
-a <- ggplot(tot_cbind_dt, aes(x=PC1, y=PC2)) + 
+a <- ggplot(tot_pca[[1]], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=car)) +
   labs(title='general PCA')
-b <- ggplot(pos_cbind_dt, aes(x=PC1, y=PC2)) + 
+b <- ggplot(pos_pca[[1]], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=car)) +
   labs(title='CD19+ only PCA')
-c <- ggplot(neg_cbind_dt, aes(x=PC1, y=PC2)) + 
+c <- ggplot(neg_pca[[1]], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=car)) +
   labs(title='CD19- only PCA')
-d <- ggplot(cd4_cbind_dt, aes(x=PC1, y=PC2)) + 
+d <- ggplot(cd4_pca[[1]], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=car)) +
   labs(title='CD4 only PCA')
-e <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
+e <- ggplot(cd8_pca[[1]], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=car)) +
   labs(title='CD8 only PCA')
 
@@ -128,7 +132,7 @@ grid.arrange(a, b, c, d, e, ncol=2)
 
 # ggplotly of general PCA, colored by day
 
-p <- ggplot(pos_cbind_dt, aes(x=PC1, y=PC2, text=paste("Costim:", car, "<br>Day:", day, "<br>K562:", k562))) +
+p <- ggplot(pos_pca[[1]], aes(x=PC1, y=PC2, text=paste("Costim:", car, "<br>Day:", day, "<br>K562:", k562))) +
   geom_point(aes(color=as.factor(day), shape=t_type, size=1)) +
   labs(title='CD19+ only PCA')
 
@@ -147,31 +151,16 @@ screeplot(cd4_pca, npcs=length(cd4_pca$sdev))
 screeplot(cd8_pca, npcs=length(cd8_pca$sdev))
 
 
-# function to change column name of V1 to input_var and add to variable loadings table
-input_variance_col <- function(df) {
-  rot_rows <- data.table(row.names(df$rotation))
-  setnames(rot_rows, "V1", "input_var")
-  return(cbind(rot_rows, data.table(df$rotation)))
-}
-
-
-tot_rot_dt <- input_variance_col(tot_pca)
-pos_rot_dt <- input_variance_col(pos_pca)
-neg_rot_dt <- input_variance_col(neg_pca)
-cd4_rot_dt <- input_variance_col(cd4_pca)
-cd8_rot_dt <- input_variance_col(cd8_pca)
-
-
 
 # plot each PC to see what input variables contribute to which PC
 ggplot() +
-  geom_bar(data=melt(cd8_rot_dt, id.vars='input_var', variable.name='PC', value.name='value'),
+  geom_bar(data=melt(cd8_pca[[2]], id.vars='input_var', variable.name='PC', value.name='value'),
            aes(x=reorder(input_var, value), y=value), stat="identity") +
   facet_wrap(~ PC, scales="free") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # just PC1 in ascending order, but we care about max abs values (i.e. leftmost & rightmost) b/c that contributes most to the variance
-ggplot(cd8_rot_dt, aes(x=reorder(input_var, PC1), y=PC1)) +
+ggplot(cd8_pca[[2]], aes(x=reorder(input_var, PC1), y=PC1)) +
   geom_bar(stat="identity") +
   theme(axis.text.x = element_text(angle=90, hjust=1))
 
@@ -220,18 +209,18 @@ arr_by_day <- function(df) {
 }
 
 
-tot_seg_dt <- arr_by_day(tot_cbind_dt)
-cd4_seg_dt <- arr_by_day(cd4_cbind_dt)
-cd8_seg_dt <- arr_by_day(cd8_cbind_dt)
-pos_seg_dt <- arr_by_day(pos_cbind_dt)
-neg_seg_dt <- arr_by_day(neg_cbind_dt)
+tot_seg_dt <- arr_by_day(tot_pca[[1]])
+cd4_seg_dt <- arr_by_day(cd4_pca[[1]])
+cd8_seg_dt <- arr_by_day(cd8_pca[[1]])
+pos_seg_dt <- arr_by_day(pos_pca[[1]])
+neg_seg_dt <- arr_by_day(neg_pca[[1]])
 
 
 tot_seg_dt[k562=='cd19+', lt := "solid"]
 tot_seg_dt[k562=='cd19-', lt := "dashed"]
 
 
-ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
+ggplot(cd8_pca[[1]], aes(x=PC1, y=PC2)) + 
   geom_point(aes(color=as.factor(day), size=1)) +
   geom_segment(data=cd8_seg_dt, 
                color='grey70',
@@ -256,16 +245,17 @@ ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) +
 ```{r}
 
 # use either igv or nejm for scale_color
-cd8_arr <- ggplot(cd8_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(data=cd8_cbind_dt[day==0], aes(color=car, size=1)) +
+cd8_arr <- ggplot(cd8_pca[[1]], aes(x=PC1, y=PC2)) + 
+  geom_point(data=cd8_pca[[1]][day==0], aes(color=car, size=1)) +
   geom_segment(data=cd8_seg_dt, 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
                size=2,
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
   scale_color_brewer(palette="Paired") +
-  labs(title="CD8 CD19+ only PCA") +
+  labs(title="CD8 CD19+ only PCA - diff") +
   theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, size = 24),
+  theme(aspect.ratio=1,
+        plot.title = element_text(hjust = 0.5, size = 24),
         legend.title = element_text(size=20),
         legend.text = element_text(size=18),
         axis.title = element_text(size=20)) +
@@ -275,16 +265,17 @@ cd8_arr
 
 
 
-cd4_arr <- ggplot(cd4_cbind_dt, aes(x=PC1, y=PC2)) + 
-  geom_point(data=cd4_cbind_dt[day==0], aes(color=car, size=1)) +
+cd4_arr <- ggplot(cd4_pca[[1]], aes(x=PC1, y=PC2)) + 
+  geom_point(data=cd4_pca[[1]][day==0], aes(color=car, size=1)) +
   geom_segment(data=cd4_seg_dt, 
                aes(x=PC1_a, y=PC2_a, xend=PC1_b, yend=PC2_b, color=car, alpha=0.1),
                size=2,
                arrow=arrow(length=unit(0.3,"cm"), type="closed")) +
   scale_color_brewer(palette="Paired") +
-  labs(title="CD4 CD19+ only PCA") +
+  labs(title="CD4 CD19+ only PCA - diff") +
   theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, size = 24),
+  theme(aspect.ratio=1, 
+        plot.title = element_text(hjust = 0.5, size = 24),
         legend.title = element_text(size=20),
         legend.text = element_text(size=18),
         axis.title = element_text(size=20)) +
