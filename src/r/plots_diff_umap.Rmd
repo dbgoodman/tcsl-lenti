@@ -107,20 +107,23 @@ umap_dt_in <- scale_for_umap(umap_cast_dt, umap_vars, censor_negative_min)
 
 ### Run across parameter list
 
-#umap parameter list
+#umap parameter list 
 min_dist_set <- c(0.0001, 0.005, 0.1)
 n_neighbor_set <- c(3,6,15,30)
-umap_params <- data.table(expand.grid(min_dist_set, n_neighbor_set))
+learning_rate_set <- c(0.1, 0.25, 0.5, 1) 
+
+
+umap_params <- data.table(expand.grid(min_dist_set, n_neighbor_set, learning_rate_set))
 
 # run umap via uwot library
 umap_out <- umap_params[, {
   print(paste0('Running: ',.BY)); 
   as.data.table(umap(umap_dt_in, min_dist=as.numeric(.BY[1]),
-    n_neighbors=as.numeric(.BY[2]), verbose=F, n_threads=8, n_trees=50))
+    n_neighbors=as.numeric(.BY[2]), learning_rate=as.numeric(.BY[3]), verbose=F, n_threads=8, n_trees=100))
   }, by=names(umap_params)]
 
 # rename the columns
-names(umap_out) <- c('min_dist','n_neighbor','umap_1','umap_2')
+names(umap_out) <- c('min_dist','n_neighbor', 'learning_rate', 'umap_1','umap_2')
 
 # add the umap output to the input dt
 umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
@@ -131,33 +134,34 @@ umap_fcs_dt <- unique(umap_dt[,
     umap_fcs_dt, on=.(t_type,well,day,event_id)]
 ```
 
-```{r eval=redo_umap_param_search, fig.width=20, fig.height=10}
+```{r eval=redo_umap_param_search, fig.width=30, fig.height=15}
 color_points <- ggplot(umap_fcs_dt[car %in% c('CD28','41BB','KLRG1','BAFF-R','Zeta')], 
     aes(x=umap_1, y=umap_2, color=interaction(car, t_type))) +
   geom_point(size=0.1, alpha=0.1) + 
   guides(colour = guide_legend(override.aes = list(alpha=1, size=3))) +
-  facet_grid(min_dist~n_neighbor) +
+  facet_grid(min_dist~n_neighbor+learning_rate) +
   theme_bw()
 
 color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
   geom_hex(bins = 70) +
   scale_fill_continuous(
     type = "viridis", limits=c(0,30), oob=scales::squish) +
-  facet_grid(min_dist~n_neighbor) +
+  facet_grid(min_dist~n_neighbor+learning_rate) +
   theme_bw()
 
 grid.arrange(color_points, color_density, ncol=2)
 ```
 
-Choosing neighbors == 15 and min_dist == 1e-4. 
+Choosing neighbors == 30 and min_dist == 1e-4. 
 
 ## Checking UMAP Param space
 
 Scaling this to 200 events per well and checking CAR/condition separation.
 
-```{r, eval=redo_umap_clustering}
+```{r}
 chosen_dist=0.0001
 chosen_n_neighbor=100 # default is 15
+chosen_learning_rate=0.1
 
 umap_dt <- diff_dt[!is.na(event_id), 
   .SD[event_id %in% sample(unique(event_id), 
@@ -173,29 +177,33 @@ umap_vars <- c(paste0(names(channel_map),'_t'))
 # removing cd_t and zombie_t from umap_vars
 umap_vars <- umap_vars[umap_vars != c('cd_t', 'zombie_t')]
 
-#cast it so variables are columns and
-#subset sample umap data on variables
-umap_cast_dt <- dcast(umap_dt, 
+# filter by cd4/8
+umap_cd4_dt <- umap_dt %>% filter(t_type=='cd4') 
+umap_cd8_dt <- umap_dt %>% filter(t_type=='cd8') 
+```
+### CD4 UMAP
+```{r, eval=redo_umap_clustering}
+umap_cd4_cast_dt <- dcast(umap_cd4_dt, 
   event_id + well + plate + day + t_type ~ variable, 
   value.var='value')
 
-umap_dt_in <- umap_cast_dt[, ..umap_vars]
+umap_cd4_dt_in <- umap_cd4_cast_dt[, umap_vars]
 
 # scale each input column
-umap_dt_in[ , 
-  (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+umap_cd4_dt_in <- scale(umap_cd4_dt_in)
 
 # run umap via uwot library (added learning rate and n_sgd_threads=1)
-umap_out <- umap(umap_dt_in, min_dist=chosen_dist,
-    n_neighbors=chosen_n_neighbor, learning_rate=0.5, verbose=T, n_threads=8, n_trees=100, n_sgd_threads=1,
+set.seed(123)
+umap_cd4_out <- umap(umap_cd4_dt_in, min_dist=chosen_dist,
+    n_neighbors=chosen_n_neighbor, learning_rate=chosen_learning_rate, verbose=T, n_threads=8, n_trees=100, n_sgd_threads=1,
     ret_nn=T)
 
 # nearest neighbors in original space
-nearest_neighbors <- umap_out$nn$euclidean$idx
-neighbor_dist <- umap_out$nn$euclidean$dist
-edge_weights <- scales::rescale(-neighbor_dist, to=c(0,1))
-edge_weights <- edge_weights - min(edge_weights)
-umap_out <- data.table(umap_out$embedding)
+nearest_neighbors_cd4 <- umap_cd4_out$nn$euclidean$idx
+neighbor_dist_cd4 <- umap_cd4_out$nn$euclidean$dist
+edge_weights_cd4 <- scales::rescale(-neighbor_dist_cd4, to=c(0,1))
+edge_weights_cd4 <- edge_weights_cd4 - min(edge_weights_cd4)
+umap_cd4_out <- data.table(umap_cd4_out$embedding)
 
 #nearest neighbors in embedding
 umap_nn <- cbind(1:nrow(umap_fcs_dt), 
@@ -205,18 +213,59 @@ umap_nd <- cbind(rep(0, nrow(umap_fcs_dt)),
 umap_ew <- scales::rescale(-umap_nd, to=c(0,1))
 umap_ew <- umap_ew - min(umap_ew)
 
-    
 # rename the columns
-names(umap_out) <- c('umap_1','umap_2')
+names(umap_cd4_out) <- c('umap_1','umap_2')
 
 # add the umap output to the input dt
-umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
-umap_fcs_dt[, id := 1:.N]
+umap_cd4_fcs_dt <- cbind(umap_cd4_cast_dt[, 1:length(names(umap_cd4_cast_dt))], umap_cd4_out)
+umap_cd4_fcs_dt <- tibble::rowid_to_column(umap_cd4_fcs_dt, "id")
 
 # add back the annotations
-umap_fcs_dt <- unique(umap_dt[, 
-  .(donor, car, k562, t_type, day, well, event_id)])[
-    umap_fcs_dt, on=.(t_type,well,day,event_id)]
+umap_cd4_fcs_dt <- umap_cd4_fcs_dt %>% left_join(distinct(umap_cd4_dt, donor, car, k562, t_type, day, well, event_id), by=c('t_type', 'day', 'well', 'event_id'))
+```
+
+### CD8 UMAP
+```{r, eval=redo_umap_clustering}
+umap_cd8_cast_dt <- dcast(umap_cd8_dt, 
+  event_id + well + plate + day + t_type ~ variable, 
+  value.var='value')
+
+umap_cd8_dt_in <- umap_cd8_cast_dt[, umap_vars]
+
+# scale each input column
+umap_cd8_dt_in <- scale(umap_cd8_dt_in)
+
+# run umap via uwot library (added learning rate and n_sgd_threads=1)
+set.seed(123)
+umap_cd8_out <- umap(umap_cd8_dt_in, min_dist=chosen_dist,
+    n_neighbors=chosen_n_neighbor, learning_rate=chosen_learning_rate, verbose=T, n_threads=8, n_trees=100, n_sgd_threads=1,
+    ret_nn=T)
+
+# nearest neighbors in original space
+nearest_neighbors_cd8 <- umap_cd8_out$nn$euclidean$idx
+neighbor_dist_cd8 <- umap_cd8_out$nn$euclidean$dist
+edge_weights_cd8 <- scales::rescale(-neighbor_dist_cd8, to=c(0,1))
+edge_weights_cd8 <- edge_weights_cd8 - min(edge_weights_cd8)
+umap_cd8_out <- data.table(umap_cd8_out$embedding)
+
+#nearest neighbors in embedding
+umap_nn <- cbind(1:nrow(umap_fcs_dt), 
+    nnwhich(umap_fcs_dt[, list(umap_1, umap_2)], k=c(1:3)))
+umap_nd <- cbind(rep(0, nrow(umap_fcs_dt)), 
+    nndist(umap_fcs_dt[, list(umap_1, umap_2)], k=c(1:3)))
+umap_ew <- scales::rescale(-umap_nd, to=c(0,1))
+umap_ew <- umap_ew - min(umap_ew)
+
+# rename the columns
+names(umap_cd8_out) <- c('umap_1','umap_2')
+
+# add the umap output to the input dt
+umap_cd8_fcs_dt <- cbind(umap_cd8_cast_dt[, 1:length(names(umap_cd8_cast_dt))], umap_cd8_out)
+umap_cd8_fcs_dt <- tibble::rowid_to_column(umap_cd8_fcs_dt, "id")
+
+# add back the annotations
+umap_cd8_fcs_dt <- umap_cd8_fcs_dt %>% left_join(distinct(umap_cd8_dt, donor, car, k562, t_type, day, well, event_id), by=c('t_type', 'day', 'well', 'event_id'))
+
 ```
 
 ## Clustering via leiden/reticulate
@@ -228,34 +277,64 @@ import pandas as pd
 import numpy as np
 import math
 
-edges = []
-n_neighbors = r.nearest_neighbors.shape[1]
-for i, nn_row in enumerate(r.nearest_neighbors):
-    edge_weights = r.edge_weights[i]
-    for j in range(1, n_neighbors):
-        edges.append((int(nn_row[0]), int(nn_row[j]), edge_weights[j]))
+# first, for CD4
+edges_cd4 = []
+n_neighbors_cd4 = r.nearest_neighbors_cd4.shape[1]
+for i, nn_row in enumerate(r.nearest_neighbors_cd4):
+    edge_weights_cd4 = r.edge_weights_cd4[i]
+    for j in range(1, n_neighbors_cd4):
+        edges_cd4.append((int(nn_row[0]), int(nn_row[j]), edge_weights_cd4[j]))
       
-knn_graph = ig.Graph.TupleList(edges, directed=True, weights=True)
+knn_graph_cd4 = ig.Graph.TupleList(edges_cd4, directed=True, weights=True)
 
-part = leidenalg.find_partition(knn_graph, 
+part_cd4 = leidenalg.find_partition(knn_graph_cd4, 
     leidenalg.ModularityVertexPartition, weights='weight')
 #part = leidenalg.find_partition(knn_graph, 
 #    leidenalg.CPMVertexPartition, weights='weight', 
 #    resolution_parameter=0.05)
 
-cluster_membership = [x for _,x in sorted(zip(knn_graph.vs['name'],part.membership))]
+cluster_membership_cd4 = [x for _,x in sorted(zip(knn_graph_cd4.vs['name'],part_cd4.membership))]
+
+# again for CD8
+edges_cd8 = []
+n_neighbors_cd8 = r.nearest_neighbors_cd8.shape[1]
+for i, nn_row in enumerate(r.nearest_neighbors_cd8):
+    edge_weights_cd8 = r.edge_weights_cd8[i]
+    for j in range(1, n_neighbors_cd8):
+        edges_cd8.append((int(nn_row[0]), int(nn_row[j]), edge_weights_cd8[j]))
+      
+knn_graph_cd8 = ig.Graph.TupleList(edges_cd8, directed=True, weights=True)
+
+part_cd8 = leidenalg.find_partition(knn_graph_cd8, 
+    leidenalg.ModularityVertexPartition, weights='weight')
+#part = leidenalg.find_partition(knn_graph, 
+#    leidenalg.CPMVertexPartition, weights='weight', 
+#    resolution_parameter=0.05)
+
+cluster_membership_cd8 = [x for _,x in sorted(zip(knn_graph_cd8.vs['name'],part_cd8.membership))]
+
 ```
 
 ```{r, eval=redo_umap_clustering, fig.width=15, fig.height=10}
-umap_fcs_dt[, cluster := factor(py$cluster_membership+1)]
+# convert into data tables
+umap_cd4_fcs_dt <- as.data.table(umap_cd4_fcs_dt)
+umap_cd8_fcs_dt <- as.data.table(umap_cd8_fcs_dt)
+
+#add new column to umap 
+umap_cd4_fcs_dt[, cluster := factor(py$cluster_membership_cd4+1)]
+umap_cd8_fcs_dt[, cluster := factor(py$cluster_membership_cd8+1)]
 ```
 
 ```{r, eval=redo_umap_clustering}
 
 # save the clustering data
-fwrite(umap_fcs_dt, 
+fwrite(umap_cd4_fcs_dt, 
   compress='gzip', 
-  file=file.path(here::here('..','data','diff.sampled.umap.csv.gz')))
+  file=file.path(here::here('..','data','diff.sampled.umap_cd4.csv.gz')))
+
+fwrite(umap_cd8_fcs_dt, 
+  compress='gzip', 
+  file=file.path(here::here('..','data','diff.sampled.umap_cd8.csv.gz')))
 
 # sync output back to s3
 system('aws s3 sync \\
@@ -268,404 +347,373 @@ system('aws s3 sync \\
 ## Cluster Analysis
 
 One issue with these clusters is that they are not contiguous in the UMAP embedding:
-
+### cd8 umap plot 
 ```{r, fig.width=15, fig.height=12}
-umap_fcs_dt <- fread(
+umap_cd8_fcs_dt <- fread(
   file.path(
-    here::here('..','data','diff.sampled.umap.csv.gz')))
-umap_fcs_dt[, cluster := factor(cluster)]
+    here::here('..','data','diff.sampled.umap_cd8.csv.gz')))
+umap_cd8_fcs_dt[, cluster := factor(cluster)]
 
-umap_cluster_dt <- umap_fcs_dt[, list(
+umap_cd8_cluster_dt <- umap_cd8_fcs_dt[, list(
   mean_umap_1= mean(umap_1), 
   mean_umap_2= mean(umap_2), 
   size= .N), by=cluster]
 
+# whole plot
 ggplot() + 
-  geom_point(data=umap_fcs_dt, 
+  geom_point(data=umap_cd8_fcs_dt, 
     aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
-  geom_label(data=umap_cluster_dt, aes(
+  geom_label(data=umap_cd8_cluster_dt, aes(
     x=mean_umap_1, y=mean_umap_2,
     label=paste(cluster,size,sep='\n'), 
     color=cluster), alpha=0.3) +
   theme_minimal()
 
+# individual plots
 ggplot() + 
-  geom_point(data=umap_fcs_dt, 
+  geom_point(data=umap_cd8_fcs_dt, 
     aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
-  geom_label(data=umap_cluster_dt, aes(
+  geom_label(data=umap_cd8_cluster_dt, aes(
     x=mean_umap_1, y=mean_umap_2,
     label=paste(cluster,size,sep='\n'), 
     color=cluster), alpha=0.3) +
   facet_wrap(~cluster) +
   theme_bw()
 ```
-###UMAP data exploration (NAP)
-```{r}
-umap_fcs_dt %>% head()
+### cd4 umap plot
+```{r, fig.width=15, fig.height=12}
+umap_cd4_fcs_dt <- fread(
+  file.path(
+    here::here('..','data','diff.sampled.umap_cd4.csv.gz')))
+umap_cd4_fcs_dt[, cluster := factor(cluster)]
+
+umap_cd4_cluster_dt <- umap_cd4_fcs_dt[, list(
+  mean_umap_1= mean(umap_1), 
+  mean_umap_2= mean(umap_2), 
+  size= .N), by=cluster]
+
+# whole plot
+ggplot() + 
+  geom_point(data=umap_cd4_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
+  geom_label(data=umap_cd4_cluster_dt, aes(
+    x=mean_umap_1, y=mean_umap_2,
+    label=paste(cluster,size,sep='\n'), 
+    color=cluster), alpha=0.3) +
+  theme_minimal()
+
+# individual plots
+ggplot() + 
+  geom_point(data=umap_cd4_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
+  geom_label(data=umap_cd4_cluster_dt, aes(
+    x=mean_umap_1, y=mean_umap_2,
+    label=paste(cluster,size,sep='\n'), 
+    color=cluster), alpha=0.3) +
+  facet_wrap(~cluster) +
+  theme_bw()
 ```
 
 ```{r, fig.width=30, fig.height=20}
-cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
-cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
+color_plots <- function(umap_df) {
+  cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
+  cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
+  color_time <- ggplot(umap_df[][, cd19 := (k562=='cd19+')], 
+      aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
+    geom_point(size=0.1, alpha=0.5) +
+    facet_grid(car~cd19) +
+    scale_color_manual(values=c(cd4_colors, cd8_colors)) +
+    guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
+  
+  color_density <- ggplot(umap_df, aes(x=umap_1, y=umap_2)) +
+    geom_hex(bins = 70) +
+    facet_grid(car~cd19) +
+    scale_fill_continuous(
+      type = "viridis", limits=c(0,30), oob=scales::squish) +
+    theme_bw()
+  
+  color_markers <- ggplot(
+      melt(umap_df, measure.vars=umap_vars)[, 
+        value.scaled := scale(value), by='variable'][,
+          cd19 := (k562=='cd19+')], 
+      aes(x=umap_1, y=umap_2, z=value.scaled)) +
+    stat_summary_hex(bins = 70) +
+    facet_grid(variable~cd19) +
+    scale_fill_distiller(palette='RdYlBu', limits=c(-3, 3), oob=scales::squish) +
+    theme_bw()
+  
+  grid.arrange(color_time, color_density, color_markers, ncol=3)
+}
 
-color_time <- ggplot(umap_fcs_dt[][, cd19 := (k562=='cd19+')], 
-    aes(x=umap_1, y=umap_2, color=interaction(day, t_type))) +
-  geom_point(size=0.1, alpha=0.5) +
-  facet_grid(car~cd19) +
-  scale_color_manual(values=c(cd4_colors, cd8_colors)) +
-  guides(colour = guide_legend(override.aes = list(alpha=1, size=3)))
+color_plots(umap_cd4_fcs_dt)
+color_plots(umap_cd8_fcs_dt)
 
-color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
-  geom_hex(bins = 70) +
-  facet_grid(car~cd19) +
-  scale_fill_continuous(
-    type = "viridis", limits=c(0,30), oob=scales::squish) +
-  theme_bw()
 
-color_markers <- ggplot(
-    melt(umap_fcs_dt, measure.vars=umap_vars)[, 
-      value.scaled := scale(value), by='variable'][,
-        cd19 := (k562=='cd19+')], 
-    aes(x=umap_1, y=umap_2, z=value.scaled)) +
-  stat_summary_hex(bins = 70) +
-  facet_grid(variable~cd19) +
-  scale_fill_distiller(palette='RdYlBu', limits=c(-3, 3), oob=scales::squish) +
-  theme_bw()
-
-grid.arrange(color_time, color_density, color_markers, ncol=3)
 ```
 
 ```{r, fig.width=15, fig.height=8}
-cluster_pct_vars <- c(paste0(
-  names(channel_map),'_t'), 
-  'FSC-A','SSC-A','donor')
+# add cd19 and cd4/8 rows to dendro
 
-max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+dendrogram <- function(umap_fcs_dt) {
+  cluster_pct_vars <- c(paste0(
+    names(channel_map),'_t'), 
+    'FSC-A','SSC-A','donor','cd19')
+  
+  max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+  
+  umap_var_melt_dt <-melt(
+    umap_fcs_dt[!is.na(donor)], measure.vars= c(umap_vars,'donor', 'cd19'))
+  
+  # Use z scale to plot params
+  umap_var_melt_dt[, value_scaled := scale(value), by=variable]
+  param_cluster_pct_dt <- umap_var_melt_dt[
+    !is.na(cluster) & variable %in% cluster_pct_vars,
+    list(
+      clust_mean = mean(value_scaled),
+      clust_sd = sd(value_scaled)),
+        by=c('variable','cluster')]
+  
+  # Make dendrogram
+  cluster_mean_cast <- dcast(
+    param_cluster_pct_dt, 
+    variable ~ cluster, 
+    value.var='clust_mean')
+  
+  cluster_dendro_m <- as.matrix(cluster_mean_cast[, -c(1)])
+  rownames(cluster_dendro_m) <- unlist(cluster_mean_cast[,1])
+  dendro_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_m))))
+  dendro_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_m)))
+  
+  # Create dendrogram plot
+  dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
+    theme(axis.text.y = element_text(size = 6))
+  dendro_clusters_plot <- ggdendrogram(data = dendro_clusters, rotate = TRUE) + 
+    theme(axis.text.y = element_text(size = 6))
+  
+  # column order
+  cluster_order <- order.dendrogram(dendro_clusters)
+  cluster_names <- colnames(cluster_dendro_m[, cluster_order])
+  param_cluster_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
+  
+  # row order
+  var_order <- order.dendrogram(dendro_vars)
+  var_names <- row.names(cluster_dendro_m[var_order, ])
+  param_cluster_pct_dt$variable <- factor(
+      param_cluster_pct_dt$variable,
+      levels = var_names)
+  
+  # heatmap
+  var_heatmap <- ggplot(param_cluster_pct_dt) + 
+      geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
+      scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
+      theme_minimal()
+  
+  # col dendro
+  dendro_data_col <- dendro_data(dendro_clusters, type = "rectangle")
+  dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
+      geom_segment(data = segment(dendro_data_col), 
+          aes(x = x, y = y, xend = xend, yend = yend))
+  plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
+              dendro_col, grid::unit(0.2, "null"), position = "top")
+  ggdraw(plot_dendroheat)
+}
 
-umap_var_melt_dt <-melt(
-  umap_fcs_dt[!is.na(donor)], measure.vars= c(umap_vars,'donor'))
+#cd8
+dendrogram(umap_cd8_fcs_dt)
 
-# Use z scale to plot params
-umap_var_melt_dt[, value_scaled := scale(value), by=variable]
-param_cluster_pct_dt <- umap_var_melt_dt[
-  !is.na(cluster) & variable %in% cluster_pct_vars,
-  list(
-    clust_mean = mean(value_scaled),
-    clust_sd = sd(value_scaled)),
-      by=c('variable','cluster')]
-
-# Make dendrogram
-cluster_mean_cast <- dcast(
-  param_cluster_pct_dt, 
-  variable ~ cluster, 
-  value.var='clust_mean')
-
-cluster_dendro_m <- as.matrix(cluster_mean_cast[, -c(1)])
-rownames(cluster_dendro_m) <- unlist(cluster_mean_cast[,1])
-dendro_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_m))))
-dendro_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_m)))
-
-# Create dendrogram plot
-dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
-  theme(axis.text.y = element_text(size = 6))
-dendro_clusters_plot <- ggdendrogram(data = dendro_clusters, rotate = TRUE) + 
-  theme(axis.text.y = element_text(size = 6))
-
-# column order
-cluster_order <- order.dendrogram(dendro_clusters)
-cluster_names <- colnames(cluster_dendro_m[, cluster_order])
-param_cluster_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
-
-# row order
-var_order <- order.dendrogram(dendro_vars)
-var_names <- row.names(cluster_dendro_m[var_order, ])
-param_cluster_pct_dt$variable <- factor(
-    param_cluster_pct_dt$variable,
-    levels = var_names)
-
-# heatmap
-var_heatmap <- ggplot(param_cluster_pct_dt) + 
-    geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
-    scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
-    theme_minimal()
-
-# col dendro
-dendro_data_col <- dendro_data(dendro_clusters, type = "rectangle")
-dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
-    geom_segment(data = segment(dendro_data_col), 
-        aes(x = x, y = y, xend = xend, yend = yend))
-plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
-            dendro_col, grid::unit(0.2, "null"), position = "top")
-ggdraw(plot_dendroheat)
+#cd4
+dendrogram(umap_cd4_fcs_dt)
 ```
-
-####cd19+ dendrogram
-```{r}
-param_cluster_cd19_pct_dt <- umap_var_melt_dt[
-  !is.na(cluster) & variable %in% cluster_pct_vars,
-  list(
-    clust_mean = mean(value_scaled),
-    clust_sd = sd(value_scaled)),
-      by=c('variable','cluster', 'cd19')]
-
-param_cluster_cd19_pos_pct_dt <- param_cluster_cd19_pct_dt %>% filter(cd19 == TRUE)
-param_cluster_cd19_neg_pct_dt <- param_cluster_cd19_pct_dt %>% filter(cd19 == FALSE)
-
-# Make dendrogram
-cluster_mean_cd19_cast <- dcast(
-  param_cluster_cd19_pos_pct_dt, 
-  variable ~ cluster, 
-  value.var='clust_mean')
-
-cluster_dendro_cd19_m <- as.matrix(cluster_mean_cd19_cast[, -c(1)])
-rownames(cluster_dendro_cd19_m) <- unlist(cluster_mean_cd19_cast[,1])
-dendro_cd19_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_cd19_m))))
-dendro_cd19_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_cd19_m)))
-
-# Create dendrogram plot
-dendro_cd19_vars_plot <- ggdendrogram(data = dendro_cd19_vars, rotate = TRUE) + 
-  theme(axis.text.y = element_text(size = 6))
-dendro_cd19_clusters_plot <- ggdendrogram(data = dendro_cd19_clusters, rotate = TRUE) + 
-  theme(axis.text.y = element_text(size = 6))
-
-# column order
-cluster_order_cd19 <- order.dendrogram(dendro_cd19_clusters)
-cluster_names_cd19 <- colnames(cluster_dendro_cd19_m[, cluster_order_cd19])
-param_cluster_cd19_pos_pct_dt <- as.data.table(param_cluster_cd19_pos_pct_dt)
-param_cluster_cd19_pos_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
-
-
-# row order
-var_order_cd19 <- order.dendrogram(dendro_cd19_vars)
-var_names_cd19 <- row.names(cluster_dendro_cd19_m[var_order_cd19, ])
-param_cluster_cd19_pos_pct_dt$variable <- factor(
-    param_cluster_cd19_pos_pct_dt$variable,
-    levels = var_names_cd19)
-
-# heatmap
-var_heatmap_cd19 <- ggplot(param_cluster_cd19_pos_pct_dt) + 
-    geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
-    scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
-    theme_minimal()
-
-# col dendro
-dendro_data_col_cd19 <- dendro_data(dendro_cd19_clusters, type = "rectangle")
-dendro_col_cd19 <- axis_canvas(var_heatmap_cd19, axis = "x") + 
-    geom_segment(data = segment(dendro_data_col_cd19), 
-        aes(x = x, y = y, xend = xend, yend = yend))
-plot_dendroheat_cd19 <- insert_xaxis_grob(var_heatmap_cd19, 
-            dendro_col_cd19, grid::unit(0.2, "null"), position = "top")
-ggdraw(plot_dendroheat_cd19) + draw_label('CD19+', x=0.9,y=0.9)
-
-
-```
-
-####cd19- dendrogram
-```{r}
-# Make dendrogram
-cluster_mean_cd19n_cast <- dcast(
-  param_cluster_cd19_neg_pct_dt,
-  variable ~ cluster,
-  value.var='clust_mean')
-
-cluster_dendro_cd19n_m <- as.matrix(cluster_mean_cd19n_cast[, -c(1)])
-rownames(cluster_dendro_cd19n_m) <- unlist(cluster_mean_cd19n_cast[,1])
-dendro_cd19n_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_cd19n_m))))
-dendro_cd19n_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_cd19n_m)))
-
-# Create dendrogram plot
-dendro_cd19n_vars_plot <- ggdendrogram(data = dendro_cd19n_vars, rotate = TRUE) +
-  theme(axis.text.y = element_text(size = 6))
-dendro_cd19n_clusters_plot <- ggdendrogram(data = dendro_cd19n_clusters, rotate = TRUE) +
-  theme(axis.text.y = element_text(size = 6))
-
-# column order
-cluster_order_cd19n <- order.dendrogram(dendro_cd19n_clusters)
-cluster_names_cd19n <- colnames(cluster_dendro_cd19n_m[, cluster_order_cd19n])
-param_cluster_cd19_neg_pct_dt <- as.data.table(param_cluster_cd19_neg_pct_dt)
-param_cluster_cd19_neg_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
-
-
-# row order
-var_order_cd19n <- order.dendrogram(dendro_cd19n_vars)
-var_names_cd19n <- row.names(cluster_dendro_cd19n_m[var_order_cd19n, ])
-param_cluster_cd19_neg_pct_dt$variable <- factor(
-    param_cluster_cd19_neg_pct_dt$variable,
-    levels = var_names_cd19n)
-
-# heatmap
-var_heatmap_cd19n <- ggplot(param_cluster_cd19_neg_pct_dt) +
-    geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
-    scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
-    theme_minimal()
-
-# col dendro
-dendro_data_col_cd19n <- dendro_data(dendro_cd19n_clusters, type = "rectangle")
-dendro_col_cd19n <- axis_canvas(var_heatmap_cd19n, axis = "x") +
-    geom_segment(data = segment(dendro_data_col_cd19n),
-        aes(x = x, y = y, xend = xend, yend = yend))
-plot_dendroheat_cd19n <- insert_xaxis_grob(var_heatmap_cd19n,
-            dendro_col_cd19n, grid::unit(0.2, "null"), position = "top")
-ggdraw(plot_dendroheat_cd19n) + draw_label('CD19-', x=0.9,y=0.9)
-
-```
-
-
 
 ### Percent of cells in day, by cluster
 
 ```{r, echo=F, fig.width=15, fig.height=8}
-day_cluster_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(day,cluster, t_type, k562))][,
-    list(day, pct=N/sum(N)), by=c('k562','cluster','t_type')]
+cluster_names <- c("15", "12", "8",  "10", "3",  "6",  "9",  "11", "7",  "2",  "4",  "5",  "14", "1", "13") # globally defining cluster names for rknit
 
-day_cluster_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
+day_cluster <- function(umap_fcs_dt) {
+  day_cluster_pct_dt <- map_day_0(umap_fcs_dt)[,
+    data.table(table(day,cluster, t_type, k562))][,
+      list(day, pct=N/sum(N)), by=c('k562','cluster','t_type')]
+  
+  day_cluster_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
+  
+  ggplot(day_cluster_pct_dt[k562=='cd19+'], aes(
+      x=cluster, 
+      y=factor(day, levels=c(0,6,15,24,33)), 
+      fill=pct)) + 
+    geom_tile( 
+        color='black') +
+    geom_text(aes(label=round(pct*100)), size=3, color='white') +
+    facet_grid(k562+t_type~., scales='free') +
+    scale_fill_viridis_b(direction=1, limits=c(0, 1)) +
+    labs(title='Percent of cells in each cluster by day',  y='Day', 
+         subtitle='(cols sum to 100%)') +
+    theme_minimal()
+}
 
-ggplot(day_cluster_pct_dt[k562=='cd19+'], aes(
-    x=cluster, 
-    y=factor(day, levels=c(0,6,15,24,33)), 
-    fill=pct)) + 
-  geom_tile( 
-      color='black') +
-  geom_text(aes(label=round(pct*100)), size=3, color='white') +
-  facet_grid(k562+t_type~., scales='free') +
-  scale_fill_viridis_b(direction=1, limits=c(0, 1)) +
-  labs(title='Percent of cells in each cluster by day',  y='Day', 
-       subtitle='(cols sum to 100%)') +
-  theme_minimal()
+#cd8
+day_cluster(umap_cd8_fcs_dt)
+
+#cd4
+day_cluster(umap_cd4_fcs_dt)
 ```
 
 ### Percent of cells in cluster, by day
 
 ```{r, echo=F, fig.width=15, fig.height=8}
-day_cluster_total_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(day,cluster, t_type, k562))][,
-    list(cluster, pct=N/sum(N)), by=c('k562','day','t_type')]
+day_cluster_total <- function(umap_fcs_dt) {
+  day_cluster_total_pct_dt <- map_day_0(umap_fcs_dt)[,
+    data.table(table(day,cluster, t_type, k562))][,
+      list(cluster, pct=N/sum(N)), by=c('k562','day','t_type')]
+  
+  day_cluster_total_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
+  
+  ggplot(day_cluster_total_pct_dt[k562=='cd19+'], aes(
+      x=cluster, 
+      y=factor(day, levels=c(0,6,15,24,33)), 
+      fill=pct)) + 
+    geom_tile(color='black') +
+    geom_text(aes(label=round(pct*100)), size=3, color='white') +
+    facet_grid(k562+t_type~., scales='free') +
+    scale_fill_viridis_b('',direction=1, limits=c(0, 0.6)) +
+    labs(title='Percent of cells in each day by cluster', y='Day',
+      subtitle='(rows sum to 100%)') +
+    theme_minimal()
+}
 
-day_cluster_total_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
+#cd8
+day_cluster_total(umap_cd8_fcs_dt)
 
-ggplot(day_cluster_total_pct_dt[k562=='cd19+'], aes(
-    x=cluster, 
-    y=factor(day, levels=c(0,6,15,24,33)), 
-    fill=pct)) + 
-  geom_tile(color='black') +
-  geom_text(aes(label=round(pct*100)), size=3, color='white') +
-  facet_grid(k562+t_type~., scales='free') +
-  scale_fill_viridis_b('',direction=1, limits=c(0, 0.6)) +
-  labs(title='Percent of cells in each day by cluster', y='Day',
-    subtitle='(rows sum to 100%)') +
-  theme_minimal()
-
-day_cluster_pct_dt %>% head()
-day_cluster_total_pct_dt %>% head()
+#cd4
+day_cluster_total(umap_cd4_fcs_dt)
 
 ```
 
 ### CAR differences per cluster
 #### summed across cols
 ```{r, echo=F, fig.width=15, fig.height=8}
-car_cluster_day_indiv_k562_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(car,cluster,k562,t_type, day))][,
-    list(car, pct=N/sum(N)), by=c('cluster','k562','t_type','day')][,
-      pct_delta := scale(pct), by=c('cluster','k562','t_type', 'day')]
 
-car_cluster_day_indiv_k562_pct_dt[,
-  cluster := factor(cluster, levels = cluster_names)]
+car_per_day_per_cluster <- function(umap_fcs_dt) {
+  car_cluster_day_indiv_k562_pct_dt <- map_day_0(umap_fcs_dt)[,
+    data.table(table(car,cluster,k562,t_type, day))][,
+      list(car, pct=N/sum(N)), by=c('cluster','k562','t_type','day')][,
+        pct_delta := scale(pct), by=c('cluster','k562','t_type', 'day')]
+  
+  car_cluster_day_indiv_k562_pct_dt[,
+    cluster := factor(cluster, levels = cluster_names)]
+  
+  car_cluster_day_indiv_k562_pct_dt$day <- factor(car_cluster_day_indiv_k562_pct_dt$day, levels=c('0','6','15','24','33'))
+  
+  min_col <- brewer.pal(name='BrBG', n=11)[2]
+  
+  ggplot(car_cluster_day_indiv_k562_pct_dt[k562=='cd19+']) + 
+      geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
+      facet_grid(k562+t_type~day, scales='free') +
+      scale_fill_distiller('',
+        palette='BrBG', 
+        direction=1,
+        #limits=c(-2.8, 2.8), 
+        na.value=min_col) +
+      labs(title='CAR enrichment\nper day per cluster', y='CAR',
+        subtitle='CAR enrichment in cluster\n(z-score) (summed across cols)') +
+      theme_minimal()
+}
 
-car_cluster_day_indiv_k562_pct_dt$day <- factor(car_cluster_day_indiv_k562_pct_dt$day, levels=c('0','6','15','24','33'))
+#cd8
+car_per_day_per_cluster(umap_cd8_fcs_dt)
 
-min_col <- brewer.pal(name='BrBG', n=11)[2]
-
-car_cluster_day_indiv_k562_pct_dt %>% head(100)
-
-ggplot(car_cluster_day_indiv_k562_pct_dt[k562=='cd19+']) + 
-    geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
-    facet_grid(k562+t_type~day, scales='free') +
-    scale_fill_distiller('',
-      palette='BrBG', 
-      direction=1,
-      #limits=c(-2.8, 2.8), 
-      na.value=min_col) +
-    labs(title='CAR enrichment\nper day per cluster', y='CAR',
-      subtitle='CAR enrichment in cluster\n(z-score) (summed across cols)') +
-    theme_minimal()
+#cd4
+car_per_day_per_cluster(umap_cd4_fcs_dt)
 ```
 ##### summed across rows
 ```{r, echo=F, fig.width=15, fig.height=8}
-car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(car,cluster,k562,t_type,day))][,
-    list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
-      pct_delta := scale(pct), by=c('car','k562','t_type','day')]
+car_per_day_per_cluster_total <- function(umap_fcs_dt) {
+  car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
+    data.table(table(car,cluster,k562,t_type,day))][,
+      list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
+        pct_delta := scale(pct), by=c('car','k562','t_type','day')]
+  
+  car_cluster_day_indiv_k562_total_pct_dt[,
+  cluster := factor(cluster, levels = cluster_names)]
+  
+  car_cluster_day_indiv_k562_total_pct_dt$day <- factor(car_cluster_day_indiv_k562_total_pct_dt$day, levels=c('0','6','15','24','33'))
+  
+  min_col <- brewer.pal(name='BrBG', n=11)[2]
+  
+  ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) + 
+      geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
+      facet_grid(k562+t_type~day, scales='free') +
+      scale_fill_distiller('',
+        palette='BrBG', 
+        direction=1,
+        #limits=c(-2.8, 2.8), 
+        na.value=min_col) +
+      labs(title='CAR enrichment\nper day per cluster', y='CAR',
+        subtitle='CAR enrichment in cluster\n(z-score) (summed across rows)') +
+      theme_minimal()
+}
 
-car_cluster_day_indiv_k562_total_pct_dt[,
-cluster := factor(cluster, levels = cluster_names)]
+#cd8
+car_per_day_per_cluster_total(umap_cd8_fcs_dt)
 
-car_cluster_day_indiv_k562_total_pct_dt$day <- factor(car_cluster_day_indiv_k562_total_pct_dt$day, levels=c('0','6','15','24','33'))
-
-car_cluster_day_indiv_k562_total_pct_dt %>% head(100)
-
-ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) + 
-    geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
-    facet_grid(k562+t_type~day, scales='free') +
-    scale_fill_distiller('',
-      palette='BrBG', 
-      direction=1,
-      #limits=c(-2.8, 2.8), 
-      na.value=min_col) +
-    labs(title='CAR enrichment\nper day per cluster', y='CAR',
-      subtitle='CAR enrichment in cluster\n(z-score) (summed across rows)') +
-    theme_minimal()
+#cd4
+car_per_day_per_cluster_total(umap_cd4_fcs_dt)
 ```
 
 #### Bar charts showing how each CAR changes cluster by day
-```{r}
-car_cluster_day_indiv_k562_bar_pct_dt <- map_day_0(umap_fcs_dt)[,
-  data.table(table(car,cluster,k562,t_type,day))][,
-    list(day, pct=N/sum(N)), by=c('car','k562','t_type','cluster')][,
-      pct_delta := scale(pct), by=c('car','k562','t_type','cluster')]
-
-car_cluster_day_indiv_k562_bar_pct_dt[,
-cluster := factor(cluster, levels = cluster_names)]
-
-car_cluster_day_indiv_k562_bar_pct_dt$day <- factor(car_cluster_day_indiv_k562_bar_pct_dt$day, levels=c('0','6','15','24','33'))
-
-# data exploration
-car_cluster_day_indiv_k562_bar_pct_dt %>% 
-  filter(k562=='cd19+', t_type=='cd8', car=='zeta') %>% arrange(day) %>% head(100)
+```{r fig.width=15, fig.height=8}
+car_clusters_by_day <- function(umap_fcs_dt) {
+  car_cluster_day_indiv_k562_bar_pct_dt <- map_day_0(umap_fcs_dt)[,
+    data.table(table(car,cluster,k562,t_type,day))][,
+      list(day, pct=N/sum(N)), by=c('car','k562','t_type','cluster')][,
+        pct_delta := scale(pct), by=c('car','k562','t_type','cluster')]
   
-#filter for CD4+, CD19+, only CARs > 10% in a cluster in a given day
-car_cluster_day_indiv_k562_bar_pct_dt %>% 
-  filter(k562=='cd19+', t_type=='cd4', pct > 0.10) %>%
-  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
-    facet_grid(car~day, scales='free_x', space='free_x') +
-    labs(title='CD4 CAR enrichment (>10%)\nper cluster per day', y='CAR',
-      subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)')
+  car_cluster_day_indiv_k562_bar_pct_dt[,
+  cluster := factor(cluster, levels = cluster_names)]
+  
+  car_cluster_day_indiv_k562_bar_pct_dt$day <- factor(car_cluster_day_indiv_k562_bar_pct_dt$day, levels=c('0','6','15','24','33'))
+  
+  #filter for CD19+, only CARs > 10% in a cluster in a given day
+  car_cluster_day_indiv_k562_bar_pct_dt %>% 
+    filter(k562=='cd19+', pct > 0.10) %>%
+    ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
+      facet_grid(car~day, scales='free_x', space='free_x') +
+      labs(title='CAR enrichment (>10%)\nper cluster per day', y='CAR',
+        subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)')
+}
 
-#filter for CD8+, CD19+, only CARs > 10% in a cluster in a given day
-car_cluster_day_indiv_k562_bar_pct_dt %>% 
-  filter(k562=='cd19+', t_type=='cd8', pct > 0.10) %>%
-  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
-    facet_grid(car~day, scales='free_x', space='free_x') +
-    labs(title='CD8 CAR enrichment (>10%)\nper cluster per day', y='CAR',
-      subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)')
+#cd8
+car_clusters_by_day(umap_cd8_fcs_dt)
+
+#cd4
+car_clusters_by_day(umap_cd4_fcs_dt)
 ```
 
 #### Bar charts showing distribution of each CAR in clusters per day 
-```{r}
-#filter for CD4+, CD19+, only CARs > 10% in a cluster in a given day
-car_cluster_day_indiv_k562_total_pct_dt %>% 
-  filter(k562=='cd19+', t_type=='cd4', pct > 0.10) %>%
-  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
-    facet_grid(car~day, scales='free_x', space='free_x') +
-    labs(title='CD4 CAR enrichment (>10%)\nper day per cluster', y='CAR',
-      subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))')
+```{r fig.width=15, fig.height=8}
+car_clusters_by_square <- function(umap_fcs_dt) {
+  car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
+      data.table(table(car,cluster,k562,t_type,day))][,
+        list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
+          pct_delta := scale(pct), by=c('car','k562','t_type','day')]
+    
+    car_cluster_day_indiv_k562_total_pct_dt[,
+    cluster := factor(cluster, levels = cluster_names)]
+    
+    car_cluster_day_indiv_k562_total_pct_dt$day <- factor(car_cluster_day_indiv_k562_total_pct_dt$day, levels=c('0','6','15','24','33'))
+  #filter for  CD19+, only CARs > 10% in a cluster in a given day
+  car_cluster_day_indiv_k562_total_pct_dt %>% 
+    filter(k562=='cd19+', pct>.10) %>%
+    ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
+      facet_grid(car~day, scales='free_x', space='free_x') +
+      labs(title='CD8 CAR enrichment (>10%)\nper day per cluster', y='CAR',
+        subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))')
+}
 
-#filter for CD8+, CD19+, only CARs > 10% in a cluster in a given day
-car_cluster_day_indiv_k562_total_pct_dt %>% 
-  filter(k562=='cd19+', t_type=='cd8', pct>.10) %>%
-  ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
-    facet_grid(car~day, scales='free_x', space='free_x') +
-    labs(title='CD8 CAR enrichment (>10%)\nper day per cluster', y='CAR',
-      subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))')
+#cd8
+car_clusters_by_square(umap_cd8_fcs_dt)
+
+#cd4
+car_clusters_by_square(umap_cd4_fcs_dt)
 
 ```
