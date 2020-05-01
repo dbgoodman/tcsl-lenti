@@ -430,23 +430,23 @@ cast_comparison <- function(
   xy_scalemin = cast_groups[, min(c(x,y), na.rm=T)]
   xy_scalemax = cast_groups[, max(c(x,y), na.rm=T)]
   tryCatch({
-    cast_groups[, x_scaled_comb := rescale(x, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
-    cast_groups[, y_scaled_comb := rescale(y, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
+    cast_groups[, x_scaled_comb := scales::rescale(x, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
+    cast_groups[, y_scaled_comb := scales::rescale(y, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
   }, error = function(e) {
     message(e)
-    cast_groups[, x_scaled := NaN]
-    cast_groups[, y_scaled := NaN]}
+    cast_groups[, x_scaled_comb := NaN]
+    cast_groups[, y_scaled_comb := NaN]}
   )
     
   # rescle == separate:
   # rescale x and y to (0,1) on individual scales
   tryCatch({
-    cast_groups[, x_scaled_sep := rescale(x)]
-    cast_groups[, y_scaled_sep := rescale(y)]
+    cast_groups[, x_scaled_sep :=  scales::rescale(x)]
+    cast_groups[, y_scaled_sep :=  scales::rescale(y)]
   }, error = function(e) {
     message(e)
-    cast_groups[, x_scaled := NaN]
-    cast_groups[, y_scaled := NaN]}
+    cast_groups[, x_scaled_sep := NaN]
+    cast_groups[, y_scaled_sep := NaN]}
   )
 }
 
@@ -631,6 +631,25 @@ ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot,
         title='Proliferation, +/- antigen',
         y='CD19+ Proliferation (scaled per replicate)', 
         x='CD19- Proliferation (scaled per replicate)')
+
+# with axis cuts
+ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot, 
+       aes(x=x_scaled_comb, y=y_scaled_comb, label=label.few)) + 
+    geom_point() + 
+    facet_grid(t.type ~ .) + 
+    scale_x_continuous(expand=expansion(mult=c(0,.1), add=0), limits=c(0,NA)) +
+    scale_y_continuous(limits=c(0.48, 0.95), expand=expansion(mult=c(0,0), add=0), 
+      breaks=(5:10)/10, labels=c('', (6:10)/10)) +
+    geom_text_repel(size=2.5) +
+    geom_vline(xintercept = -Inf) + geom_hline(yintercept = -Inf) +
+    labs(
+        title='Proliferation, +/- antigen',
+        y='CD19+ Proliferation (scaled per replicate)', 
+        x='CD19- Proliferation\n(scaled per replicate)') +
+    theme_minimal() +
+    theme(panel.spacing.y=unit(1.5, "lines"))
+
+# fig2 style
 
 # with axis cuts
 ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot, 
@@ -852,8 +871,8 @@ cast_4v8[, assay := factor(assay,
 # label significant hits
 cast_4v8[, CAR.type.size := CAR.type]
 cast_4v8[CAR.type == 'other' & 
-    ((padj.disp_CD4 < -log10(0.05) & log2FoldChange_CD4 > 0) | 
-    (padj.disp_CD8 < -log10(0.05) & log2FoldChange_CD8 > 0)), 
+    ((padj.disp_CD4 > -log10(0.05) & log2FoldChange_CD4 > 0) | 
+    (padj.disp_CD8 > -log10(0.05) & log2FoldChange_CD8 > 0)), 
   CAR.type.size := 'other_sig']
 
 cast_4v8[, CAR.label.sig := '']
