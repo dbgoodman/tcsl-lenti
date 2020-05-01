@@ -416,11 +416,13 @@ cast_comparison <- function(
     rescale= 'combined') {
   
   message(paste(x_group, y_group, sep=', '))
+  
   cast_groups <- dcast(
     unique(comp.df[sort.group %in% c(x_group, y_group), 
         list(CAR.align, sort.group, CAR.score)]), 
     CAR.align ~ sort.group, value.var = col)[, 
-      comparison := paste(x_group, y_group, sep=' vs ')]
+      `:=`(x.group= x_group, y.group= y_group)]
+  
   names(cast_groups)[c(2,3)] <- xycols
   
   stopifnot(rescale %in% c('combined','separate'))
@@ -430,8 +432,10 @@ cast_comparison <- function(
   xy_scalemin = cast_groups[, min(c(x,y), na.rm=T)]
   xy_scalemax = cast_groups[, max(c(x,y), na.rm=T)]
   tryCatch({
-    cast_groups[, x_scaled_comb := scales::rescale(x, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
-    cast_groups[, y_scaled_comb := scales::rescale(y, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
+    cast_groups[, x_scaled_comb := scales::rescale(
+      x, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
+    cast_groups[, y_scaled_comb := scales::rescale(
+      y, from=c(min(c(x,y), na.rm=T), max(c(x,y), na.rm=T)))]
   }, error = function(e) {
     message(e)
     cast_groups[, x_scaled_comb := NaN]
@@ -449,7 +453,28 @@ cast_comparison <- function(
     cast_groups[, y_scaled_sep := NaN]}
   )
 }
+```
+## All Replicate Comparisons
+```{r}
 
+all_rep_comparisons <- read.counts[
+  grepl('CTV', assay), 
+  data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
+  by=c('assay','t.type','k.type')]
+
+names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
+
+all_rep_comparisons <- all_rep_comparisons[, 
+  cast_comparison(read.counts, x.group, y.group)[, c('x.group','y.group') := NULL],
+  by=c('assay','t.type','k.type','x.group','y.group')]
+
+ggplot(all_rep_comparisons) + 
+  geom_point(aes(x_scaled_sep, y_scaled_sep)) + 
+  facet_wrap(assay + k.type + t.type ~ x.group + y.group)
+
+```
+## Pos Neg Comparisons
+```{r}
 # remove prolif1.d2.ctv3 for now - CD4 has only 1 bin, D, 
 # and KLRG1 is on top for CD19+ ...need to check this more
 
