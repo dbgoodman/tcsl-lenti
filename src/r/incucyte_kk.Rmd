@@ -180,9 +180,10 @@ setnames(bb28z_dt, "car", "ctrl_car")
 
 k562_thresh <- function(incucyte_dt, pct_rem){
   
-  cross_dt <- incucyte_dt[, list(
-      t_cross = Elapsed[which.min(abs(mean_value_none-(pct_rem/100)))],
-      cross_thresh = min(mean_value_none)<(pct_rem/100)),
+  cross_dt <- incucyte_dt[Elapsed<=150, list(
+      t_cross = min(Elapsed[order(abs(mean_value_none-(pct_rem/100)))][1:15]),
+      cross_thresh = min(mean_value_none)<(pct_rem/100),
+      last_mean_val_none = last(mean_value_none)),
     by=c('car','k562','donor','measurement','day','t_type','noise')][
       noise==F & cross_thresh==T]
   cross_dt[, day_f := factor(cross_dt$day, levels=c('0','8','15','22','29'))]
@@ -192,10 +193,6 @@ k562_thresh <- function(incucyte_dt, pct_rem){
     geom_line(aes(x=Elapsed, y=mean_value_none, 
                   group=interaction(well,day,donor), 
                   color=as.factor(donor))) +
-    geom_ribbon(aes(x=Elapsed, 
-                    ymin=mean_value_none-std_err_value_none_log, 
-                    ymax=mean_value_none+std_err_value_none_log, 
-                    fill=as.factor(donor)), alpha=0.3) +
     geom_vline(data=cross_dt[measurement==chosen_measure & k562=='mkate_cd19' & 
                                t_type=='cd4' & car!='none'], 
                aes(xintercept=t_cross)) +
@@ -227,10 +224,6 @@ k562_thresh <- function(incucyte_dt, pct_rem){
     geom_line(aes(x=Elapsed, y=mean_value_none, 
                   group=interaction(well,day,donor), 
                   color=as.factor(donor))) +
-    geom_ribbon(aes(x=Elapsed, 
-                    ymin=mean_value_none-std_err_value_none_log, 
-                    ymax=mean_value_none+std_err_value_none_log, 
-                    fill=as.factor(donor)), alpha=0.3) +
     geom_vline(data=cross_dt[measurement==chosen_measure & k562=='mkate_cd19' & 
                              t_type=='cd8' & car!='none'], 
                aes(xintercept=t_cross)) +
@@ -244,7 +237,7 @@ k562_thresh <- function(incucyte_dt, pct_rem){
     geom_text(data=cross_dt[t_type=='cd8' & measurement==chosen_measure & 
                             k562=='mkate_cd19' & car!='none'], 
               aes(x=t_cross-8, y=1.5, label=t_cross)) +
-    scale_x_continuous(expand=c(0,0), limits=c(0,150)) + 
+    scale_x_continuous(expand=c(0,0), limits=c(0,70)) + 
     scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
                        limits=c(1e-2,1e1), trans=log10_trans()) +
     theme_minimal(base_size=20) + 
@@ -266,85 +259,145 @@ k562_thresh <- function(incucyte_dt, pct_rem){
 ```
 
 
-
 ```{r}
 
+cross_60 <- k562_thresh(incucyte_dt, 60)
+
+```
+
+
+
+```{r}
 
 
 # plots showing vertical line where red (area/intensity/count) reaches 0.75 of starting
 # separate cd4/cd8 plots
 
-ggplot(incucyte_dt[t_type=='cd4' & measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
-  geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
-  geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
-  geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19' & t_type=='cd4'], aes(xintercept=t_75_left)) +
-  facet_grid(car~day_f+donor)  +
-  geom_line(data=bb28z_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], 
-            aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
-            color='gray') +
-  geom_text(data=cross_75_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
-  ggtitle("CD4 - Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
-  theme_minimal(base_size=20) + 
-  geom_vline(xintercept=0) + 
-  geom_hline(yintercept=0) +
-  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
-  labs(y='Change in Red Area (Normalized to Starting)',
-       fill='Donor',
-       color='Donor',
-       linetype='Controls')
+# ggplot(incucyte_dt[t_type=='cd4' & measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
+#   geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
+#   geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
+#   geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19' & t_type=='cd4'], aes(xintercept=t_75_left)) +
+#   facet_grid(car~day_f+donor)  +
+#   geom_line(data=bb28z_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], 
+#             aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
+#             color='gray') +
+#   geom_text(data=cross_75_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
+#   ggtitle("CD4 - Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
+#   theme_minimal(base_size=20) + 
+#   geom_vline(xintercept=0) + 
+#   geom_hline(yintercept=0) +
+#   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+#   labs(y='Change in Red Area (Normalized to Starting)',
+#        fill='Donor',
+#        color='Donor',
+#        linetype='Controls')
+# 
+# 
+# ggplot(incucyte_dt[t_type=='cd8' & measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
+#   geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
+#   geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
+#   geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19' & t_type=='cd8'], aes(xintercept=t_75_left)) +
+#   facet_grid(car~day_f+donor)  +
+#   geom_line(data=bb28z_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], 
+#             aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
+#             color='gray') +
+#   geom_text(data=cross_75_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
+#   ggtitle("CD8 - Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
+#   theme_minimal(base_size=20) + 
+#   geom_vline(xintercept=0) + 
+#   geom_hline(yintercept=0) +
+#   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+#   labs(y='Change in Red Area (Normalized to Starting)',
+#        fill='Donor',
+#        color='Donor',
+#        linetype='Controls')
 
 
-ggplot(incucyte_dt[t_type=='cd8' & measurement=='redarea' & noise==F & k562=='mkate_cd19' & !(car %in% c('KLRG1','none'))]) +
-  geom_line(aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor),color=as.factor(donor))) +
-  geom_ribbon(aes(x=Elapsed, ymin=mean_value_norm-std_error, ymax=mean_value_norm+std_error, fill=as.factor(donor)), alpha=0.3) +
-  geom_vline(data=cross_75_dt[measurement=='redarea' & k562=='mkate_cd19' & t_type=='cd8'], aes(xintercept=t_75_left)) +
-  facet_grid(car~day_f+donor)  +
-  geom_line(data=bb28z_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], 
-            aes(x=Elapsed, y=mean_value_norm, group=interaction(well,day,donor,ctrl_car), linetype=ctrl_car), 
-            color='gray') +
-  geom_text(data=cross_75_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=t_75_left-8, y=1.5, label=t_75_left)) +
-  ggtitle("CD8 - Time When Red Total Area Reaches 0.75 (Normalized to Starting)") +
-  theme_minimal(base_size=20) + 
-  geom_vline(xintercept=0) + 
-  geom_hline(yintercept=0) +
-  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
-  labs(y='Change in Red Area (Normalized to Starting)',
-       fill='Donor',
-       color='Donor',
-       linetype='Controls')
 
 
-
-
-ggplot(cross_75_dt[t_type=='cd4' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=car, y=t_75_left, fill=car)) +
+ggplot(cross_60[[1]][t_type=='cd4' & measurement==chosen_measure & k562=='mkate_cd19'], aes(x=car, y=t_cross, fill=car)) +
   geom_bar(stat="identity", position=position_dodge()) +
-  facet_grid(donor~day_f) +
-  theme_minimal(base_size=20) + geom_hline(yintercept=-Inf) + geom_vline(xintercept=-Inf) + scale_y_continuous(expand=c(0,0)) +
-  scale_fill_brewer(palette='Reds') +
-  theme(plot.title = element_text(size=20)) +
-  theme(plot.title = element_text(hjust=0.5)) +
-  theme(panel.spacing=unit(2, "lines")) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(title='CD4 - Time When Red Area Reaches 75% of Starting',
-       x='CAR',
-       y='Hours When 75% Red Area Remains',
+  geom_text(aes(x=car, y=t_cross+5, group=t_cross, label=t_cross), 
+            position = position_dodge(width=0.9),
+            size=4) +
+  facet_grid(donor~day_f,
+             labeller=label_both) +
+  theme_minimal(base_size=20) + 
+  geom_hline(yintercept=-Inf) + 
+  geom_vline(xintercept=-Inf) + 
+  scale_y_continuous(expand=c(0,0), limits=c(0,220)) +
+  scale_fill_brewer(palette='Paired') +
+  theme(plot.title=element_text(size=20, hjust=0.5),
+        panel.spacing=unit(2, "lines"),
+        axis.text.x=element_blank(),
+        axis.title.x=element_blank()) +
+  labs(title='CD4 - Time When Red Intensity Reaches 60% of Starting',
+       y='Hours When 60% Red Intensity Remains',
        fill='CAR')
 
 
-ggplot(cross_75_dt[t_type=='cd8' & measurement=='redarea' & k562=='mkate_cd19'], aes(x=car, y=t_75_left, fill=car)) +
+ggplot(cross_60[[1]][t_type=='cd8' & measurement==chosen_measure & k562=='mkate_cd19'], aes(x=car, y=t_cross, fill=car)) +
   geom_bar(stat="identity", position=position_dodge()) +
-  facet_grid(donor~day_f) +
-  theme_minimal(base_size=20) + geom_hline(yintercept=-Inf) + geom_vline(xintercept=-Inf) + scale_y_continuous(expand=c(0,0)) +
-  scale_fill_brewer(palette='Reds') +
-  theme(plot.title = element_text(size=20)) +
-  theme(plot.title = element_text(hjust=0.5)) +
-  theme(panel.spacing=unit(2, "lines")) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(title='CD8 - Time When Red Area Reaches 75% of Starting',
-       x='CAR',
-       y='Hours When 75% Red Area Remains',
+  geom_text(aes(x=car, y=t_cross+2, group=t_cross, label=t_cross), 
+            position = position_dodge(width=0.9),
+            size=4) +
+  facet_grid(donor~day_f,
+             labeller=label_both) +
+  theme_minimal(base_size=20) + 
+  geom_hline(yintercept=-Inf) + 
+  geom_vline(xintercept=-Inf) + 
+  scale_y_continuous(expand=c(0,0), limits=c(0,53)) +
+  scale_fill_brewer(palette='Paired') +
+  theme(plot.title=element_text(size=20, hjust=0.5),
+        panel.spacing=unit(2, "lines"),
+        axis.text.x=element_blank(),
+        axis.title.x=element_blank()) +
+  labs(title='CD8 - Time When Red Intensity Reaches 60% of Starting',
+       y='Hours When 60% Red Intensity Remains',
        fill='CAR')
 
+
+```
+
+
+```{r}
+
+ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & measurement == chosen_measure & car!='none'], 
+  aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=car)) + 
+  geom_line(aes(color=car)) + 
+  geom_text(data=cross_60[[1]][k562=='mkate_cd19' & t_type=='cd4' & 
+                            measurement==chosen_measure & car!='none'], 
+            aes(label=t_cross, colour=car, x=140, y=last_mean_val_none)) +
+  facet_grid(t_type+donor~day_f) + 
+  ggtitle("Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 25)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
+  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+    limits=c(1e-2,1e1), trans=log10_trans()) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_brewer(palette='Paired') + 
+  scale_fill_brewer(palette='Paired') + 
+  geom_line(data=incucyte_dt[k562=='mkate_cd19' & !noise & t_type=='cd4' & measurement==chosen_measure & car=='none'], aes(x=Elapsed, y=mean_value_none),
+            color='gray') +
+  theme(panel.spacing = unit(2, "lines"))
+
+
+
+ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement == chosen_measure], 
+  aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=car)) + 
+  geom_line(aes(color=car)) + 
+  facet_grid(t_type+donor~day_f) + 
+  ggtitle("Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 25)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,70)) +
+  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+    limits=c(1e-2,1e1), trans=log10_trans()) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_brewer(palette='Set1') + 
+  scale_fill_brewer(palette='Set1') + 
+  theme(panel.spacing = unit(2, "lines"))
 
 ```
 
