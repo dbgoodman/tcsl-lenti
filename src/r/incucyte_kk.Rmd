@@ -258,7 +258,7 @@ k562_thresh <- function(incucyte_dt, pct_rem){
 ```
 
 
-```{r}
+```{r fig.width=16, fig.height=8}
 
 cross_60 <- k562_thresh(incucyte_dt, 60)
 
@@ -270,7 +270,7 @@ cross_60[[3]]
 
 
 
-```{r}
+```{r fig.width=16, fig.height=8}
 
 # barplots showing time when 60% red intensity is reached
 
@@ -323,7 +323,7 @@ ggplot(cross_60[[1]][t_type=='cd8' & measurement==chosen_measure & k562=='mkate_
 ```
 
 
-```{r}
+```{r fig.width=16, fig.height=8}
 
 # line plots with elapsed time when threshold is reached.
 
@@ -370,7 +370,7 @@ ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement =
 ```
 
 
-```{r}
+```{r fig.width=16, fig.height=8}
 
 # facet on car and color by day
 
@@ -417,25 +417,62 @@ ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement =
 ```
 
 
-```{r}
+```{r fig.width=16, fig.height=8}
 
 # % cancer cells killed at different timepoints - theo's suggestion at meeting
 
-ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & measurement == chosen_measure & car!='none' & Elapsed==24], 
-  aes(x=car, y=mean_value_none, group=interaction(car, day, donor), fill=car)) + 
-  geom_point(aes(color=car)) + 
-  facet_grid(t_type+donor ~ .) + 
-  ggtitle("CD4 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting) at 24 Hours") +
-  theme_minimal(base_size=20) +
-  theme(plot.title = element_text(size = 25)) + 
-  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
-    limits=c(1e-2,1e1), trans=log10_trans()) +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_color_brewer(palette='Paired') + 
-  scale_fill_brewer(palette='Paired') + 
-  geom_hline(yintercept=1,
-            color='gray60') +
-  theme(panel.spacing = unit(2, "lines"))
+set_time <- function(df, elapsed_hr){
+  cd4_plot <- ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' &
+                                   measurement == chosen_measure & car!='none' &
+                                   Elapsed==elapsed_hr], 
+    aes(x=car, y=mean_value_none, group=interaction(car, day_f, donor), 
+        fill=car, color=car)) + 
+    geom_point(aes(color=car)) + 
+    geom_linerange(aes(ymin=mean_value_none-std_dev_value_none_log, 
+                      ymax=mean_value_none+std_dev_value_none_log)) +
+    facet_grid(t_type+donor ~ day_f) + 
+    ggtitle(paste0("CD4 - Incucyte K562 Killing by mKate Total Integrated Intensity\n(normalized to starting) at ", elapsed_hr ," Hours")) +
+    theme_minimal(base_size=20) +
+    theme(plot.title = element_text(size = 25)) + 
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+      limits=c(1e-2,1e1), trans=log10_trans()) +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_color_brewer(palette='Paired') + 
+    scale_fill_brewer(palette='Paired') + 
+    geom_hline(yintercept=1,
+              color='gray60') +
+    theme(panel.spacing = unit(2, "lines"),
+          axis.text.x = element_text(angle = 90, vjust=0.5))
+  
+  cd8_plot <- ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' &
+                                   measurement == chosen_measure & car!='none' &
+                                   Elapsed==elapsed_hr], 
+    aes(x=car, y=mean_value_none, group=interaction(car, day_f, donor), 
+        fill=car, color=car)) + 
+    geom_point(aes(color=car)) + 
+    geom_linerange(aes(ymin=mean_value_none-std_dev_value_none_log, 
+                      ymax=mean_value_none+std_dev_value_none_log)) +
+    facet_grid(t_type+donor ~ day_f) + 
+    ggtitle(paste0("CD8 - Incucyte K562 Killing by mKate Total Integrated Intensity\n(normalized to starting) at ", elapsed_hr ," Hours")) +
+    theme_minimal(base_size=20) +
+    theme(plot.title = element_text(size = 25)) + 
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+      limits=c(1e-2,1e1), trans=log10_trans()) +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_color_brewer(palette='Paired') + 
+    scale_fill_brewer(palette='Paired') + 
+    geom_hline(yintercept=1,
+              color='gray60') +
+    theme(panel.spacing = unit(2, "lines"),
+          axis.text.x = element_text(angle = 90, vjust=0.5))
+  
+  new_list <- list(cd4_plot, cd8_plot)
+  return(new_list)
+}
+
+
+set_time(incucyte_dt, 26)[[1]]
+set_time(incucyte_dt, 26)[[2]]
 
 
 ```
