@@ -3,13 +3,21 @@ library("gdata")
 library("ggplot2")
 library('scales')
 
+# normalize
+# DBG & KK looked at raw value plots - saw that first two hours had a lot of 
+# noise/sharp jumps in values. 
+# likely to be image recognition noise /etc, so we are starting the
+# normalization at 2 hrs. 
+NORM_HOUR_CUTOFF = 2
+
 incucyte_dir <- here::here('..','..','incucyte')
 
 load_single_measurement <- function(parent_dir, data_path, platemap_path) {
   
   data_dt <- fread(file=file.path(parent_dir, data_path))
   data_dt <- data_dt[, 2:ncol(data_dt)]
-  data_melt_dt <- suppressWarnings(melt(data_dt, id.vars='Elapsed', variable.name='test', value.name='value'))
+  data_melt_dt <- suppressWarnings(melt(data_dt, id.vars='Elapsed', 
+    variable.name='test', value.name='value'))
   data_melt_dt <- data_melt_dt[, c('well','image') := tstrsplit(test, ", Image")]
   platemap_dt <- fread(file=file.path(parent_dir, platemap_path))
   data_melt_dt <- merge(data_melt_dt, platemap_dt, by=c('well'))
@@ -36,27 +44,32 @@ load_incucyte_data <- function(parent_dir, experiment_name) {
   experiment_dir = file.path(parent_dir, experiment_name)
   
   filepaths_dt <- data.table(
-    data_path=list.files(path=parent_dir, pattern=paste0('.+.', experiment_name, '.+txt'), recursive=TRUE)
+    data_path=list.files(path=parent_dir, 
+    pattern=paste0('.+.', experiment_name, '.+txt'), recursive=TRUE)
   )
   
   filepaths_dt[,
                `:=`(
                  date = gsub('.+/([\\d\\.]+)_[^/]+$', '\\1', data_path),
                  donor = gsub('.+_D\\d{1,2}_donor(\\d).+', '\\1', data_path),
-                 day = gsub(paste0('.+', experiment_name, '_D(\\d+).+'), '\\1', data_path),
+                 day = gsub(paste0(
+                   '.+', experiment_name, '_D(\\d+).+'), '\\1', data_path),
                  measurement = gsub('.+(_donor\\d)?_(\\w+).txt', '\\2', data_path)
                )]
   
   #load incucyte plate maps
   platemaps_dt <- data.table(
-    platemap_path=list.files(path=parent_dir, pattern=paste0('.*',experiment_name,'.*csv'), recursive=TRUE)
+    platemap_path=list.files(path=parent_dir,
+      pattern=paste0('.*',experiment_name,'.*csv'), recursive=TRUE)
   )
   
   platemaps_dt[,
-               `:=`(
-                 donor = gsub('.+_D\\d{1,2}_inc_donor(\\d).+', '\\1', platemap_path),
-                 day = gsub(paste0('.+_', experiment_name, '_D(\\d+).+'), '\\1', platemap_path)
-               )]
+  `:=`(
+    donor = gsub('.+_D\\d{1,2}_inc_donor(\\d).+', '\\1', 
+    platemap_path),
+   day = gsub(paste0(
+     '.+_', experiment_name, '_D(\\d+).+'), '\\1', platemap_path)
+)]
   
   #merge filepaths_dt and platemaps_dt
   if (platemaps_dt[, all(donor == platemap_path)]) {
@@ -71,12 +84,14 @@ load_incucyte_data <- function(parent_dir, experiment_name) {
       by=c('date', 'donor', 'day', 'measurement')]
   }
   
-  # replace plate donor with explicit donor on map, since some donors are switched
+  # replace plate donor with explicit donor on map, since some donors are 
+  # switched
   combined_data_dt[, donor := donor_map]
   combined_data_dt[, donor_map := NULL]
   
   # get number of replicates per timepoint and condition
-  combined_data_dt[, n_rep := .N, by=c('measurement','donor','day','well','Elapsed')]
+  combined_data_dt[, n_rep := .N,
+    by=c('measurement','donor','day','well','Elapsed')]
   
   #if individual images available, throw away mean value (where image == well)
   combined_data_dt <- combined_data_dt[n_rep == 1 | well != image]
@@ -88,8 +103,11 @@ load_incucyte_data <- function(parent_dir, experiment_name) {
   combined_data_dt[day==7, day := 8]
   
   # clean up days
-  combined_data_dt$day_f <- factor(combined_data_dt$day, levels=as.character(unique(combined_data_dt$day)))
-  combined_data_dt$car_f <- factor(combined_data_dt$car, levels=c('41BB', 'BAFF-R', 'CD28', 'CD40', 'KLRG1', 'TACI', 'TNR8', 'zeta', 'none'))
+  combined_data_dt$day_f <- factor(combined_data_dt$day, 
+    levels=as.character(unique(combined_data_dt$day)))
+  combined_data_dt$car_f <- factor(combined_data_dt$car,
+    levels=c('41BB', 'BAFF-R', 'CD28', 'CD40', 'KLRG1', 
+      'TACI', 'TNR8', 'zeta', 'none'))
   
   # remove noise:
   #1. identify large differences between successive measurements
@@ -104,18 +122,27 @@ load_incucyte_data <- function(parent_dir, experiment_name) {
   remove_around_noise <- function(noise_vector) {
     return(as.numeric(any(as.logical(noise_vector))))
   }
-  combined_data_dt[, noise_adj := frollapply(noise, 3, remove_around_noise, align='center', fill=0), 
-              by=c('measurement','donor','day','k562','well','image','car')]
+  combined_data_dt[, noise_adj := frollapply(noise, 3, remove_around_noise, 
+      align='center', fill=0), 
+    by=c('measurement','donor','day','k562','well','image','car')]
   
   #4. noisy measurements map across wells for the same day/donor/t_type (same plate)
-  combined_data_dt[, noise := any(noise_adj > 0), by=c('measurement','day','k562','Elapsed','donor')]
+  combined_data_dt[, noise := any(noise_adj > 0), 
+    by=c('measurement','day','k562','Elapsed','donor')]
   combined_data_dt[, noise_adj := NULL]
   
-  # normalize
-  combined_data_dt[, value_norm := value/(value[Elapsed==0]+0.001), by=c('well','day','donor','car','measurement','k562','image')]
-  combined_data_dt[, mean_value_norm := mean(value_norm), by=c('day','donor','car','Elapsed','measurement','k562')]
-  combined_data_dt[, std_dev := sd(value_norm), by=c('day','donor','car','Elapsed','measurement','k562')]
-  combined_data_dt[, std_error := std_dev/sqrt(.N), by=c('day','donor','car','Elapsed','measurement','k562')]
+  # normalize: DBG & KK looked at raw value plots - saw that first two hours had
+  # a lot of noise/sharp jumps in values. likely to be image recognition
+  # noise/etc, so we are starting the normalization at 2 hrs.
+  
+  combined_data_dt[, value_norm := value/(value[Elapsed==NORM_HOUR_CUTOFF]+0.001), 
+    by=c('well','day','donor','car','measurement','k562','image')]
+  combined_data_dt[, mean_value_norm := mean(value_norm),
+    by=c('day','donor','car','Elapsed','measurement','k562')]
+  combined_data_dt[, std_dev := sd(value_norm),
+    by=c('day','donor','car','Elapsed','measurement','k562')]
+  combined_data_dt[, std_error := std_dev/sqrt(.N),
+    by=c('day','donor','car','Elapsed','measurement','k562')]
 
   #re-order days
   combined_data_dt[, day_f := factor(day_f, levels=sort(as.numeric(levels(day_f))))]
@@ -140,12 +167,17 @@ incucyte_dt <- rbind(
   copy(incucyte_dt[t_type == 'cd4' & is.na(donor)])[, donor := 4])
 
 # add normalization to no T cells
-incucyte_dt[, mean_value_none := mean_value_norm/mean(mean_value_norm[car == 'none']), by=c('measurement','donor','day','k562','Elapsed', 't_type')]
-incucyte_dt[, value_none := value_norm/mean(mean_value_norm[car == 'none']), by=c('measurement','donor','day','k562','Elapsed', 't_type')]
-incucyte_dt[, std_dev_value_none := sd(value_none), by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
-incucyte_dt[, std_err_value_none := std_dev_value_none/sqrt(.N), by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
-incucyte_dt[, std_dev_value_none_log := sd(log(value_none)), by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
-incucyte_dt[, std_err_value_none_log := std_dev_value_none_log/sqrt(.N), by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
-
+incucyte_dt[, mean_value_none := mean_value_norm/mean(mean_value_norm[car == 'none']), 
+  by=c('measurement','donor','day','k562','Elapsed', 't_type')]
+incucyte_dt[, value_none := value_norm/mean(mean_value_norm[car == 'none']), 
+  by=c('measurement','donor','day','k562','Elapsed', 't_type')]
+incucyte_dt[, std_dev_value_none := sd(value_none),
+  by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
+incucyte_dt[, std_err_value_none := std_dev_value_none/sqrt(.N),
+  by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
+incucyte_dt[, std_dev_value_none_log := sd(log(value_none)),
+  by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
+incucyte_dt[, std_err_value_none_log := std_dev_value_none_log/sqrt(.N),
+  by=c('measurement','donor','day','k562','Elapsed', 't_type','car')]
 
 save(incucyte_dt, file=file.path(here::here('..','data','incucyte.Rdata')))
