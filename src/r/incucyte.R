@@ -10,7 +10,8 @@ library('scales')
 # normalization at 2 hrs. 
 NORM_HOUR_CUTOFF = 2
 
-incucyte_dir <- here::here('..','..','incucyte')
+incucyte_dir <- here::here(
+  '..','..','s3-roybal-tcsl', 'lenti_screen_compiled_data', 'data', 'incucyte')
 
 load_single_measurement <- function(parent_dir, data_path, platemap_path) {
   
@@ -19,6 +20,10 @@ load_single_measurement <- function(parent_dir, data_path, platemap_path) {
   data_melt_dt <- suppressWarnings(melt(data_dt, id.vars='Elapsed', 
     variable.name='test', value.name='value'))
   data_melt_dt <- data_melt_dt[, c('well','image') := tstrsplit(test, ", Image")]
+  
+  # make sure image is numeric
+  data_melt_dt[, image := as.numeric(image)]
+  
   platemap_dt <- fread(file=file.path(parent_dir, platemap_path))
   data_melt_dt <- merge(data_melt_dt, platemap_dt, by=c('well'))
   data_melt_dt[, value := as.numeric(value)]
@@ -165,6 +170,15 @@ incucyte_dt <- rbind(
   incucyte_dt[!is.na(donor)], 
   copy(incucyte_dt[t_type == 'cd4' & is.na(donor)])[, donor := 3], 
   copy(incucyte_dt[t_type == 'cd4' & is.na(donor)])[, donor := 4])
+
+
+# we ran this code (commented) to determine which replicates to filter out
+#...
+# here is a list of the days/reps/cars/etc to filter out
+#...
+
+#code to manually filter out these replicates before getting final
+#mean_value_none measurements, etc
 
 # add normalization to no T cells
 incucyte_dt[, mean_value_none := mean_value_norm/mean(mean_value_norm[car == 'none']), 

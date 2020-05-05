@@ -174,7 +174,6 @@ bb28z_dt <- incucyte_dt[car %in% c('41BB','CD28','zeta') & k562 != 'none' &
                           noise==F]
 setnames(bb28z_dt, "car", "ctrl_car")
 
-
 # function to get elapsed time at which red measurement crosses threshold and 
 # get some plots out
 
@@ -183,7 +182,7 @@ k562_thresh <- function(incucyte_dt, pct_rem){
   cross_dt <- incucyte_dt[Elapsed<=150, list(
       t_cross = min(Elapsed[order(abs(mean_value_none-(pct_rem/100)))][1:15]),
       cross_thresh = min(mean_value_none)<(pct_rem/100),
-      last_mean_val_none = last(mean_value_none)),
+      last_mean_val_none = dplyr::last(mean_value_none)),
     by=c('car','k562','donor','measurement','day','t_type','noise')][
       noise==F & cross_thresh==T]
   cross_dt[, day_f := factor(cross_dt$day, levels=c('0','8','15','22','29'))]
@@ -473,7 +472,127 @@ set_time <- function(df, elapsed_hr){
 
 set_time(incucyte_dt, 26)[[1]]
 set_time(incucyte_dt, 26)[[2]]
+```
+
+### Dan's single-plot version
+
+```{r}
+plot_set_time <- function(df, elapsed_hr){
+  
+  t_type <- df[, unique(t_type)]
+  stopifnot(length(t_type) == 1)
+  meausrement <- 
+  
+  plot <- ggplot(df[Elapsed==elapsed_hr], 
+    aes(x=car, y=mean_value_none, group=interaction(car, day_f, donor), 
+        fill=car, color=car)) + 
+    geom_point(aes(color=car)) + 
+    geom_linerange(aes(ymin=mean_value_none-std_dev_value_none_log, 
+                      ymax=mean_value_none+std_dev_value_none_log)) +
+    facet_grid(donor ~ day_f) + 
+    ggtitle(paste(t_type," - Incucyte K562 Killing by mKate Total Integrated Intensity\n(normalized to starting) at ", elapsed_hr ," Hours")) +
+    theme_minimal(base_size=20) +
+    theme(plot.title = element_text(size = 25)) + 
+    scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+      limits=c(1e-2,1e1), trans=log10_trans()) +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_color_brewer(palette='Paired') + 
+    scale_fill_brewer(palette='Paired') + 
+    geom_hline(yintercept=1,
+              color='gray60') +
+    theme(panel.spacing = unit(2, "lines"),
+          axis.text.x = element_text(angle = 90, vjust=0.5))
+}
+
+plot_set_time(incucyte_df[
+  k562=='mkate_cd19' & !noise & t_type == 'cd4' &
+  measurement == chosen_measure & car!='none']) +
+  labs(..., x=..., y=....) 
 
 
 ```
 
+### Different elapsed hour per t.type / day
+
+```
+day t_type measure_hour
+0   cd4    36
+18  cd4    72
+```
+Merge above table with incucyte_dt 
+
+```
+merge(incucyte_dt, measure_hour_table, on=...)[Elasped == measure_hour]
+```
+
+## Data Quality Polishing / To Dos
+
+* first hour(s) for some days/reps are weird, too low, it jumps up
+  ** day 15, cd4, donor 3 and donor 4 esp.
+  ** got rid of 1-2 hours at beginning of every replicate/donor?
+  
+```
+ggplot(incucyte_dt[Elapsed < 10 & measurement == 'redintensity' & day_f == 8 & t_type == 'cd4' & k562 == 'mkate_cd19' & noise == F]) + geom_line(aes(y=mean_value_none, x=Elapsed, color = interaction(image, rep))) + facet_grid(donor+rep~car)
+```
+
+* inspect plots to remove outliers? For instance, one of the replicates 
+(rep 2 donor 2, cd4, day 8, 41bb) looks like no t cells while the other looks fine.
+
+```
+ggplot(incucyte_dt[measurement == 'redintensity' & day_f == 8 & t_type == 'cd4' & k562 == 'mkate_cd19' & noise == F]) + geom_line(aes(y=value, x=Elapsed, color = interaction(image, rep))) + facet_grid(donor+rep~car)
+```
+
+Dan's suggestion: take stdev of images within replicate - is one a huge outlier?
+then, take stdev of replicate means to mean of both replicates - how similar are they?
+
+```{r}
+incucyte_new_dt <- copy(incucyte_dt)
+NORM_HOUR_CUTOFF <- 2
+
+incucyte_new_dt[, value_norm := NULL]
+incucyte_new_dt[, mean_value_norm := NULL]
+incucyte_new_dt[, std_dev := NULL]
+incucyte_new_dt[, std_error := NULL]
+
+incucyte_new_dt[, value_norm := value/(value[Elapsed==NORM_HOUR_CUTOFF]+0.001), 
+  by=c('rep','day','donor','car','measurement','k562','image','t_type')]
+
+incucyte_new_dt[, value_norm_img_diff := value_norm/mean(value_norm), 
+  by=c('rep','day','donor','car','measurement','k562','t_type','Elapsed')][,
+    value_norm_img_diff := mean(value_norm_img_diff[Elapsed < 150], na.rm=T), 
+    c('rep','day','donor','car','measurement','k562','t_type','image')]
+
+# plot of value norm differences for day 0, cd4
+ggplot(incucyte_new_dt[measurement == 'redintensity' & 
+    t_type == 'cd4' & day_f==0 & k562 == 'mkate_cd19' & noise == F]) + 
+  geom_line(aes(y=value_norm_img_diff, x=Elapsed,
+    color = interaction(image, rep))) + 
+  facet_grid(donor+rep~car)
+
+# mean difference from norm per day for cd4s
+ggplot(incucyte_new_dt[measurement == 'redintensity' & t_type == 'cd4' & 
+    k562 == 'mkate_cd19' & noise == F]) + 
+  geom_point(aes(y=value_norm_img_diff, x=day_f, 
+    color = interaction(image, rep))) + 
+  facet_grid(donor+rep~car)
+
+# mean difference from norm per day for cd8s
+ggplot(incucyte_new_dt[measurement == 'redintensity' & t_type == 'cd8' & 
+    k562 == 'mkate_cd19' & noise == F]) + 
+  geom_point(aes(y=value_norm_img_diff, x=day_f,
+    color = interaction(image, rep))) + 
+  facet_grid(donor+rep~car)
+```
+
+Based on looking at this with Kendall, we decided to not remove bad images and take the mean of everything, but to remove bad replicates.
+
+```{r}
+incucyte_new_dt[, mean_value_norm_rep := mean(value_norm),
+  by=c('day','donor','car','Elapsed','measurement','k562','t_type','rep')]
+incucyte_new_dt[, std_dev_norm_rep := sd(mean_value_norm_rep),
+  by=c('day','donor','car','Elapsed','measurement','k562','t_type','rep')][,
+    std_dev_norm_rep := mean(std_dev_norm_rep[Elapsed < 150], na.rm=T), 
+    c('rep','day','donor','car','measurement','k562','t_type')]
+
+#(make plots, compare, check, investigate bad replicate, like (rep 2 donor 2, cd4, day 8, 41bb))
+```
