@@ -1,0 +1,217 @@
+---
+title: "TCSL148 Jurkat Signaling"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','..','html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gtable)
+library(RColorBrewer)
+
+#paste into terminal tab until Dan fixes this
+#s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
+
+#to make a data table with my csv 
+signaling.dt <- fread(paste0(
+  '/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/',
+  'tcsl148.csv'))
+
+# to plot a bar plot to show the differing percentages of Jurkats
+ggplot(data=signaling.dt, aes(
+    x=interaction(CAR, Hours), y=combo_mcherry_percent, fill=Line)) +
+  geom_bar(stat="identity") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+``` {r}
+
+#to make a data table with stimulation of the difference between + and -
+posneg.signaling.dt <- signaling.dt[, list(
+  posneg.diff= combo_mcherry_percent[Stimulation=="+"] - 
+    combo_mcherry_percent[Stimulation=='-']),
+  by=c('CAR','Line','Hours')]
+
+# to plot a bar plot to show the differing percentages of Jurkats + and -
+ggplot(posneg.signaling.dt, aes(
+      x=interaction(CAR, Hours, Line), y=posneg.diff, fill=Line)) +
+  geom_bar(stat="identity") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#to make a data table with stimulation of the difference between + and none
+posnone.signaling.dt <- signaling.dt[, list(
+  posnone.diff= combo_mcherry_percent[Stimulation=="+"] - 
+      combo_mcherry_percent[Stimulation=='none']),
+  by=c('CAR','Line','Hours')]
+
+# to plot a bar plot to show the differing percentages of Jurkats + and none
+ggplot(posnone.signaling.dt, 
+        aes(x=interaction(CAR, Hours, Line), y=posnone.diff, fill=Line)) + 
+    geom_bar(stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#to make a data table with stimulation of the difference between - and none
+negnone.signaling.dt <- signaling.dt[, list(
+  negnone.diff= combo_mcherry_percent[Stimulation=="-"] - 
+      combo_mcherry_percent[Stimulation=='none']),
+  by=c('CAR','Line','Hours')]
+
+# to plot a bar plot to show the differing percentages of Jurkats - and none
+ggplot(negnone.signaling.dt, aes(
+        x=interaction(CAR, Hours, Line), y=negnone.diff, fill=Line)) +
+    geom_bar(stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+```{r}
+#This area is to make a heatmap. 
+
+ggplot(posneg.signaling.dt) + 
+    geom_tile(aes(y=CAR, x=as.factor(Hours), fill=posneg.diff)) +
+    scale_fill_distiller('Difference in\nActivation,\nCD19+ vs CD19-', 
+        palette='Blues', direction = 1) +
+    facet_grid(Line ~ Hours, scales='free') +
+    labs(x='Hours of Stimulation', title='TCSL148 Jurkat Signaling Lines') +
+    theme_minimal() + 
+    theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+#ONE CELL LINE AT A TIME
+ggplot(signaling.dt[(Line=='4047' & Hours > 1 & Stimulation == '+' ) | 
+        (Line=='4047' & Hours <1 & Stimulation == 'none')]) + 
+    geom_tile(aes(y=CAR, x=as.factor(Hours), fill=combo_mcherry_percent)) +
+    scale_fill_distiller('Percent Activation CD19+', 
+        palette='Blues', direction = 1) +
+    facet_grid(Line ~ Hours, scales='free') +
+    labs(x='Hours of Stimulation', 
+         title='TCSL148 Signaling NFkB/4047 CD19+ Stim') +
+    theme_minimal() + 
+    theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r fig.width=10, fig.height=6}
+#to make individual bar graphs
+
+#pos only all lines all days
+ggplot(signaling.dt[Stimulation == '+'], aes(
+        x=interaction(CAR, Hours, Line), y=combo_mcherry_percent, fill=Line)) +
+    geom_bar(stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#pos only and 4045 only all days but D0
+ggplot(signaling.dt[Stimulation == '+'& Line=='4045'], aes(
+        x=interaction(CAR, Hours), y=combo_mcherry_percent, fill=Hours)) +
+    facet_grid(~CAR, scales='free') +
+    geom_bar(stat="identity") + 
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#pos only and 4047 only all days with D0
+ggplot(signaling.dt[
+        (Line=='4047' & Hours > 1 & Stimulation == '+' ) | 
+        (Line=='4047' & Hours <1 & Stimulation == 'none')], 
+        aes(x=interaction(CAR, Hours), y=combo_mcherry_percent, fill=Hours)) + 
+    facet_grid(~CAR, scales='free') +
+    geom_bar(stat="identity") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#pos only and 4047 only all days with D0 and fixed x axis and colors
+ggplot(signaling.dt[
+        (Line=='4047' & Hours > 1 & Stimulation == '+' ) | 
+        (Line=='4047' & Hours <1 & Stimulation == 'none')], 
+        aes(x=as.factor(Hours), y=combo_mcherry_percent, fill=factor(Hours))) + 
+    facet_grid(~CAR, scales='free') +
+    geom_bar(stat="identity") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    scale_fill_brewer(palette="Blues")
+
+#choosing a subset of colors from a palette
+# n should be acual number of color squares
+# the c() should have the colors in the set you want
+# you can remove with c(-9), or do a range with c(3:7)
+#then, use a manual color scale with the chosen colors
+ggplot(signaling.dt[
+        (Line=='4045' & Hours > 1 & Stimulation == '+' ) | 
+        (Line=='4045' & Hours <1 & Stimulation == 'none')], 
+        aes(x=as.factor(Hours), y=combo_mcherry_percent, fill=factor(Hours))) + 
+    facet_grid(~CAR, scales='free') +
+    geom_bar(stat="identity") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(hjust = .5), 
+          legend.title.align=0.5, 
+          plot.title = element_text(hjust = 0.5)) +
+    scale_fill_manual(values=brewer.pal(9, "Blues")[c(3,5,7,9)]) +
+    labs(x='Hours of Stimulation', y='Percent Reporter Activity', 
+         title='TCSL148 Signaling (AP1/4045) K562 CD19+')
+
+#in order to look at all of the stimulation types at once and to make all 
+# of the y axis scales the same at 100%
+ggplot(signaling.dt[
+        (Line=='4045' & Hours > 1) | 
+        (Line=='4045' & Hours <1 & Stimulation == 'none')], 
+        aes(x=as.factor(Hours), y=combo_mcherry_percent, fill=factor(Hours))) + 
+    facet_grid(Stimulation ~CAR, scales='free') +
+    geom_bar(stat="identity") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(hjust = .5), 
+          legend.title.align=0.5, 
+          plot.title = element_text(hjust = 0.5)) +
+    scale_fill_manual(values=brewer.pal(9, "Blues")[c(3,5,7,9)]) + 
+    labs(x='Hours of Stimulation', y='Percent Reporter Activity', 
+        title='TCSL148 Signaling (AP1/4045)') +
+    ylim(0, 100)
+
+#to make 0 hours no stimulation bar copy onto all of the stimulation types 
+# (even though it did not get + or - stim)
+map_day_0 <- function(df) {
+    return(rbind(
+        df,
+        df[Stimulation=='none' & Hours == 0][, Stimulation := '+'],
+        df[Stimulation=='none' & Hours == 0][, Stimulation := '-']
+    ))}
+
+plot.signaling.dt <- map_day_0(signaling.dt)
+
+ggplot(plot.signaling.dt[(Line=='4045')], 
+        aes(x=as.factor(Hours), y=combo_mcherry_percent, fill=factor(Hours))) + 
+    facet_grid(Stimulation ~CAR, scales='free') +
+    geom_bar(stat="identity") + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(hjust = .5), 
+          legend.title.align=0.5, 
+          plot.title = element_text(hjust = 0.5)) +
+    scale_fill_manual(values=brewer.pal(9, "Blues")[c(3,5,7,9)]) + 
+    labs(x='Hours of Stimulation', y='Percent Reporter Activity', 
+         title='TCSL148 Signaling (AP1/4045)') + ylim(0, 100)
+
+```
+
+
+```{r}
+#this is to normalize the data to untransduced from the same day
+signaling.dt[, 
+    combo_mcherry_pct_v_unt := 
+        # within each group, subtract each CAR pct from the untransduced
+        combo_mcherry_percent - combo_mcherry_percent[CAR=='Unt'], 
+    by=c('Hours','Line','Stimulation')]
+
+signaling.dt[, 
+    combo_mcherry_mfi_v_unt := 
+        # within each group, subtract each CAR mfi from the untransduced
+        combo_mcherry_mfi / combo_mcherry_mfi[CAR=='Unt'], 
+    by=c('Hours','Line','Stimulation')]
+```
+
