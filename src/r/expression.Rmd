@@ -73,6 +73,26 @@ grid.text(
 
 
 ```{r}
+#this is the section I am trying to make barplots showing the cell type expression of costims
+
+rawSets_sum <- fread(paste0('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/fig1_expression_binary_min_sum.csv'), header = TRUE, sep = ",", stringsAsFactors = FALSE)
+rawSets_sum[is.na(rawSets_sum)] <- NA
+
+celltypecount <- count(rawSets_sum, vars=sum)
+
+
+ggplot(celltypecount) + 
+  geom_bar(aes(x=factor(vars), y=n), stat='identity', width=1) +
+  scale_fill_brewer('Number of Cell Types Each Costim is Expressed In', palette='YlOrRd') + 
+  theme_minimal() +
+  labs(x="Number of Cell Types", y='Number of Costims')
+
+
+```
+
+
+
+```{r}
 #remove cell types from data
 
 rawSets_min <- fread(paste0('/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/fig1_expression_binary_min.csv'), header = TRUE, sep = ",", stringsAsFactors = FALSE)
@@ -125,7 +145,7 @@ grid.text( "CSA",
 ```
 
 ```{r}
-#remove cell types from data
+#remove more cell types from data to be only 5 sets and plot using elipses 
 library(eulerr)
 
 rawSets_min2 <- fread(
@@ -146,52 +166,49 @@ plot(ellipse_fit, quantities=T)
 # Close the pdf file
 dev.off() 
 
-# CSA should delete the code below once she is satisfied the above works:
-########
+```
+
+```{r}
+#plotting only 5 sets with the original vennulator function
 
 # #turning the spreadsheet into a vertical spreadsheet with only one column.
-# vennSet_min2 <- pivot_longer(rawSets_min2, cols = ends_with("cell"), names_to = "Expression", names_repair = "check_unique", values_to = "count", values_drop_na = TRUE)
-# 
-# vennSet_min2
-# 
-# #get rid of NA rows
-# delete.na <- function(DF, n=0) {
-#   DF[rowSums(is.na(DF)) <= n,]}
-# 
-# final_min2 <- delete.na(vennSet_min2)
-# 
-# final_min2
-# dim(final_min2)
-# 
-# #remove the column that includes the marker of 1 from the original binary data
-# final_min2$count <- NULL
-# 
-# #removes the words _cell from each data point so granulocyte_cell becomes granulocyte and make the T_cell look more natural 
-# final_min2$Expression <- gsub("_cell", "", final_min2$Expression)
-# final_min2$Expression <- gsub("T", "T cell", final_min2$Expression)
-# final_min2$Expression <- gsub("B", "B cell", final_min2$Expression)
-# final_min2$Expression <- gsub("NK", "NK cell", final_min2$Expression)
-# final_min2$Expression <- gsub("NK cellT cell", "NKT", final_min2$Expression)
-# 
-# #plot the venn diagram
-# v_min2 <- venneuler(data.frame(final_min2))
-# 
-# par(cex = 0.7)
-# 
-# plot(v_min2, main = "Costim Expression by Cell Type", cex.main = 1.5)
-# grid.text( "CSA",
-#   x = 0.52,
-#   y = 0.15,
-#   gp = gpar(
-#     fontsize = 1,
-#     fontface = 1
-#   )
-# )
-# 
-# #replot with euler
-# final_min2 <- as.data.frame(final_min2)
-# 
-# plot(euler(final_min2, shape = "ellipse"), quantities = TRUE)
+vennSet_min2 <- pivot_longer(rawSets_min2, cols = ends_with("cell"), names_to = "Expression", names_repair = "check_unique", values_to = "count", values_drop_na = TRUE)
+
+
+vennSet_min2
+
+#get rid of NA rows
+delete.na <- function(DF, n=0) {DF[rowSums(is.na(DF)) <= n,]}
+ 
+final_min2 <- delete.na(vennSet_min2)
+ 
+#remove the column that includes the marker of 1 from the original binary data
+final_min2$count <- NULL
+ 
+#removes the words _cell from each data point so granulocyte_cell becomes granulocyte and make the T_cell look more natural 
+final_min2$Expression <- gsub("_cell", "", final_min2$Expression)
+final_min2$Expression <- gsub("T", "T cell", final_min2$Expression)
+final_min2$Expression <- gsub("B", "B cell", final_min2$Expression)
+final_min2$Expression <- gsub("NK", "NK cell", final_min2$Expression)
+final_min2$Expression <- gsub("NK cellT cell", "NKT", final_min2$Expression)
+
+##plot the venn diagram
+v_min2 <- venneuler(data.frame(final_min2))
+
+par(cex = 0.7)
+plot(v_min2, main = "Costim Expression by Cell Type", cex.main = 1.5) grid.text( "CSA",
+   x = 0.52,
+   y = 0.15,
+   gp = gpar(
+     fontsize = 1,
+     fontface = 1
+   )
+ )
+ 
+ #replot with euler
+ final_min2 <- as.data.frame(final_min2)
+ 
+ plot(euler(final_min2, shape = "ellipse"), quantities = TRUE)
 
 ```
 
