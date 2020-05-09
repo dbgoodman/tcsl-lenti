@@ -589,10 +589,36 @@ Based on looking at this with Kendall, we decided to not remove bad images and t
 ```{r}
 incucyte_new_dt[, mean_value_norm_rep := mean(value_norm),
   by=c('day','donor','car','Elapsed','measurement','k562','t_type','rep')]
+
 incucyte_new_dt[, std_dev_norm_rep := sd(mean_value_norm_rep),
   by=c('day','donor','car','Elapsed','measurement','k562','t_type','rep')][,
     std_dev_norm_rep := mean(std_dev_norm_rep[Elapsed < 150], na.rm=T), 
     c('rep','day','donor','car','measurement','k562','t_type')]
 
 #(make plots, compare, check, investigate bad replicate, like (rep 2 donor 2, cd4, day 8, 41bb))
+
+# cd4 mean_value_norm_rep comparisons
+ggplot(incucyte_new_dt[measurement=='redintensity' & t_type=='cd4' & 
+                         k562=='mkate_cd19' & noise==F & !is.na(rep) & day_f==0]) +
+  geom_line(aes(x=Elapsed, y=mean_value_norm_rep, color=as.factor(rep))) +
+  facet_grid(donor~car)
+# day 0: both reps look good for all cars
+# day 8: donor 2 41BB (1 vs 3), donor 1 zeta (5 vs ~7), and donor 2 KLRG1 (6 vs 8)
+# day 15: donor 3 zeta (5 vs 8)
+# day 22: donor 1 BAFF-R lines look a little different but not bad? (1.25 vs 2.5)
+# day 29: donor 2 zeta lines look a bit different (~1.3 vs ~2.7)
+# also general note: D8/15/22 have 2 reps for donors 3 & 4 but D0 does not. true in csv.
+
+
+# cd8 mean_value_norm_rep comparisons
+ggplot(incucyte_new_dt[measurement=='redintensity' & t_type=='cd8' & 
+                         k562=='mkate_cd19' & noise==F & !is.na(rep) & day_f==0]) +
+  geom_line(aes(x=Elapsed, y=mean_value_norm_rep, color=as.factor(rep))) +
+  facet_grid(donor~car)
+# day 0: both reps look good for all cars
+# day 8: donor 2 CD28 lines look a bit different (0 vs ~1)
+# day 15: both reps look good for all cars
+# day 22: donor 1 BAFF-R lines are a little different (~0.7 vs ~1.5)
+# day 29: looks pretty good
+
 ```
