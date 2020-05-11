@@ -453,41 +453,6 @@ color_plots(umap_cd8_fcs_dt)
 
 ```
 
-```{r}
-# test kitchen
-test_kitchen <- data.frame('variable' = rep('ccr7_t',6), cluster = c(10,4,5,13,7,1), clust_mean=c(1.9958137, -0.6116742, -0.4279137, -0.3149753, -0.6173423, -0.1729749))
-
-test_kitchen
-# test
-test_kitchen %>%
-  group_by(variable) %>% 
-  mutate(rk = rank(-abs(clust_mean))) %>%
-  filter(rk <= 3) %>% 
-  arrange(variable, rk) %>%
-  mutate(cluster=as.character(cluster)) %>%
-  mutate(cluster = ifelse(clust_mean > 0, paste(cluster,'+'), paste(cluster,'-'))) %>%
-  summarise(cluster = paste(cluster, collapse=", ")) %>%
-  unite(variable, variable, cluster, sep=" : ", remove=F) %>%
-  ungroup() %>%
-  pull(variable) %>% rep(10) 
-
-# replace var with cluster
-test_kitchen %>%
-  mutate(variable=gsub("\\_t$", "", variable)) %>%
-  group_by(cluster) %>% 
-  mutate(rk = rank(-abs(clust_mean))) %>%
-  filter(rk <= 3) %>% 
-  arrange(cluster, rk) %>%
-  mutate(variable=as.character(variable)) %>%
-  mutate(variable = ifelse(clust_mean > 0, paste(variable,'+'), paste(variable,'-'))) %>%
-  summarise(variable = paste(variable, collapse=", ")) %>%
-  unite(cluster, cluster, variable, sep=" : ", remove=F) %>%
-  select(cluster)
-
-```
-
-
-
 ```{r, fig.width=15, fig.height=8}
 dendrogram <- function(umap_fcs_dt, cell_type) {
   cluster_pct_vars <- c(paste0(
@@ -537,9 +502,11 @@ dendrogram <- function(umap_fcs_dt, cell_type) {
       param_cluster_pct_dt$variable,
       levels = var_names)
   
-   #annotate clusters as per variable values (remove gfp, myc first)
+   #annotate clusters as per variable values (removed gfp, myc)
+  '%notin%' <- Negate('%in%')
   annotations <- param_cluster_pct_dt %>%
   mutate(variable=gsub("\\_t$", "", variable)) %>%
+  filter(variable %notin% c('gfp','myc')) %>%
   mutate(cluster=as.character(cluster)) %>%
   group_by(cluster) %>% 
   mutate(rk = rank(-abs(clust_mean))) %>%
@@ -586,18 +553,12 @@ dendrogram(umap_cd8_fcs_dt, 'cd8')
 dendrogram(umap_cd4_fcs_dt, 'cd4')
 ```
 
-
-### Add annotations to clusters
-```{r}
-```
-
-
 ### Percent of cells in day, by cluster
 
 ```{r, echo=F, fig.width=15, fig.height=8}
 cluster_names <- c("15", "12", "8",  "10", "3",  "6",  "9",  "11", "7",  "2",  "4",  "5",  "14", "1", "13") # globally defining cluster names for rknit
 
-day_cluster <- function(umap_fcs_dt) {
+day_cluster <- function(umap_fcs_dt, cell_type) {
   day_cluster_pct_dt <- map_day_0(umap_fcs_dt)[,
     data.table(table(day,cluster, t_type, k562))][,
       list(day, pct=N/sum(N)), by=c('k562','cluster','t_type')]
@@ -613,22 +574,21 @@ day_cluster <- function(umap_fcs_dt) {
     geom_text(aes(label=round(pct*100)), size=3, color='white') +
     facet_grid(k562+t_type~., scales='free') +
     scale_fill_viridis_b(direction=1, limits=c(0, 1)) +
-    labs(title='Percent of cells in each cluster by day',  y='Day', 
-         subtitle='(cols sum to 100%)') +
-    theme_minimal()
+    labs(y='Day', subtitle='(cols sum to 100%)') +
+    theme_minimal() + ggtitle(paste('Percent of ',as.character(cell_type),' cells in each cluster by day'))
 }
 
 #cd8
-day_cluster(umap_cd8_fcs_dt)
+day_cluster(umap_cd8_fcs_dt, 'CD8')
 
 #cd4
-day_cluster(umap_cd4_fcs_dt)
+day_cluster(umap_cd4_fcs_dt, 'CD4')
 ```
 
 ### Percent of cells in cluster, by day
 
 ```{r, echo=F, fig.width=15, fig.height=8}
-day_cluster_total <- function(umap_fcs_dt) {
+day_cluster_total <- function(umap_fcs_dt, cell_type) {
   day_cluster_total_pct_dt <- map_day_0(umap_fcs_dt)[,
     data.table(table(day,cluster, t_type, k562))][,
       list(cluster, pct=N/sum(N)), by=c('k562','day','t_type')]
@@ -645,14 +605,14 @@ day_cluster_total <- function(umap_fcs_dt) {
     scale_fill_viridis_b('',direction=1, limits=c(0, 0.6)) +
     labs(title='Percent of cells in each day by cluster', y='Day',
       subtitle='(rows sum to 100%)') +
-    theme_minimal()
+    theme_minimal() + ggtitle(paste('Percent of ',as.character(cell_type),' cells in each day by cluster'))
 }
 
 #cd8
-day_cluster_total(umap_cd8_fcs_dt)
+day_cluster_total(umap_cd8_fcs_dt, 'CD8')
 
 #cd4
-day_cluster_total(umap_cd4_fcs_dt)
+day_cluster_total(umap_cd4_fcs_dt, 'CD4')
 
 ```
 
@@ -660,7 +620,7 @@ day_cluster_total(umap_cd4_fcs_dt)
 #### summed across cols
 ```{r, echo=F, fig.width=15, fig.height=8}
 
-car_per_day_per_cluster <- function(umap_fcs_dt) {
+car_per_day_per_cluster <- function(umap_fcs_dt, cell_type) {
   car_cluster_day_indiv_k562_pct_dt <- map_day_0(umap_fcs_dt)[,
     data.table(table(car,cluster,k562,t_type, day))][,
       list(car, pct=N/sum(N)), by=c('cluster','k562','t_type','day')][,
@@ -683,18 +643,18 @@ car_per_day_per_cluster <- function(umap_fcs_dt) {
         na.value=min_col) +
       labs(title='CAR enrichment\nper day per cluster', y='CAR',
         subtitle='CAR enrichment in cluster\n(z-score) (summed across cols)') +
-      theme_minimal()
+      theme_minimal() + ggtitle(paste(as.character(cell_type),' CAR enrichment\nper day per cluster'))
 }
 
 #cd8
-car_per_day_per_cluster(umap_cd8_fcs_dt)
+car_per_day_per_cluster(umap_cd8_fcs_dt, "CD8")
 
 #cd4
-car_per_day_per_cluster(umap_cd4_fcs_dt)
+car_per_day_per_cluster(umap_cd4_fcs_dt, "CD4")
 ```
 ##### summed across rows
 ```{r, echo=F, fig.width=15, fig.height=8}
-car_per_day_per_cluster_total <- function(umap_fcs_dt) {
+car_per_day_per_cluster_total <- function(umap_fcs_dt, cell_type) {
   car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
     data.table(table(car,cluster,k562,t_type,day))][,
       list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
@@ -717,19 +677,19 @@ car_per_day_per_cluster_total <- function(umap_fcs_dt) {
         na.value=min_col) +
       labs(title='CAR enrichment\nper day per cluster', y='CAR',
         subtitle='CAR enrichment in cluster\n(z-score) (summed across rows)') +
-      theme_minimal()
+      theme_minimal() + ggtitle(paste(as.character(cell_type),' CAR enrichment\nper day per cluster'))
 }
 
 #cd8
-car_per_day_per_cluster_total(umap_cd8_fcs_dt)
+car_per_day_per_cluster_total(umap_cd8_fcs_dt, "CD8")
 
 #cd4
-car_per_day_per_cluster_total(umap_cd4_fcs_dt)
+car_per_day_per_cluster_total(umap_cd4_fcs_dt, "CD4")
 ```
 
 #### Bar charts showing how each CAR changes cluster by day
 ```{r fig.width=15, fig.height=8}
-car_clusters_by_day <- function(umap_fcs_dt) {
+car_clusters_by_day <- function(umap_fcs_dt, cell_type) {
   car_cluster_day_indiv_k562_bar_pct_dt <- map_day_0(umap_fcs_dt)[,
     data.table(table(car,cluster,k562,t_type,day))][,
       list(day, pct=N/sum(N)), by=c('car','k562','t_type','cluster')][,
@@ -746,19 +706,19 @@ car_clusters_by_day <- function(umap_fcs_dt) {
     ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
       facet_grid(car~day, scales='free_x', space='free_x') +
       labs(title='CAR enrichment (>10%)\nper cluster per day', y='CAR',
-        subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)')
+        subtitle='CAR enrichment in cluster\n(absolute %) (summed across rows by cluster number)') + ggtitle(paste(as.character(cell_type),' CAR enrichment (>10%)\nper cluster per day'))
 }
 
 #cd8
-car_clusters_by_day(umap_cd8_fcs_dt)
+car_clusters_by_day(umap_cd8_fcs_dt, "CD8")
 
 #cd4
-car_clusters_by_day(umap_cd4_fcs_dt)
+car_clusters_by_day(umap_cd4_fcs_dt, "CD4")
 ```
 
 #### Bar charts showing distribution of each CAR in clusters per day 
 ```{r fig.width=15, fig.height=8}
-car_clusters_by_square <- function(umap_fcs_dt) {
+car_clusters_by_square <- function(umap_fcs_dt, cell_type) {
   car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
       data.table(table(car,cluster,k562,t_type,day))][,
         list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
@@ -773,14 +733,14 @@ car_clusters_by_square <- function(umap_fcs_dt) {
     filter(k562=='cd19+', pct>.10) %>%
     ggplot() + geom_bar(aes(x=cluster, y=pct), color='black', stat='identity') +
       facet_grid(car~day, scales='free_x', space='free_x') +
-      labs(title='CD8 CAR enrichment (>10%)\nper day per cluster', y='CAR',
-        subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))')
+      labs(title='CAR enrichment (>10%)\nper day per cluster', y='CAR',
+        subtitle='CAR enrichment in cluster\n(z-score) (summed across CAR x day (each square))') + ggtitle(paste(as.character(cell_type),' CAR enrichment (>10%)\nper day per cluster'))
 }
 
 #cd8
-car_clusters_by_square(umap_cd8_fcs_dt)
+car_clusters_by_square(umap_cd8_fcs_dt, "CD8")
 
 #cd4
-car_clusters_by_square(umap_cd4_fcs_dt)
+car_clusters_by_square(umap_cd4_fcs_dt, "CD4")
 
 ```
