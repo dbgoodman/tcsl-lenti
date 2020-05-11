@@ -20,6 +20,8 @@ library(spatstat)
 library(ggdendro)
 library(cowplot)
 library(tidyverse)
+library(grid)
+library(gridExtra) # add to AWS
 use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 
 data_dir <- here::here('..','data')
@@ -55,9 +57,9 @@ For now, skip straight to high dimensional plotting.
 channel_map <- diff_opt_cd4$channel_map
 
 # for now use all variables in the channel map except cd4/8
-# removing zombie and cd_t (there is no var to differentiate cd4 and cd8 here)
+# removing zombie, cd_t, myc_t, gfp_t
 umap_vars <- c(paste0(names(channel_map),'_t'))
-umap_vars <- umap_vars[umap_vars != c('cd_t', 'zombie_t')]
+umap_vars <- umap_vars[umap_vars != c('cd_t', 'zombie_t', 'myc_t', 'gfp_t')]
 
 sample_for_umap <- function(df, sample_size) {
   umap_dt <- diff_dt[!is.na(event_id), 
@@ -174,8 +176,8 @@ channel_map <- diff_opt_cd4$channel_map
 # for now use all variables in the channel map
 umap_vars <- c(paste0(names(channel_map),'_t'))
 
-# removing cd_t and zombie_t from umap_vars
-umap_vars <- umap_vars[umap_vars != c('cd_t', 'zombie_t')]
+# removing cd_t, zombie_t, myc_t, gfp_t from umap_vars
+umap_vars <- umap_vars[!umap_vars %in% c('zombie_t', 'myc_t', 'gfp_t')]
 
 # filter by cd4/8
 umap_cd4_dt <- umap_dt %>% filter(t_type=='cd4') 
@@ -451,10 +453,43 @@ color_plots(umap_cd8_fcs_dt)
 
 ```
 
-```{r, fig.width=15, fig.height=8}
-# add cd19 and cd4/8 rows to dendro
+```{r}
+# test kitchen
+test_kitchen <- data.frame('variable' = rep('ccr7_t',6), cluster = c(10,4,5,13,7,1), clust_mean=c(1.9958137, -0.6116742, -0.4279137, -0.3149753, -0.6173423, -0.1729749))
 
-dendrogram <- function(umap_fcs_dt) {
+test_kitchen
+# test
+test_kitchen %>%
+  group_by(variable) %>% 
+  mutate(rk = rank(-abs(clust_mean))) %>%
+  filter(rk <= 3) %>% 
+  arrange(variable, rk) %>%
+  mutate(cluster=as.character(cluster)) %>%
+  mutate(cluster = ifelse(clust_mean > 0, paste(cluster,'+'), paste(cluster,'-'))) %>%
+  summarise(cluster = paste(cluster, collapse=", ")) %>%
+  unite(variable, variable, cluster, sep=" : ", remove=F) %>%
+  ungroup() %>%
+  pull(variable) %>% rep(10) 
+
+# replace var with cluster
+test_kitchen %>%
+  mutate(variable=gsub("\\_t$", "", variable)) %>%
+  group_by(cluster) %>% 
+  mutate(rk = rank(-abs(clust_mean))) %>%
+  filter(rk <= 3) %>% 
+  arrange(cluster, rk) %>%
+  mutate(variable=as.character(variable)) %>%
+  mutate(variable = ifelse(clust_mean > 0, paste(variable,'+'), paste(variable,'-'))) %>%
+  summarise(variable = paste(variable, collapse=", ")) %>%
+  unite(cluster, cluster, variable, sep=" : ", remove=F) %>%
+  select(cluster)
+
+```
+
+
+
+```{r, fig.width=15, fig.height=8}
+dendrogram <- function(umap_fcs_dt, cell_type) {
   cluster_pct_vars <- c(paste0(
     names(channel_map),'_t'), 
     'FSC-A','SSC-A','donor','cd19')
@@ -462,7 +497,7 @@ dendrogram <- function(umap_fcs_dt) {
   max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
   
   umap_var_melt_dt <-melt(
-    umap_fcs_dt[!is.na(donor)], measure.vars= c(umap_vars,'donor', 'cd19'))
+    umap_fcs_dt[!is.na(donor)], measure.vars= c(umap_vars,'donor', 'cd19', 'myc_t', 'gfp_t')) #add back in previously removed vars
   
   # Use z scale to plot params
   umap_var_melt_dt[, value_scaled := scale(value), by=variable]
@@ -502,12 +537,28 @@ dendrogram <- function(umap_fcs_dt) {
       param_cluster_pct_dt$variable,
       levels = var_names)
   
+   #annotate clusters as per variable values (remove gfp, myc first)
+  annotations <- param_cluster_pct_dt %>%
+  mutate(variable=gsub("\\_t$", "", variable)) %>%
+  mutate(cluster=as.character(cluster)) %>%
+  group_by(cluster) %>% 
+  mutate(rk = rank(-abs(clust_mean))) %>%
+  filter(rk <= 3) %>% 
+  arrange(cluster, rk) %>%
+  mutate(variable = ifelse(clust_mean > 0, paste(variable,'+',sep = ""), paste(variable,'-',sep = ""))) %>%
+  summarise(variable = paste(variable, collapse=", ")) %>% 
+  data.table::transpose()
+  colnames(annotations) <- as.character(unlist(annotations[1,]))
+  annotations = annotations[-1, ]
+  annotations <- annotations[cluster_names]
+  row.names(annotations) <- NULL 
+  
   # heatmap
   var_heatmap <- ggplot(param_cluster_pct_dt) + 
-      geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') +
+      geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') + geom_text(aes(x=cluster, y=variable, label=round(clust_mean, 2)), size=3, color='black') +
       scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
-      theme_minimal()
-  
+      theme_minimal() # + theme(axis.text.x = element_text(angle=90, hjust=1))
+
   # col dendro
   dendro_data_col <- dendro_data(dendro_clusters, type = "rectangle")
   dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
@@ -515,15 +566,31 @@ dendrogram <- function(umap_fcs_dt) {
           aes(x = x, y = y, xend = xend, yend = yend))
   plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
               dendro_col, grid::unit(0.2, "null"), position = "top")
-  ggdraw(plot_dendroheat)
-}
+  dendro_plot <- ggdraw(plot_dendroheat) + draw_label(label=cell_type, x = 0.95, y = 0.95, hjust = 0.95, vjust = 0.95, size=40) 
+  
+  # annotation table
+  tt <- ttheme_default(core=list(fg_params = list(fontsize=10), colhead=list(fg_params = list(fontsize=10, parse=TRUE))))
+  annotations[1,] = str_wrap(annotations[1,], 0)
+  tbl <- tableGrob(annotations, rows=NULL, theme=tt)
+  # tbl <- strwrap(tbl, width = 10, simplify = FALSE)
+  tbl$widths <- unit(rep(1/ncol(tbl), ncol(tbl)), "npc")
+  
+  # print plot and table
+  grid.arrange(dendro_plot, tbl, nrow = 2, as.table = TRUE)
+} 
 
 #cd8
-dendrogram(umap_cd8_fcs_dt)
+dendrogram(umap_cd8_fcs_dt, 'cd8')
 
 #cd4
-dendrogram(umap_cd4_fcs_dt)
+dendrogram(umap_cd4_fcs_dt, 'cd4')
 ```
+
+
+### Add annotations to clusters
+```{r}
+```
+
 
 ### Percent of cells in day, by cluster
 
