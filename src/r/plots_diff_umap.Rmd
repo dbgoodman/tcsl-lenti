@@ -502,11 +502,11 @@ dendrogram <- function(umap_fcs_dt, cell_type) {
       param_cluster_pct_dt$variable,
       levels = var_names)
   
-   #annotate clusters as per variable values (removed gfp, myc)
+   #annotate clusters as per variable values (removed gfp, myc, cd, donor)
   '%notin%' <- Negate('%in%')
   annotations <- param_cluster_pct_dt %>%
   mutate(variable=gsub("\\_t$", "", variable)) %>%
-  filter(variable %notin% c('gfp','myc')) %>%
+  filter(variable %notin% c('gfp','myc','cd','donor')) %>%
   mutate(cluster=as.character(cluster)) %>%
   group_by(cluster) %>% 
   mutate(rk = rank(-abs(clust_mean))) %>%
