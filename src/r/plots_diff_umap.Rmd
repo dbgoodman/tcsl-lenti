@@ -457,11 +457,8 @@ ggdraw(plot_dendroheat_cd19)
 
 ```
 
-<<<<<<< HEAD
-####cd19- dendrogram
-=======
+
 ####cd19+ dendrogram
->>>>>>> nap
 ```{r}
 # Make dendrogram
 cluster_mean_cd19n_cast <- dcast(
@@ -590,11 +587,7 @@ ggplot(car_cluster_day_indiv_k562_pct_dt[k562=='cd19+']) +
 #### summed across rows
 ```{r, echo=F, fig.width=15, fig.height=8}
 car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
-<<<<<<< HEAD
-  data.table(table(car,cluster,k562,t_type))][,
-=======
   data.table(table(car,cluster,day,k562,t_type))][,
->>>>>>> nap
     list(cluster, pct=N/sum(N)), by=c('car','k562','t_type')][,
       pct_delta := scale(pct), by=c('car','k562','t_type')]
 
@@ -607,12 +600,8 @@ ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) +
     scale_fill_distiller('',
       palette='BrBG', 
       direction=1,
-<<<<<<< HEAD
-      #limits=c(-4, 4), 
-=======
       limits=c(-2.8, 2.8), 
->>>>>>> nap
-      na.value=min_col) +
+       na.value=min_col) +
     labs(title='CAR enrichment\nper cluster', y='CAR',
       subtitle='CAR enrichment in cluster\n(z-score)') +
     theme_minimal()
