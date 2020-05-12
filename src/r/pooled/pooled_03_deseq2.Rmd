@@ -15,7 +15,7 @@ library(knitr)
 library(ggrepel)
 library(RColorBrewer)
 library(DESeq2)
-library(rnaseqGene)
+#library(rnaseqGene)
 library(plotly)
 library(Rtsne)
 library(scales)
@@ -31,7 +31,7 @@ data.output.dir <- file.path(here::here(
 load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 
 # set this to true to re-run, else will load from s3
-rerun_deseq <- T
+rerun_deseq <- F
 ```
 
 # DeSeq2 Computation
@@ -656,7 +656,7 @@ ggplot(pos_neg_comparisons[, prolif_donor := interaction(batch, donor)],
 pos_neg_comparisons_melt <- melt(
   pos_neg_comparisons[, 
     xy_ratio := x_scaled_comb/y_scaled_comb], measure.vars= grep(
-  '^[xy]', names(pos_neg_comparisons), perl=T, value=T)
+  '^[xy][^.]', names(pos_neg_comparisons), perl=T, value=T)
   )[, 
     `:=`(var_mean= mean(value, na.rm=T), var_sd= sd(value, na.rm=T)), 
     by=c('t.type','assay','CAR.align','variable')]
@@ -724,7 +724,7 @@ ggsave(here::here('..','figs','pooled','relative_prolif.pdf'),
 pos_neg_comparisons_melt <- melt(
   pos_neg_comparisons[, 
     xy_ratio := x_scaled_comb/y_scaled_comb], measure.vars= grep(
-  '^[xy]', names(pos_neg_comparisons), perl=T, value=T)
+  '^[xy][^.]', names(pos_neg_comparisons), perl=T, value=T)
   )[, 
     `:=`(var_mean= mean(value, na.rm=T), var_sd= sd(value, na.rm=T)), 
     by=c('t.type','CAR.align','variable')]
@@ -768,7 +768,7 @@ ggsave(here::here('..','figs','pooled','relative_prolif_t_mean.pdf'),
 pos_neg_comparisons_melt <- melt(
   pos_neg_comparisons[, 
     xy_ratio := x_scaled_comb/y_scaled_comb], measure.vars= grep(
-  '^[xy]', names(pos_neg_comparisons), perl=T, value=T)
+  '^[xy][^.]', names(pos_neg_comparisons), perl=T, value=T)
   )[, 
     `:=`(var_mean= mean(value, na.rm=T), var_sd= sd(value, na.rm=T)), 
     by=c('t.type','CAR.align','variable')]
@@ -850,7 +850,7 @@ Dan likes this one the best and will use for Fig 2B (until someone complains aga
 pos_neg_comparisons_melt <- melt(
   pos_neg_comparisons[, 
     xy_ratio := x_scaled_comb/y_scaled_comb], measure.vars= grep(
-  '^[xy]', names(pos_neg_comparisons), perl=T, value=T)
+  '^[xy][^.]', names(pos_neg_comparisons), perl=T, value=T)
   )[, 
     `:=`(var_mean= mean(value, na.rm=T), var_sd= sd(value, na.rm=T)), 
     by=c('t.type','CAR.align','variable', 'assay')]
