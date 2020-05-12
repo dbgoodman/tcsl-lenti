@@ -376,12 +376,12 @@ ggplot(
 ```{r}
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
 
 read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
 
 read.counts[,
-            car.abund.rel.baseline := car.abund/car.abund.adj,
+            car.abund.rel.baseline := car.abund/car.abund.baseline,
             by=.(donor, t.type, batch)]
 
 read.counts[assay == 'baseline',
@@ -394,7 +394,7 @@ ggplot(
           k.type != 'NA']) + 
   geom_line(aes(
     x=day, y=log2(car.abund.rel.baseline),
-    group=CAR.align, color= log10(car.abund.adj))) + 
+    group=CAR.align, color= log10(car.abund.baseline))) + 
   facet_grid(t.type ~ donor + batch) +
   scale_color_distiller('log2 Starting CAR abundance', palette='Spectral') +
   labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance') +
@@ -845,11 +845,11 @@ cd8.bin.plot
 ```{r}
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
 
 read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
 
-read.counts[, car.abund.rel.baseline := car.abund/car.abund.adj,
+read.counts[, car.abund.rel.baseline := car.abund/car.abund.baseline,
             by=.(donor, t.type, batch)]
 
 read.counts[assay == 'baseline',
@@ -4062,14 +4062,14 @@ mask_receptor_prolif <- function(receptor) {
 
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
 
 car.abund.set <- car.abund.set[CAR.align %in% c(masked_names, unmasked_names)]
 car.abund.set <- car.abund.set[, masked_name := mask_receptor_prolif(CAR.align), by=.(CAR.align)]
 
 read.counts.abund.set <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)][]
 
-read.counts.abund.set[, car.abund.rel.baseline := car.abund/car.abund.adj,
+read.counts.abund.set[, car.abund.rel.baseline := car.abund/car.abund.baseline,
             by=.(donor, t.type, batch)]
 
 read.counts.abund.set[assay == 'baseline',

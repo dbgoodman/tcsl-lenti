@@ -31,7 +31,7 @@ data.output.dir <- file.path(here::here(
 load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 
 # set this to true to re-run, else will load from s3
-rerun_deseq <- F
+rerun_deseq <- T
 ```
 
 # DeSeq2 Computation
@@ -41,7 +41,7 @@ rerun_deseq <- F
 ```{r, eval=rerun_deseq}
 
 run_deseq <- function(data.dt, ref_bin, test_bin, 
-    control_replicates = T,                      
+    control_replicates = T,
     interaction = T, group.control = F, weight.bins = F) 
 {
   
@@ -238,62 +238,63 @@ run_deseq <- function(data.dt, ref_bin, test_bin,
 ## Run DESeq2 on all comparisons
 
 ```{r, eval=rerun_deseq}
-test_ref_sets <- c(ref=list(), test=list())
 
-# A/B/AB vs C/D/CD
-test_ref_sets$ref <- c(as.list(rep('D',3)), as.list(rep('C',3)), rep(list(c('C','D')),3))
-test_ref_sets$test <- rep(list('A','B',c('A','B')),3)
-test_ref_sets$interaction <- as.list(rep(F, 9))
-
-# A/B/AB/ABCD vs baseline
-test_ref_sets$ref <- c(test_ref_sets$ref, as.list(rep('baseline',3)))
-test_ref_sets$test <- c(test_ref_sets$test, list('A','B',c('A','B','C','D')))
-test_ref_sets$interaction <- c(test_ref_sets$interaction, as.list(rep(T, 3)))
-
-all.deseq.results.dt <- data.table()
-
-for (set_i in seq_along(test_ref_sets$ref)) {
+if (rerun_deseq) {
+  test_ref_sets <- c(ref=list(), test=list())
+  
+  # A/B/AB vs C/D/CD
+  test_ref_sets$ref <- c(as.list(rep('D',3)), as.list(rep('C',3)), rep(list(c('C','D')),3))
+  test_ref_sets$test <- rep(list('A','B',c('A','B')),3)
+  test_ref_sets$interaction <- as.list(rep(F, 9))
+  
+  # A/B/AB/ABCD vs baseline
+  test_ref_sets$ref <- c(test_ref_sets$ref, as.list(rep('baseline',3)))
+  test_ref_sets$test <- c(test_ref_sets$test, list('A','B',c('A','B','C','D')))
+  test_ref_sets$interaction <- c(test_ref_sets$interaction, as.list(rep(T, 3)))
+  
+  all.deseq.results.dt <- data.table()
+  
+  for (set_i in seq_along(test_ref_sets$ref)) {
+      
+    ref_set <- test_ref_sets$ref[[set_i]]
+    test_set <- test_ref_sets$test[[set_i]]
     
-  ref_set <- test_ref_sets$ref[[set_i]]
-  test_set <- test_ref_sets$test[[set_i]]
-  
-  ref_str <- paste0(ref_set, collapse='')
-  test_str <- paste0(test_set, collapse='')
-  
-  inter <- test_ref_sets$interaction[[set_i]]
-  
-  deseq.results.dt <- read.counts[batch != 'post-cytof' & !is.na(k.type),
-    {
-      message(paste(c(ref_str, test_str, inter, .BY[1],"\n"), collapse= ' - '));
-      tryCatch(
-        run_deseq(
-          data.dt = .SD, 
-          ref_bin = ref_set,
-          test_bin = test_set,
-          interaction = inter,
-          group.control = T),
-        error= function(e) {message(e); return(data.table())}
-      )
-    },
-    by = .(group)]
-  
-  if (nrow(deseq.results.dt) > 0) {
-    deseq.results.dt[,
-      `:=`(
-        ref_set = ref_str,
-        test_set = test_str,
-        inter = inter)]
+    ref_str <- paste0(ref_set, collapse='')
+    test_str <- paste0(test_set, collapse='')
+    
+    inter <- test_ref_sets$interaction[[set_i]]
+    
+    deseq.results.dt <- read.counts[batch != 'post-cytof' & !is.na(k.type),
+      {
+        message(paste(c(ref_str, test_str, inter, .BY[1],"\n"), collapse= ' - '));
+        tryCatch(
+          run_deseq(
+            data.dt = .SD, 
+            ref_bin = ref_set,
+            test_bin = test_set,
+            interaction = inter,
+            group.control = T),
+          error= function(e) {message(e); return(data.table())}
+        )
+      },
+      by = .(group)]
+    
+    if (nrow(deseq.results.dt) > 0) {
+      deseq.results.dt[,
+        `:=`(
+          ref_set = ref_str,
+          test_set = test_str,
+          inter = inter)]
+    }
+    
+    all.deseq.results.dt <- rbind(
+      all.deseq.results.dt,
+      deseq.results.dt, fill=T)
   }
   
-  all.deseq.results.dt <- rbind(
-    all.deseq.results.dt,
-    deseq.results.dt, fill=T)
-}
-```
-
-```{r, eval=rerun_deseq}
-save(list=c('all.deseq.results.dt'),
+  save(list=c('all.deseq.results.dt'), 
      file=file.path(data.output.dir, 'pooled_deseq2_data.Rdata'))
+}
 ```
 
 # Plots
@@ -412,15 +413,15 @@ x_group <- 'prolif2_d1_3d_CTV1_CD4_neg'
 y_group <- 'prolif2_d1_3d_CTV1_CD4_pos'
 
 cast_comparison <- function(
-    comp.df, x_group, y_group, col='CAR.score', xycols=c('x','y'),
+    comp.df, x_group, y_group, value_col='CAR.score', xycols=c('x','y'),
     rescale= 'combined') {
   
   message(paste(x_group, y_group, sep=', '))
   
   cast_groups <- dcast(
     unique(comp.df[sort.group %in% c(x_group, y_group), 
-        list(CAR.align, sort.group, CAR.score)]), 
-    CAR.align ~ sort.group, value.var = col)[, 
+        list(CAR.align, sort.group, get(value_col))]), 
+    CAR.align ~ sort.group, value.var = 'V3')[, 
       `:=`(x.group= x_group, y.group= y_group)]
   
   names(cast_groups)[c(2,3)] <- xycols
@@ -455,7 +456,104 @@ cast_comparison <- function(
 }
 ```
 ## All Replicate Comparisons
+
 ```{r}
+
+plot_all_reps <- function(value_col) {
+  
+all_rep_comparisons <- read.counts[
+  grepl('CTV', assay), 
+  data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
+  by=c('assay','t.type','k.type')]
+
+names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
+
+all_rep_comparisons <- all_rep_comparisons[, 
+  cast_comparison(read.counts, x.group, y.group, value_col=value_col)[, 
+    c('x.group','y.group') := NULL],
+  by=c('assay','t.type','k.type','x.group','y.group')]
+
+# combine with baseline abundance as color
+baseline.abund <- read.counts[
+  assay=='baseline', list(mean.baseline= mean(car.abund.baseline, na.rm=T)),
+  by=c('t.type','CAR.align')][,
+    list(CAR.align, 
+      rel.baseline.log= log10(mean.baseline/mean(mean.baseline))), 
+    by=c('t.type')]
+
+all_rep_comparisons <-all_rep_comparisons[
+  baseline.abund, on=c('t.type','CAR.align')]
+
+all_rep_comparisons[, rep_pair := paste(gsub('(prolif\\d_d\\d).*','\\1', x.group), gsub('(prolif\\d_d\\d).*','\\1', y.group), sep='|')]
+all_rep_comparisons[, assay_kt := paste(assay,t.type,k.type, sep='|')]
+
+return(ggplot(all_rep_comparisons) + 
+  geom_point(aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log, 
+    label=CAR.align), shape = 21, colour = "grey30") + 
+  scale_fill_distiller(palette='BrBG', 
+    limit=c(-1,1) * max(abs(all_rep_comparisons$rel.baseline.log))) +
+  facet_wrap(assay_kt ~ rep_pair, ncol=4))
+
+}
+```
+
+## All Reps, CAR score
+```{r, fig.width=6, fig.height=18}
+read.counts[, car.abund.log := log10(car.abund)]
+
+#assay_rep_list:
+assay_rep_set <- unique(read.counts[
+  data.table(
+    assay=c('baseline','CTV1','CTV2','CTV3'), 
+    prev_assay=c(NA,'baseline','CTV1','CTV2')), on='assay'][, 
+  list(assay, sort.group, prev_assay, donor, batch, t.type, k.type)])
+
+#map day0 
+assay_rep_set <- rbind(
+  assay_rep_set[assay=='baseline'][, k.type := 'pos'], 
+  assay_rep_set[assay=='baseline'][, k.type := 'neg'], 
+  assay_rep_set[assay!='baseline'])
+
+#merge with prev copy to get prev sort.group correspondence
+assay_rep_set <- assay_rep_set[, list(
+    donor, batch, t.type, k.type,
+    prev_assay=assay,prev.sort.group=sort.group)][
+  assay_rep_set,
+  on=c('donor','batch','t.type','k.type','prev_assay')]
+
+# use baseline from prolif2 always
+assay_rep_set[assay == 'CTV1', 
+  prev.sort.group := gsub('prolif1','prolif2',prev.sort.group)]
+
+#merge with prev measurements
+prev_measure <- unique(read.counts[, list(
+  car.abund.prev=car.abund, prev.sort.group=sort.group, CAR.align)])[
+    assay_rep_set, on=c('prev.sort.group')]
+
+#merge with orig read counts
+read.counts <- prev_measure[, list(
+    car.abund.prev, prev.sort.group, CAR.align, sort.group)][
+      read.counts, on=c('sort.group','CAR.align')]
+
+#calculate relative prev
+read.counts[, car.abund.rel.prev := car.abund/car.abund.prev]
+
+
+plot_all_reps(value_col='CAR.score')  +
+  labs(title='CAR score replicate comparison')
+plot_all_reps(value_col='car.abund') +
+  labs(title='CAR Abundance replicate comparison')
+plot_all_reps(value_col='car.abund.log') +
+  labs(title='CAR Log Abundance replicate comparison')
+plot_all_reps(value_col='car.abund.rel.baseline') +
+  labs(title='CAR Relative Abundance Change to Baseline, replicate comparison')
+plot_all_reps(value_col='car.abund.rel.prev') +
+  labs(title='CAR Relative Abundance Change to Previous, replicate comparison')
+```
+
+### All Reps, Abundance relative to T0 (baseline)
+
+```{r, fig.width=6, fig.height=18}
 
 all_rep_comparisons <- read.counts[
   grepl('CTV', assay), 
@@ -465,14 +563,61 @@ all_rep_comparisons <- read.counts[
 names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
 
 all_rep_comparisons <- all_rep_comparisons[, 
-  cast_comparison(read.counts, x.group, y.group)[, c('x.group','y.group') := NULL],
+  cast_comparison(read.counts, 
+    x.group, y.group, value_col='car.abund.rel.baseline')[, c('x.group','y.group') := NULL],
   by=c('assay','t.type','k.type','x.group','y.group')]
 
 ggplot(all_rep_comparisons) + 
   geom_point(aes(x_scaled_sep, y_scaled_sep)) + 
-  facet_wrap(assay + k.type + t.type ~ x.group + y.group)
+  facet_wrap(assay + k.type + t.type ~ x.group + y.group, ncol=4) +
+  labs(title='CAR Abundance comparison') + 
+  theme_minimal(base_size=9)
 
 ```
+
+### pos/neg CTV3, within t.type
+```{r}
+
+all_rep_comparisons <- read.counts[
+  grepl('CTV', assay), 
+  data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
+  by=c('assay','t.type')]
+
+names(all_rep_comparisons)[3:4] <- c('x.group','y.group')
+
+all_rep_comparisons <- all_rep_comparisons[, 
+  cast_comparison(read.counts, x.group, y.group)[,
+    c('x.group','y.group') := NULL],
+    by=c('assay','t.type','x.group','y.group')]
+
+ggplot(all_rep_comparisons[assay == 'CTV3']) + 
+  geom_point(aes(x_scaled_sep, y_scaled_sep)) + 
+  facet_wrap(assay + t.type ~ x.group + y.group)
+
+```
+
+### pos/neg CTV3, within k.type
+```{r}
+
+all_rep_comparisons <- read.counts[
+  grepl('CTV', assay), 
+  data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
+  by=c('assay','k.type')]
+
+names(all_rep_comparisons)[3:4] <- c('x.group','y.group')
+
+all_rep_comparisons <- all_rep_comparisons[, 
+  cast_comparison(read.counts, x.group, y.group)[,
+    c('x.group','y.group') := NULL],
+    by=c('assay','x.group','y.group')]
+
+ggplot(all_rep_comparisons[assay == 'CTV3']) + 
+  geom_point(aes(x_scaled_sep, y_scaled_sep)) + 
+  facet_wrap(assay ~ x.group + y.group)
+
+```
+
+
 ## Pos Neg Comparisons
 ```{r}
 # remove prolif1.d2.ctv3 for now - CD4 has only 1 bin, D, 
