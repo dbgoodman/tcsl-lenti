@@ -272,59 +272,78 @@ day_labels <- c("0" = "Day 0", "8" = "Day 8", "15" = "Day 15", "22" = "Day 22",
 donor_labels <- c("1" = "Donor 1", "2" = "Donor 2", "3" = "Donor 3", 
                   "4" = "Donor 4")
 
-ggplot(cd4_60[[1]][measurement==chosen_measure & k562=='mkate_cd19'], 
-       aes(x=car, y=t_cross, fill=car)) +
-  geom_bar(stat="identity", position=position_dodge()) +
-  geom_text(aes(x=car, y=t_cross+5, group=t_cross, label=t_cross), 
-            position = position_dodge(width=0.9),
-            size=4) +
-  geom_text(data=cd4_60[[2]][car!='none' & measurement==chosen_measure & k562=='mkate_cd19'], 
-            aes(x=car, y=5, group=t_cross, label='NA'),
-            position=position_dodge(width=0.9),
-            size=3) +
-  facet_grid(donor~day_f,
-             labeller=labeller(day_f=day_labels, 
-                               donor=donor_labels)) +
-  theme_minimal(base_size=20) + 
-  geom_hline(yintercept=-Inf) + 
-  geom_vline(xintercept=-Inf) + 
-  scale_y_continuous(expand=c(0,0), limits=c(0,65)) +
-  scale_fill_brewer(palette='Paired') +
-  theme(plot.title=element_text(size=24, hjust=0.5),
-        axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
-        panel.spacing=unit(2, "lines")) +
-  labs(title='CD4 - Time When Red Intensity Reaches 60% of Starting',
-       x='Costim',
-       y='Hours When 60% Red Intensity Remains',
-       fill='Costim')
+cd4_barplot <- ggplot(cd4_60[[1]][donor %in% c(1,2) & 
+                                  measurement==chosen_measure & 
+                                  k562=='mkate_cd19'], 
+                   aes(x=car, y=t_cross, fill=car)) +
+              geom_bar(stat="identity", position=position_dodge()) +
+              geom_text(aes(x=car, y=t_cross+5, group=t_cross, label=t_cross), 
+                        position = position_dodge(width=0.9),
+                        size=4) +
+              geom_text(data=cd4_60[[2]][donor %in% c(1,2) & car!='none' & 
+                                         measurement==chosen_measure & 
+                                         k562=='mkate_cd19'], 
+                        aes(x=car, y=5, group=t_cross, label='NA'),
+                        position=position_dodge(width=0.9),
+                        size=3) +
+              facet_grid(donor~day_f,
+                         labeller=labeller(day_f=day_labels, 
+                                           donor=donor_labels)) +
+              theme_minimal(base_size=20) + 
+              geom_hline(yintercept=-Inf) + 
+              geom_vline(xintercept=-Inf) + 
+              scale_y_continuous(expand=c(0,0), limits=c(0,65)) +
+              scale_fill_brewer(palette='Paired') +
+              theme(plot.title=element_text(size=24, hjust=0.5),
+                    axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
+                    panel.spacing=unit(2, "lines")) +
+              labs(title='CD4 - Time When Red Intensity Reaches 60% of Starting',
+                   x='Costim',
+                   y='Hours When 60% Red Intensity Remains',
+                   fill='Costim')
+
+cd4_barplot
+
+ggsave(paste0(output_dir, '/60pct_killing_hr_barplot_cd4.pdf'),
+       cd4_barplot, width = 7, height = 4,
+       units = 'in', dpi = 300)
 
 
-ggplot(cd8_60[[1]][measurement==chosen_measure & k562=='mkate_cd19'], 
-       aes(x=car, y=t_cross, fill=car)) +
-  geom_bar(stat="identity", position=position_dodge()) +
-  geom_text(aes(x=car, y=t_cross+2, group=t_cross, label=t_cross), 
-            position = position_dodge(width=0.9),
-            size=4) +
-  geom_text(data=cd8_60[[2]][car!='none' & measurement==chosen_measure & k562=='mkate_cd19'], 
-            aes(x=car, y=2, group=t_cross, label='NA'),
-            position=position_dodge(width=0.9),
-            size=3) +
-  facet_grid(donor~day_f,
-             labeller=labeller(day_f=day_labels, 
-                               donor=donor_labels)) +
-  theme_minimal(base_size=20) + 
-  geom_hline(yintercept=-Inf) + 
-  geom_vline(xintercept=-Inf) + 
-  scale_y_continuous(expand=c(0,0), limits=c(0,50)) +
-  scale_fill_brewer(palette='Paired') +
-  theme(plot.title=element_text(size=24, hjust=0.5),
-        axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
-        panel.spacing=unit(2, "lines")) +
-  labs(title='CD8 - Time When Red Intensity Reaches 60% of Starting',
-       x='Costim',
-       y='Hours When 60% Red Intensity Remains',
-       fill='Costim')
+cd8_barplot <- ggplot(cd8_60[[1]][measurement==chosen_measure & 
+                                      k562=='mkate_cd19'], 
+       
+                      aes(x=car, y=t_cross, fill=car)) +
+              geom_bar(stat="identity", position=position_dodge()) +
+              geom_text(aes(x=car, y=t_cross+2, group=t_cross, label=t_cross), 
+                        position = position_dodge(width=0.9),
+                        size=4) +
+              geom_text(data=cd8_60[[2]][car!='none' & 
+                                         measurement==chosen_measure & 
+                                         k562=='mkate_cd19'], 
+                        aes(x=car, y=2, group=t_cross, label='NA'),
+                        position=position_dodge(width=0.9),
+                        size=3) +
+              facet_grid(donor~day_f,
+                         labeller=labeller(day_f=day_labels, 
+                                           donor=donor_labels)) +
+              theme_minimal(base_size=20) + 
+              geom_hline(yintercept=-Inf) + 
+              geom_vline(xintercept=-Inf) + 
+              scale_y_continuous(expand=c(0,0), limits=c(0,50)) +
+              scale_fill_brewer(palette='Paired') +
+              theme(plot.title=element_text(size=24, hjust=0.5),
+                    axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
+                    panel.spacing=unit(2, "lines")) +
+              labs(title='CD8 - Time When Red Intensity Reaches 60% of Starting',
+                   x='Costim',
+                   y='Hours When 60% Red Intensity Remains',
+                   fill='Costim')
 
+cd8_barplot
+
+ggsave(paste0(output_dir, '/60pct_killing_hr_barplot_cd8.pdf'),
+       cd8_barplot, width = 7, height = 4,
+       units = 'in', dpi = 300)
 
 ```
 
@@ -412,42 +431,55 @@ ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement =
 my_colors <- brewer.pal(n=9, "PuBuGn")[5:9]
 
 
-ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & measurement == chosen_measure & car!='none'], 
-  aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=day_f)) + 
-  geom_line(aes(color=day_f)) + 
-  facet_grid(t_type+donor~car) + 
-  ggtitle("CD4 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
-  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
-  theme(plot.title = element_text(size = 25)) + 
-  scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
-  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
-    limits=c(1e-2,1e1), trans=log10_trans()) +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_color_manual(values=my_colors) + 
-  scale_fill_manual(values=my_colors) + 
-  geom_hline(yintercept=1,
-            color='gray60') +
-  theme(panel.spacing = unit(2, "lines"))
+cd4_by_car <- ggplot(incucyte_dt[donor %in% c(1,2) & k562=='mkate_cd19' & !noise & t_type == 'cd4' & measurement == chosen_measure & car!='none'], 
+              aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=day_f)) + 
+              geom_line(aes(color=day_f)) + 
+              facet_grid(t_type+donor~car) + 
+              ggtitle("CD4 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+              theme_minimal(base_size=20) + 
+              geom_vline(xintercept=0) + 
+              geom_hline(yintercept=0) +
+              theme(plot.title = element_text(size = 25)) + 
+              scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
+              scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+                limits=c(1e-2,1e1), trans=log10_trans()) +
+              theme(plot.title = element_text(hjust = 0.5)) + 
+              scale_color_manual(values=my_colors) + 
+              scale_fill_manual(values=my_colors) + 
+              geom_hline(yintercept=1,
+                        color='gray60') +
+              theme(panel.spacing = unit(2, "lines"))
+
+cd4_by_car
+
+ggsave(paste0(output_dir, '/killing_curves_by_car_cd4.pdf'),
+       cd4_by_car, width = 7, height = 4,
+       units = 'in', dpi = 300)
 
 
 
-ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement == chosen_measure & car!='none'], 
-  aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=day_f)) + 
-  geom_line(aes(color=day_f)) + 
-  facet_grid(t_type+donor~car) + 
-  ggtitle("CD8 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
-  theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
-  theme(plot.title = element_text(size = 25)) + 
-  scale_x_continuous(expand=c(0,0), limits=c(0,70)) +
-  scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
-    limits=c(1e-2,1e1), trans=log10_trans()) +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_color_manual(values=my_colors) + 
-  scale_fill_manual(values=my_colors) + 
-  geom_hline(yintercept=1,
-            color='gray60') +
-  theme(panel.spacing = unit(2, "lines"))
+cd8_by_car <- ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & measurement == chosen_measure & car!='none'], 
+              aes(x=Elapsed, y=mean_value_none, group=interaction(car, day_f,donor), fill=day_f)) + 
+              geom_line(aes(color=day_f)) + 
+              facet_grid(t_type+donor~car) + 
+              ggtitle("CD8 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
+              theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+              theme(plot.title = element_text(size = 25)) + 
+              scale_x_continuous(expand=c(0,0), limits=c(0,70)) +
+              scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
+                limits=c(1e-2,1e1), trans=log10_trans()) +
+              theme(plot.title = element_text(hjust = 0.5)) + 
+              scale_color_manual(values=my_colors) + 
+              scale_fill_manual(values=my_colors) + 
+              geom_hline(yintercept=1,
+                        color='gray60') +
+              theme(panel.spacing = unit(2, "lines"))
 
+cd8_by_car
+
+ggsave(paste0(output_dir, '/killing_curves_by_car_cd8.pdf'),
+       cd8_by_car, width = 7, height = 4,
+       units = 'in', dpi = 300)
 
 ```
 
