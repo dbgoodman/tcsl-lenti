@@ -260,7 +260,8 @@ cd8_arr <- ggplot(cd8_pca[[1]], aes(x=PC1, y=PC2)) +
   theme_bw(base_size=9) +
   theme(aspect.ratio=1,
         plot.title = element_text(hjust = 0.5)) +
-  guides(alpha=F, size=F)
+  guides(alpha=F, size=F) +
+  labs(color="Costim")
 
 cd8_arr
 
@@ -281,7 +282,8 @@ cd4_arr <- ggplot(cd4_pca[[1]], aes(x=PC1, y=PC2)) +
   theme_bw(base_size=9) +
   theme(aspect.ratio=1, 
         plot.title = element_text(hjust = 0.5)) +
-  guides(alpha=F, size=F)
+  guides(alpha=F, size=F) +
+  labs(color="Costim")
 
 cd4_arr
 
