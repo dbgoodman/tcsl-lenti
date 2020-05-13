@@ -289,7 +289,7 @@ cd4_barplot <- ggplot(cd4_60[[1]][donor %in% c(1,2) &
               facet_grid(donor~day_f,
                          labeller=labeller(day_f=day_labels, 
                                            donor=donor_labels)) +
-              theme_minimal(base_size=9) + 
+              theme_minimal(base_size=20) + 
               geom_hline(yintercept=-Inf) + 
               geom_vline(xintercept=-Inf) + 
               scale_y_continuous(expand=c(0,0), limits=c(0,65)) +
@@ -316,17 +316,17 @@ cd8_barplot <- ggplot(cd8_60[[1]][measurement==chosen_measure &
               geom_bar(stat="identity", position=position_dodge()) +
               geom_text(aes(x=car, y=t_cross+2, group=t_cross, label=t_cross), 
                         position = position_dodge(width=0.9),
-                        size=2) +
+                        size=4) +
               geom_text(data=cd8_60[[2]][car!='none' & 
                                          measurement==chosen_measure & 
                                          k562=='mkate_cd19'], 
                         aes(x=car, y=2, group=t_cross, label='NA'),
                         position=position_dodge(width=0.9),
-                        size=2) +
+                        size=3) +
               facet_grid(donor~day_f,
                          labeller=labeller(day_f=day_labels, 
                                            donor=donor_labels)) +
-              theme_minimal(base_size=9) + 
+              theme_minimal(base_size=20) + 
               geom_hline(yintercept=-Inf) + 
               geom_vline(xintercept=-Inf) + 
               scale_y_continuous(expand=c(0,0), limits=c(0,50)) +
@@ -436,7 +436,7 @@ cd4_by_car <- ggplot(incucyte_dt[donor %in% c(1,2) & k562=='mkate_cd19' & !noise
               geom_line(aes(color=day_f)) + 
               facet_grid(t_type+donor~car) + 
               ggtitle("CD4 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
-              theme_minimal(base_size=9) + 
+              theme_minimal(base_size=20) + 
               geom_vline(xintercept=0) + 
               geom_hline(yintercept=0) +
               scale_x_continuous(expand=c(0,0), limits=c(0,150)) +
@@ -447,7 +447,8 @@ cd4_by_car <- ggplot(incucyte_dt[donor %in% c(1,2) & k562=='mkate_cd19' & !noise
               scale_fill_manual(values=my_colors) + 
               geom_hline(yintercept=1,
                         color='gray60') +
-              theme(panel.spacing = unit(2, "lines"))
+              theme(panel.spacing = unit(2, "lines")) + 
+    labs(color="Day")
 
 cd4_by_car
 
@@ -462,7 +463,7 @@ cd8_by_car <- ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' &
               geom_line(aes(color=day_f)) + 
               facet_grid(t_type+donor~car) + 
               ggtitle("CD8 - Incucyte K562 Killing by mKate Total Integrated Intensity (normalized to starting)") +
-              theme_minimal(base_size=9) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+              theme_minimal(base_size=20) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
               scale_x_continuous(expand=c(0,0), limits=c(0,70)) +
               scale_y_continuous('mKate Total Integrated Intensity\n(normalized to growth without CAR)',
                 limits=c(1e-2,1e1), trans=log10_trans()) +
@@ -471,7 +472,8 @@ cd8_by_car <- ggplot(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' &
               scale_fill_manual(values=my_colors) + 
               geom_hline(yintercept=1,
                         color='gray60') +
-              theme(panel.spacing = unit(2, "lines"))
+              theme(panel.spacing = unit(2, "lines")) +
+    labs(color="Day")
 
 cd8_by_car
 
