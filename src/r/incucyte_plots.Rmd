@@ -17,6 +17,8 @@ library(scales)
 library(RColorBrewer)
 library(ggrepel)
 
+output_dir <- file.path(here::here('..','figs'))
+
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'incucyte.Rdata'))
 incucyte_dt[, day_f := factor(day_f, levels=sort(as.numeric(levels(day_f))))]
@@ -552,6 +554,98 @@ plot_set_time(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' &
 plot_set_time(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' &
                             measurement==chosen_measure & car!='none'], 
               36)
+
+
+```
+
+### Dan's ranked dot version
+```{r}
+#display all colors: display.brewer.all(type="seq")
+blues <- brewer.pal(9,'Blues')[c(6,8)] #41bb, cd28
+greens <- brewer.pal(9,'Greens')[c(5,7)] #baffr, taci
+oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
+red <- brewer.pal(9,'PuRd')[c(7)] #klrg1
+purple <- brewer.pal(9,'Purples')[c(7)] #zeta
+grey <- 'grey30' #unt
+car_colors <- c(
+  '41BB'=blues[1], 'BAFF-R'=greens[1], 
+  'CD28'=blues[2], 'CD40'=oranges[1], 
+  'KLRG1'=red, 'TACI'=greens[2], 
+  'TNR8'=oranges[2], 'zeta'=purple)
+car_order=c('CD28','41BB','BAFF-R','TACI','CD40','TNR8','KLRG1','zeta')
+
+
+plot_set_time <- function(df, elapsed_hr){
+
+  df_plot <- unique(df[Elapsed==elapsed_hr,
+    list(k562, day, t_type, donor, car, mean_value_none,
+         std_dev_value_none, day_f, Elapsed)])
+
+  t_type <- df_plot[, unique(t_type)]
+  stopifnot(length(t_type) == 1)
+  df_plot[, car := factor(car, levels=car_order)]
+  
+  # we are creating a name which will be unique per dot, and include the rank
+  df_plot[, 
+    day_rank := factor(paste(rank(mean_value_none), car, day, donor, t_type, sep= '|')), 
+    by=c('k562','day','t_type','donor')]
+
+  plot <- ggplot(df_plot,
+    aes(x=day_rank, 
+      y=mean_value_none, 
+      fill=car, color=car, group=car)) +
+    geom_linerange(aes(
+      ymin=mean_value_none-std_dev_value_none,
+      ymax=mean_value_none+std_dev_value_none)) +
+    geom_point(
+      color='grey30', 
+      shape=21, position=position_dodge(width=1),
+      size=3) +
+    facet_grid(donor ~ day_f, space='free', scales='free') +
+    theme_minimal(base_size=20) +
+    theme(
+      plot.title = element_text(size = 25),
+      panel.spacing = unit(2, "lines"),
+      panel.spacing.y=unit(80,'pt'), 
+      axis.text.x=element_blank(),
+      panel.grid.minor.x = element_blank(),
+      panel.grid.major.x = element_blank()) +
+    scale_fill_manual(values=rev(car_colors)) +
+    scale_color_manual(values=rev(car_colors)) +
+    scale_y_continuous(labels = scales::percent,
+      limits=c(0,1.1),
+      breaks=c(0, 0.25, 0.5, 0.75, 1)) +
+    geom_hline(yintercept=1, color='gray30') +
+    labs(x=" ", y=" ")
+
+  return(plot)
+}
+
+killing_plots_combined_cd8 <- plot_grid(
+  plot_set_time(
+    incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & donor == 1 &
+      measurement==chosen_measure & car!='none'], 32),
+  plot_set_time(
+    incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & donor == 2 &
+      measurement==chosen_measure & car!='none'], 32),
+  ncol = 1, align = 'v', axis = 'l')
+
+killing_plots_combined_cd4 <- plot_grid(
+  plot_set_time(
+    incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & donor == 1 &
+      measurement==chosen_measure & car!='none'], 80),
+  plot_set_time(
+    incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & donor == 2 &
+      measurement==chosen_measure & car!='none'], 76),
+  ncol = 1, align = 'v', axis = 'l')
+
+ggsave(paste0(output_dir, '/incucyte_ranked_dots_cd4_76_hrs.pdf'),
+       killing_plots_combined_cd4, width = 8, height = 4,
+       units = 'in', dpi = 300)
+
+ggsave(paste0(output_dir, '/incucyte_ranked_dots_cd8_32_hrs.pdf'),
+       killing_plots_combined_cd8, width = 8, height = 4,
+       units = 'in', dpi = 300)
 
 
 ```
