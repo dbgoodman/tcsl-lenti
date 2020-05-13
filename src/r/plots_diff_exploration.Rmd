@@ -3,7 +3,7 @@ title: "Arrayed Screen Differentiation Exploration"
 output: html_document
 knit: (function(inputFile, encoding) {
   rmarkdown::render(inputFile, 
-    encoding = encoding, output_dir = here::here('..','..','html'))})
+    encoding = encoding, output_dir = here::here(,'..','html'))})
 ---
 
 # Load Data 
