@@ -602,10 +602,9 @@ plot_set_time <- function(df, elapsed_hr){
       shape=21, position=position_dodge(width=1),
       size=3) +
     facet_grid(donor ~ day_f, space='free', scales='free') +
-    theme_minimal(base_size=20) +
+    theme_minimal(base_size=9) +
     theme(
       plot.title = element_text(size = 25),
-      panel.spacing = unit(2, "lines"),
       panel.spacing.y=unit(80,'pt'), 
       axis.text.x=element_blank(),
       panel.grid.minor.x = element_blank(),
@@ -624,7 +623,7 @@ plot_set_time <- function(df, elapsed_hr){
 killing_plots_combined_cd8 <- plot_grid(
   plot_set_time(
     incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & donor == 1 &
-      measurement==chosen_measure & car!='none'], 32),
+      measurement==chosen_measure & car!='none'], 30),
   plot_set_time(
     incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & donor == 2 &
       measurement==chosen_measure & car!='none'], 32),
