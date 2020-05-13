@@ -1,8 +1,11 @@
 ---
-title: "Incucyte Plots - KK"
+title: "Incucyte Plots"
 output:
   html_document:
     df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, 
+    output_dir = here::here('..','..','html'))})
 ---
 
 
@@ -501,8 +504,8 @@ plot_set_time <- function(df, elapsed_hr){
 }
 
 
-set_time(incucyte_dt, 26)[[1]]
-set_time(incucyte_dt, 26)[[2]]
+plot_set_time(incucyte_dt, 26)[[1]]
+plot_set_time(incucyte_dt, 26)[[2]]
 
 ```
 
