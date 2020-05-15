@@ -461,44 +461,43 @@ cast_comparison <- function(
 
 plot_all_reps <- function(value_col) {
   
-all_rep_comparisons <- read.counts[
-  grepl('CTV', assay), 
-  data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
-  by=c('assay','t.type','k.type')]
-
-names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
-
-all_rep_comparisons <- all_rep_comparisons[, 
-  cast_comparison(read.counts, x.group, y.group, value_col=value_col)[, 
-    c('x.group','y.group') := NULL],
-  by=c('assay','t.type','k.type','x.group','y.group')]
-
-# combine with baseline abundance as color
-baseline.abund <- read.counts[
-  assay=='baseline', list(mean.baseline= mean(car.abund.baseline, na.rm=T)),
-  by=c('t.type','CAR.align')][,
-    list(CAR.align, 
-      rel.baseline.log= log10(mean.baseline/mean(mean.baseline))), 
-    by=c('t.type')]
-
-all_rep_comparisons <-all_rep_comparisons[
-  baseline.abund, on=c('t.type','CAR.align')]
-
-all_rep_comparisons[, rep_pair := paste(gsub('(prolif\\d_d\\d).*','\\1', x.group), gsub('(prolif\\d_d\\d).*','\\1', y.group), sep='|')]
-all_rep_comparisons[, assay_kt := paste(assay,t.type,k.type, sep='|')]
-
-return(ggplot(all_rep_comparisons) + 
-  geom_point(aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log, 
-    label=CAR.align), shape = 21, colour = "grey30") + 
-  scale_fill_distiller(palette='BrBG', 
-    limit=c(-1,1) * max(abs(all_rep_comparisons$rel.baseline.log))) +
-  facet_wrap(assay_kt ~ rep_pair, ncol=4))
+  all_rep_comparisons <- read.counts[
+    grepl('CTV', assay), 
+    data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
+    by=c('assay','t.type','k.type')]
+  
+  names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
+  
+  all_rep_comparisons <- all_rep_comparisons[, 
+    cast_comparison(read.counts, x.group, y.group, value_col=value_col)[, 
+      c('x.group','y.group') := NULL],
+    by=c('assay','t.type','k.type','x.group','y.group')]
+  
+  # combine with baseline abundance as color
+  baseline.abund <- read.counts[
+    assay=='baseline', list(mean.baseline= mean(car.abund.baseline, na.rm=T)),
+    by=c('t.type','CAR.align')][,
+      list(CAR.align, 
+        rel.baseline.log= log10(mean.baseline/mean(mean.baseline))), 
+      by=c('t.type')]
+  
+  all_rep_comparisons <-all_rep_comparisons[
+    baseline.abund, on=c('t.type','CAR.align')]
+  
+  all_rep_comparisons[, rep_pair := paste(gsub('(prolif\\d_d\\d).*','\\1', x.group), gsub('(prolif\\d_d\\d).*','\\1', y.group), sep='|')]
+  all_rep_comparisons[, assay_kt := paste(assay,t.type,k.type, sep='|')]
+  
+  return(ggplot(all_rep_comparisons) + 
+    geom_point(aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log, 
+      label=CAR.align), shape = 21, colour = "grey30") + 
+    scale_fill_distiller(palette='BrBG', 
+      limit=c(-1,1) * max(abs(all_rep_comparisons$rel.baseline.log))) +
+    facet_grid(rep_pair ~  k.type + t.type + assay))
 
 }
 ```
 
-## All Reps, CAR score
-```{r, fig.width=6, fig.height=18}
+```{r}
 read.counts[, car.abund.log := log10(car.abund)]
 
 #assay_rep_list:
@@ -549,6 +548,43 @@ plot_all_reps(value_col='car.abund.rel.baseline') +
   labs(title='CAR Relative Abundance Change to Baseline, replicate comparison')
 plot_all_reps(value_col='car.abund.rel.prev') +
   labs(title='CAR Relative Abundance Change to Previous, replicate comparison')
+```
+
+### Individual Replicate, comparison among different measurements
+
+```{r, fig.width=15, fig.height=5}
+
+comp.df <- copy(read.counts[assay != 'baseline'])
+comp.df[, car.abund.rel.prev.scaled := scales::rescale(car.abund.rel.prev), 
+  by=sort.group]
+comp.df[, car.abund.rel.baseline.scaled := scales::rescale(car.abund.rel.baseline),
+  by=sort.group]
+comp.df[, CAR.score.scaled := scales::rescale(CAR.score), 
+  by=sort.group]
+
+baseline.abund <- read.counts[
+  assay=='baseline', list(mean.baseline= mean(car.abund.baseline, na.rm=T)),
+  by=c('t.type','CAR.align')][,
+    list(CAR.align, 
+      rel.baseline.log= log10(mean.baseline/mean(mean.baseline))), 
+    by=c('t.type')]
+
+comp.df <-comp.df[baseline.abund, on=c('t.type','CAR.align')]
+
+plot_measure_pair <- function(measure_i, measure_j) {
+  return(ggplot(comp.df[batch != 'post-cytof']) + 
+    geom_point(aes_string(x=measure_i, y=measure_j, 
+      fill='rel.baseline.log',
+      label='CAR.align'),
+      shape = 21, colour = "grey30") + 
+    scale_fill_distiller(palette='BrBG', 
+      limit=c(-1,1) * max(abs(comp.df$rel.baseline.log))) +
+    facet_grid(batch+donor ~ k.type + t.type + assay))
+}
+
+plot_measure_pair('CAR.score.scaled', 'car.abund.rel.baseline.scaled')
+plot_measure_pair('CAR.score.scaled', 'car.abund.rel.prev.scaled')
+plot_measure_pair('car.abund.rel.baseline.scaled', 'car.abund.rel.prev.scaled')
 ```
 
 ### All Reps, Abundance relative to T0 (baseline)
