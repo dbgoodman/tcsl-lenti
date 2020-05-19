@@ -2,7 +2,9 @@
 title: "pooled_03"
 author: "Daniel Goodman"
 date: "4/7/2020"
-output: html_document
+output:
+  html_document:
+    code_folding: hide
 knit: (function(inputFile, encoding) {
   rmarkdown::render(inputFile, encoding = encoding, 
   output_dir = here::here('..','html','pooled'))})
@@ -19,6 +21,7 @@ library(DESeq2)
 library(plotly)
 library(Rtsne)
 library(scales)
+library(dplyr)
 
 rm(list = ls())
 
@@ -416,7 +419,7 @@ cast_comparison <- function(
     comp.df, x_group, y_group, value_col='CAR.score', xycols=c('x','y'),
     rescale= 'combined') {
   
-  message(paste(x_group, y_group, sep=', '))
+  #message(paste(x_group, y_group, sep=', '))
   
   cast_groups <- dcast(
     unique(comp.df[sort.group %in% c(x_group, y_group), 
@@ -459,9 +462,32 @@ cast_comparison <- function(
 
 ```{r}
 
-plot_all_reps <- function(value_col) {
+
+# use malanhanobis distance to collapse replicates, 
+# then use median absolute deviation to identify outliers
+#https://www.r-craft.org/r-news/combined-outlier-detection-with-dplyr-and-ruler/
+
+maha_dist <- . %>% select_if(is.numeric) %>%
+    mahalanobis(center = colMeans(.), cov = cov(.))
+
+isnt_out_maha <- function(tbl, isnt_out_f, ...) {
+  tbl %>% maha_dist() %>% isnt_out_f(...)
+}
+
+isnt_out_mad <- function(x, thres = 3, na.rm = TRUE) {
+  abs(x - median(x, na.rm = na.rm)) <= thres * mad(x, na.rm = na.rm)
+}
+
+top_x_mad <- function(x, top=5, na.rm = TRUE) {
+  mads <- abs(x - median(x, na.rm = na.rm))
+  top_mads <- order(-mads)[1:top]
+  return(!(1:length(mads) %in% top_mads))
+}
+
+
+plot_all_reps <- function(df=read.counts, value_col) {
   
-  all_rep_comparisons <- read.counts[
+  all_rep_comparisons <- df[
     grepl('CTV', assay), 
     data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
     by=c('assay','t.type','k.type')]
@@ -469,12 +495,12 @@ plot_all_reps <- function(value_col) {
   names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
   
   all_rep_comparisons <- all_rep_comparisons[, 
-    cast_comparison(read.counts, x.group, y.group, value_col=value_col)[, 
+    cast_comparison(df, x.group, y.group, value_col=value_col)[, 
       c('x.group','y.group') := NULL],
     by=c('assay','t.type','k.type','x.group','y.group')]
   
   # combine with baseline abundance as color
-  baseline.abund <- read.counts[
+  baseline.abund <- df[
     assay=='baseline', list(mean.baseline= mean(car.abund.baseline, na.rm=T)),
     by=c('t.type','CAR.align')][,
       list(CAR.align, 
@@ -484,12 +510,34 @@ plot_all_reps <- function(value_col) {
   all_rep_comparisons <-all_rep_comparisons[
     baseline.abund, on=c('t.type','CAR.align')]
   
-  all_rep_comparisons[, rep_pair := paste(gsub('(prolif\\d_d\\d).*','\\1', x.group), gsub('(prolif\\d_d\\d).*','\\1', y.group), sep='|')]
-  all_rep_comparisons[, assay_kt := paste(assay,t.type,k.type, sep='|')]
+  all_rep_comparisons[, rep_pair := paste(
+    gsub('(prolif\\d_d\\d).*','\\1', x.group), 
+    gsub('(prolif\\d_d\\d).*','\\1', y.group), 
+    sep='\n')]
   
-  return(ggplot(all_rep_comparisons) + 
-    geom_point(aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log, 
-      label=CAR.align), shape = 21, colour = "grey30") + 
+  all_rep_comparisons[, assay_kt := paste(assay,t.type,k.type, sep='\n')]
+  
+  # use malanhanobis distance to collapse replicates, 
+  # then use median absolute deviation to identify outliers
+  all_rep_comparisons[,
+    outlier := {   
+      
+      nonsingular <- apply(tibble(x_scaled_sep, y_scaled_sep), 2, 
+        function (x) var(x) > 0 & !is.na(var(x)))
+      non_singular_sd <- tibble(x_scaled_sep, y_scaled_sep)[,
+        (nonsingular)]
+      !isnt_out_maha(non_singular_sd, top_x_mad)
+    }, by=.(rep_pair, k.type, t.type, assay)]
+  
+  all_rep_comparisons[, label_outliers := ''][outlier == T, 
+    label_outliers := CAR.align]
+  
+  return(ggplot(all_rep_comparisons, 
+      aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log, 
+        label=label_outliers)) + 
+    geom_point(shape = 21, colour = "grey30") + 
+    geom_text_repel(size=2.5) + 
+    theme_bw() + 
     scale_fill_distiller(palette='BrBG', 
       limit=c(-1,1) * max(abs(all_rep_comparisons$rel.baseline.log))) +
     facet_grid(rep_pair ~  k.type + t.type + assay))
@@ -497,7 +545,7 @@ plot_all_reps <- function(value_col) {
 }
 ```
 
-```{r}
+```{r, fig.width=15, fig.height=5}
 read.counts[, car.abund.log := log10(car.abund)]
 
 #assay_rep_list:
@@ -540,21 +588,26 @@ read.counts[, car.abund.rel.prev := car.abund/car.abund.prev]
 
 plot_all_reps(value_col='CAR.score')  +
   labs(title='CAR score replicate comparison')
+
 plot_all_reps(value_col='car.abund') +
   labs(title='CAR Abundance replicate comparison')
+
 plot_all_reps(value_col='car.abund.log') +
   labs(title='CAR Log Abundance replicate comparison')
+
 plot_all_reps(value_col='car.abund.rel.baseline') +
   labs(title='CAR Relative Abundance Change to Baseline, replicate comparison')
+
 plot_all_reps(value_col='car.abund.rel.prev') +
   labs(title='CAR Relative Abundance Change to Previous, replicate comparison')
+
 ```
 
 ### Individual Replicate, comparison among different measurements
 
 ```{r, fig.width=15, fig.height=5}
 
-comp.df <- copy(read.counts[assay != 'baseline'])
+comp.df <- copy(read.counts[assay != 'baseline' & batch != 'post-cytof'])
 comp.df[, car.abund.rel.prev.scaled := scales::rescale(car.abund.rel.prev), 
   by=sort.group]
 comp.df[, car.abund.rel.baseline.scaled := scales::rescale(car.abund.rel.baseline),
@@ -571,20 +624,79 @@ baseline.abund <- read.counts[
 
 comp.df <-comp.df[baseline.abund, on=c('t.type','CAR.align')]
 
-plot_measure_pair <- function(measure_i, measure_j) {
-  return(ggplot(comp.df[batch != 'post-cytof']) + 
-    geom_point(aes_string(x=measure_i, y=measure_j, 
+plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
+  
+  # fix overplotting:
+  df <- unique(df[, list(
+    get(measure_i), get(measure_j), 
+    rel.baseline.log,  CAR.align,
+    batch, donor, k.type, t.type, assay)])
+  
+  names(df)[c(1,2)] <- c(measure_i, measure_j)
+  
+  # use malanhanobis distance to collapse replicates, 
+  # then use median absolute deviation to identify outliers
+  df[, outlier := {
+    
+    print(.BY)
+    print(tibble(get(measure_i), get(measure_j))
+    
+      nonsingular <- apply(tibble(get(measure_i), get(measure_j)), 2, 
+        function (x) var(x) > 0 & !is.na(var(x)))
+
+      non_singular_sd <- tibble(get(measure_i), get(measure_j))[,
+        (nonsingular)]
+      
+      print(non_singular_sd)
+      
+      # for specific base of prev vs baseline and CTV1, will be singular
+      if ((ncol(non_singular_sd) == 2 && 
+            all(non_singular_sd[,1] == non_singular_sd[,2])) | 
+          ncol(non_singular_sd) != 2) {
+        !top_x_mad(pull(non_singular_sd, 1))
+      } else {
+        !isnt_out_maha(non_singular_sd, top_x_mad)
+      }
+    }, by=.(batch, donor, k.type, t.type, assay)]
+  
+  df[, label_outliers := ''][outlier == T, 
+    label_outliers := CAR.align]
+  
+
+  
+  
+  return(ggplot(df, aes_string(
+      x=measure_i, y=measure_j, 
       fill='rel.baseline.log',
-      label='CAR.align'),
-      shape = 21, colour = "grey30") + 
+      label='label_outliers')) + 
+    geom_point(shape = 21, colour = "grey30") + 
+    geom_text_repel(size=2.5) + 
+    theme_bw() +
     scale_fill_distiller(palette='BrBG', 
-      limit=c(-1,1) * max(abs(comp.df$rel.baseline.log))) +
+      limit=c(-1,1) * max(abs(df$rel.baseline.log))) +
     facet_grid(batch+donor ~ k.type + t.type + assay))
 }
 
-plot_measure_pair('CAR.score.scaled', 'car.abund.rel.baseline.scaled')
-plot_measure_pair('CAR.score.scaled', 'car.abund.rel.prev.scaled')
-plot_measure_pair('car.abund.rel.baseline.scaled', 'car.abund.rel.prev.scaled')
+deseq2_rc_measures <- comp.df[
+  dcast(all.deseq.results.dt[,
+    contrast := paste(ref_set, test_set, sep='_v_')][, 
+      `:=`(log2FoldChange.scaled=scales::rescale(log2FoldChange)), 
+      by=.(k.type, t.type, assay, contrast)], 
+        k.type + t.type + assay + CAR.align ~ contrast, 
+        value.var = c('log2FoldChange', 'padj')),
+    on=c('k.type','t.type','assay','CAR.align')]
+
+plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.baseline.scaled')
+plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.prev.scaled')
+plot_measure_pair(comp.df, 'car.abund.rel.baseline.scaled',
+    'car.abund.rel.prev.scaled')
+
+plot_measure_pair(deseq2_rc_measures,
+  'log2FoldChange_D_v_A',
+  'car.abund.rel.prev.scaled')
+
+
+
 ```
 
 ### All Reps, Abundance relative to T0 (baseline)
