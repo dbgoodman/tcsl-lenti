@@ -35,6 +35,10 @@ load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 
 # set this to true to re-run, else will load from s3
 rerun_deseq <- F
+
+# arrayed list of CARs
+array.list <- c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')
+
 ```
 
 # DeSeq2 Computation
@@ -532,11 +536,15 @@ plot_all_reps <- function(df=read.counts, value_col) {
   all_rep_comparisons[, label_outliers := ''][outlier == T, 
     label_outliers := CAR.align]
   
+  all_rep_comparisons[, label_arrayed := ''][
+    CAR.align %in% array.list & !outlier, 
+    label_arrayed := CAR.align]
+  
   return(ggplot(all_rep_comparisons, 
-      aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log, 
-        label=label_outliers)) + 
+      aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log)) + 
     geom_point(shape = 21, colour = "grey30") + 
-    geom_text_repel(size=2.5) + 
+    geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
+    geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
     theme_bw() + 
     scale_fill_distiller(palette='BrBG', 
       limit=c(-1,1) * max(abs(all_rep_comparisons$rel.baseline.log))) +
@@ -545,7 +553,7 @@ plot_all_reps <- function(df=read.counts, value_col) {
 }
 ```
 
-```{r, fig.width=15, fig.height=5}
+```{r, fig.width=22.5, fig.height=7.5}
 read.counts[, car.abund.log := log10(car.abund)]
 
 #assay_rep_list:
@@ -605,7 +613,7 @@ plot_all_reps(value_col='car.abund.rel.prev') +
 
 ### Individual Replicate, comparison among different measurements
 
-```{r, fig.width=15, fig.height=5}
+```{r, fig.width=22.5, fig.height=7.5}
 
 comp.df <- copy(read.counts[assay != 'baseline' & batch != 'post-cytof'])
 comp.df[, car.abund.rel.prev.scaled := scales::rescale(car.abund.rel.prev), 
@@ -627,7 +635,7 @@ comp.df <-comp.df[baseline.abund, on=c('t.type','CAR.align')]
 plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
   
   # fix overplotting:
-  df <- unique(df[, list(
+  df <- unique(df[!is.na(get(measure_i)) & !is.na(get(measure_j)), list(
     get(measure_i), get(measure_j), 
     rel.baseline.log,  CAR.align,
     batch, donor, k.type, t.type, assay)])
@@ -638,8 +646,8 @@ plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
   # then use median absolute deviation to identify outliers
   df[, outlier := {
     
-    print(.BY)
-    print(tibble(get(measure_i), get(measure_j))
+    #print(.BY)
+    #print(tibble(get(measure_i), get(measure_j)))
     
       nonsingular <- apply(tibble(get(measure_i), get(measure_j)), 2, 
         function (x) var(x) > 0 & !is.na(var(x)))
@@ -647,7 +655,7 @@ plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
       non_singular_sd <- tibble(get(measure_i), get(measure_j))[,
         (nonsingular)]
       
-      print(non_singular_sd)
+      #print(non_singular_sd)
       
       # for specific base of prev vs baseline and CTV1, will be singular
       if ((ncol(non_singular_sd) == 2 && 
@@ -662,15 +670,16 @@ plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
   df[, label_outliers := ''][outlier == T, 
     label_outliers := CAR.align]
   
-
-  
+  df[, label_arrayed := ''][
+    CAR.align %in% array.list & !outlier,  
+    label_arrayed := CAR.align]
   
   return(ggplot(df, aes_string(
       x=measure_i, y=measure_j, 
-      fill='rel.baseline.log',
-      label='label_outliers')) + 
+      fill='rel.baseline.log')) + 
     geom_point(shape = 21, colour = "grey30") + 
-    geom_text_repel(size=2.5) + 
+    geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
+    geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
     theme_bw() +
     scale_fill_distiller(palette='BrBG', 
       limit=c(-1,1) * max(abs(df$rel.baseline.log))) +
@@ -693,9 +702,23 @@ plot_measure_pair(comp.df, 'car.abund.rel.baseline.scaled',
 
 plot_measure_pair(deseq2_rc_measures,
   'log2FoldChange_D_v_A',
-  'car.abund.rel.prev.scaled')
+  'car.abund.rel.prev.scaled') +
+  labs(title='DeSeq2 D:A vs Abundance-Prev')
 
+plot_measure_pair(deseq2_rc_measures,
+  'log2FoldChange_D_v_A',
+  'car.abund.rel.baseline.scaled') +
+  labs(title='DeSeq2 D:A vs Abundance-Baseline')
 
+plot_measure_pair(deseq2_rc_measures,
+  'log2FoldChange_CD_v_AB',
+  'car.abund.rel.prev.scaled') +
+  labs(title='DeSeq2 CD:AB vs Abundance-Prev')
+
+plot_measure_pair(deseq2_rc_measures,
+  'log2FoldChange_CD_v_AB',
+  'car.abund.rel.baseline.scaled') +
+  labs(title='DeSeq2 CD:AB vs Abundance-Baseline')
 
 ```
 
@@ -1269,3 +1292,11 @@ prolif_posneg <- ggplot(cast_posneg,
 ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
        height=4.5, width=7)
 ```
+
+
+## DEseq2 notes on more complex contrasts
+
+We'd like to use DESeq2's normalization for CAR-score and for 
+
+
+https://www.biostars.org/p/188808/
