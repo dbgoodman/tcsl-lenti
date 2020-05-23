@@ -23,6 +23,7 @@ library(tidyverse)
 library(grid)
 library(gridExtra) # add to AWS
 library(cowplot) # add to AWS
+library(slingshot) # add to AWS
 use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 
 data_dir <- here::here('..','data')
@@ -895,6 +896,66 @@ all_plots(umap_cd8_fcs_dt, 'CD8')
 ```{r, fig.width=15, fig.height=30}
 all_plots(umap_cd4_fcs_dt, 'CD4')
 ```
+## Pseudotime Analysis
+```{r fig.width=15, fig.height=11}
+# cluster labels
+clusterLabels_cd8 <- as.vector(umap_cd8_fcs_dt$cluster)
+
+# reduced dimensional matrix
+rd_matrix_cd8 <- umap_cd8_fcs_dt %>% remove_rownames %>% column_to_rownames(var="id") %>% select(umap_1, umap_2) %>% as.matrix()
+
+# get lineages, set cluster 14 as the start (since likely naive T cells)
+lin_cd8 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '14')
+
+# assign colors to each cluster (because slingshot does not support ggplot)
+cell_pal <- function(cell_vars, pal_fun,...) {
+  if (is.numeric(cell_vars)) {
+    pal <- pal_fun(100, ...)
+    return(pal[cut(cell_vars, breaks = 100)])
+  } else {
+    categories <- sort(unique(cell_vars))
+    pal <- setNames(pal_fun(length(categories), ...), categories)
+    return(pal[cell_vars])
+  }
+}
+cell_colors_clust <- cell_pal(clusterLabels_cd8, hue_pal())
+
+# get smooth curves for lineages
+crv_cd8 <- getCurves(lin_cd8, approx_points=100)
+
+# plot trajectory on umap alongside original umap
+plot(rd_matrix_cd8, col = cell_colors_clust, pch = 16, cex = 0.5)
+lines(crv_cd8, lwd = 2, type = 'lineages', col = 'black', show.constraints = TRUE)
+
+
+ggplot() + 
+  geom_point(data=umap_cd8_fcs_dt, 
+    aes(x=umap_1, y=umap_2, color=cluster), size=0.2, alpha=0.2) +
+  geom_label(data=umap_cd8_cluster_dt, aes(
+    x=mean_umap_1, y=mean_umap_2,
+    label=paste(cluster,size,sep='\n'), 
+    color=cluster), alpha=0.3) +
+  theme_minimal()
+
+
+# plot psuedotime values for each lineage (not ready)
+nc <- 3
+pt <- slingPseudotime(lin_cd8)
+nms <- colnames(pt)
+nr <- ceiling(length(nms)/nc)
+pal <- viridis(100, end = 0.95)
+par(mfrow = c(nr, nc))
+for (i in nms) {
+  colors <- pal[cut(pt[,i], breaks = 100)]
+  plot(reducedDim(lin_cd8), col = colors, pch = 16, cex = 0.5, main = i)
+  lines(lin_cd8, lwd = 2, col = 'black', type = 'lineages')
+}
+```
+
+
+
+
+
 
 
 
