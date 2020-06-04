@@ -41,6 +41,80 @@ array.list <- c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')
 
 ```
 
+## deSeq2 normalization followed by CAR score calculation
+
+We'd like to use DESeq2's normalization for CAR-score and to properly normalize
+the baseline measurements.
+
+This can be done with either VST or rlog.
+
+https://www.biostars.org/p/188808/
+https://support.bioconductor.org/p/126713/
+
+
+```{r}
+
+cts <- dcast(
+    read.counts[, .(
+            CAR.align, 
+            sort.group.bin, 
+            k.type, t.type, batch, assay, donor, 
+            sort.group, 
+            bin,
+            counts)], 
+    CAR.align ~ sort.group.bin, value.var='counts')
+
+cts <- data.frame(cts[, -1], row.names = cts[, CAR.align])
+cts[is.na(cts)] <- 0
+
+vst_cts <- reshape2::melt(varianceStabilizingTransformation(as.matrix(cts)))
+names(vst_cts) <- c('CAR.align','sort.group.bin', 'vst')
+rlog_cts <- reshape2::melt(rlog(as.matrix(cts)))
+names(rlog_cts) <- c('CAR.align','sort.group.bin', 'rlog')
+rlog_cts$CAR.align <- factor(rlog_cts$CAR.align, levels=1:40, 
+  labels=levels(vst_cts$CAR.align))
+
+norm_cts <- merge(vst_cts, rlog_cts, by=c('CAR.align','sort.group.bin'))
+
+read.counts <- merge(read.counts, norm_cts, by=c('CAR.align','sort.group.bin'))
+
+read.counts[, 
+  vst_car_score := sum((vst - mean(vst)) * sqrt(ctv.bin.score)),
+  by=c('CAR.align','sort.group')]
+
+read.counts[, 
+  rlog_car_score := sum((rlog - mean(rlog)) * sqrt(ctv.bin.score)),
+  by=c('CAR.align','sort.group')]
+
+ggplot(read.counts) + 
+    geom_boxplot(
+        aes(x=reorder(CAR.align,vst_car_score), y=vst_car_score)) + 
+    coord_flip() + 
+    facet_wrap(t.type ~ k.type) + 
+    facet_grid(t.type ~ assay + k.type)
+
+ggplot(read.counts) + 
+    geom_boxplot(
+        aes(x=reorder(CAR.align,rlog_car_score), y=rlog_car_score)) + 
+    coord_flip() + 
+    facet_wrap(t.type ~ k.type) + 
+    facet_grid(t.type ~ assay + k.type)
+
+ggplot(read.counts) + 
+    geom_point(
+        aes(x=rlog_car_score, y=CAR.score, color=interaction(donor, batch))) + 
+    coord_flip() + 
+    facet_wrap(t.type ~ k.type) + 
+    facet_grid(t.type ~ assay + k.type)
+
+ggplot(read.counts) + 
+    geom_point(
+        aes(x=rlog_car_score, y=vst_car_score, color=interaction(donor, batch))) + 
+    coord_flip() + 
+    facet_wrap(t.type ~ k.type) + 
+    facet_grid(t.type ~ assay + k.type)
+```
+
 # DeSeq2 Computation
 
 ## DESeq2 Function
@@ -540,14 +614,27 @@ plot_all_reps <- function(df=read.counts, value_col) {
     CAR.align %in% array.list & !outlier, 
     label_arrayed := CAR.align]
   
-  return(ggplot(all_rep_comparisons, 
-      aes(x_scaled_sep, y_scaled_sep, fill=rel.baseline.log)) + 
-    geom_point(shape = 21, colour = "grey30") + 
+  non_na_comps <- all_rep_comparisons[, 
+    !any(is.na(list(var(x_scaled_sep), var(y_scaled_sep)))), 
+    by=.(rep_pair, k.type, t.type, assay)]
+  
+  r_squareds <- all_rep_comparisons[
+    non_na_comps[V1==T], on=.(rep_pair, k.type, t.type, assay)][V1 == T][, 
+      list(r=sqrt(summary(lm(x_scaled_sep ~ y_scaled_sep))$r.squared)), 
+      by=.(rep_pair, k.type, t.type, assay)]
+  
+  r_squareds[, r_lbl := paste('r=',as.character(round(r, 2)))]
+  
+  return(ggplot(data=all_rep_comparisons, 
+      aes(x_scaled_sep, y_scaled_sep)) + 
+    geom_point(shape = 21, colour = "grey30", aes(fill=rel.baseline.log)) + 
     geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
     geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
     theme_bw() + 
     scale_fill_distiller(palette='BrBG', 
       limit=c(-1,1) * max(abs(all_rep_comparisons$rel.baseline.log))) +
+    geom_label(size=2.5, aes(x=Inf, y=-Inf, label=r_lbl), data=r_squareds,
+      hjust=1, vjust=0) +
     facet_grid(rep_pair ~  k.type + t.type + assay))
 
 }
@@ -609,6 +696,13 @@ plot_all_reps(value_col='car.abund.rel.baseline') +
 plot_all_reps(value_col='car.abund.rel.prev') +
   labs(title='CAR Relative Abundance Change to Previous, replicate comparison')
 
+plot_all_reps(value_col='vst_car_score')  +
+    labs(title='VST-normalized CAR score replicate comparison')
+
+plot_all_reps(value_col='rlog_car_score')  +
+    labs(title='rlog-normalized CAR score replicate comparison')
+
+
 ```
 
 ### Individual Replicate, comparison among different measurements
@@ -621,6 +715,10 @@ comp.df[, car.abund.rel.prev.scaled := scales::rescale(car.abund.rel.prev),
 comp.df[, car.abund.rel.baseline.scaled := scales::rescale(car.abund.rel.baseline),
   by=sort.group]
 comp.df[, CAR.score.scaled := scales::rescale(CAR.score), 
+  by=sort.group]
+comp.df[, vst_car_score.scaled := scales::rescale(vst_car_score), 
+  by=sort.group]
+comp.df[, rlog_car_score.scaled := scales::rescale(rlog_car_score), 
   by=sort.group]
 
 baseline.abund <- read.counts[
@@ -651,14 +749,14 @@ plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
     
       nonsingular <- apply(tibble(get(measure_i), get(measure_j)), 2, 
         function (x) var(x) > 0 & !is.na(var(x)))
-
+      
       non_singular_sd <- tibble(get(measure_i), get(measure_j))[,
         (nonsingular)]
       
-      #print(non_singular_sd)
-      
+      # if both measures are singular
+      if (!any(nonsingular)) (FALSE)
       # for specific base of prev vs baseline and CTV1, will be singular
-      if ((ncol(non_singular_sd) == 2 && 
+      else if ((ncol(non_singular_sd) == 2 &&
             all(non_singular_sd[,1] == non_singular_sd[,2])) | 
           ncol(non_singular_sd) != 2) {
         !top_x_mad(pull(non_singular_sd, 1))
@@ -674,16 +772,25 @@ plot_measure_pair <- function(df=comp.df, measure_i, measure_j) {
     CAR.align %in% array.list & !outlier,  
     label_arrayed := CAR.align]
   
+  r_squareds <- df[, 
+    list(r=sqrt(summary(lm(data=.SD, 
+      as.formula(paste(measure_i, "~", measure_j))))$r.squared)), 
+   by=.(batch, donor, k.type, t.type, assay)]
+  
+  r_squareds[, r_lbl := paste('r=',as.character(round(r, 2)))]
+  
   return(ggplot(df, aes_string(
-      x=measure_i, y=measure_j, 
-      fill='rel.baseline.log')) + 
-    geom_point(shape = 21, colour = "grey30") + 
-    geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
-    geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
+      x=measure_i, y=measure_j)) + 
+    geom_point(data=df, shape = 21, colour = "grey30", aes(fill=rel.baseline.log)) + 
+    geom_text_repel(data=df, size=2.5, color='grey20', aes(label=label_outliers)) +
+    geom_text_repel(data=df, size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
     theme_bw() +
+    geom_label(size=2.5, aes(x=Inf, y=-Inf, label=r_lbl), data=r_squareds,
+      hjust=1, vjust=0) +
     scale_fill_distiller(palette='BrBG', 
       limit=c(-1,1) * max(abs(df$rel.baseline.log))) +
-    facet_grid(batch+donor ~ k.type + t.type + assay))
+    facet_grid(batch+donor ~ k.type + t.type + assay) +
+    labs(title=paste(measure_i,'vs.',measure_j,'Individual replicates')))
 }
 
 deseq2_rc_measures <- comp.df[
@@ -694,11 +801,41 @@ deseq2_rc_measures <- comp.df[
         k.type + t.type + assay + CAR.align ~ contrast, 
         value.var = c('log2FoldChange', 'padj')),
     on=c('k.type','t.type','assay','CAR.align')]
+```
 
+## CAR score comparisons
+```{r, fig.width=22.5, fig.height=7.5}
+plot_measure_pair(comp.df, 'vst_car_score.scaled', 'CAR.score.scaled')
+plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'CAR.score.scaled')
+plot_measure_pair(comp.df, 'vst_car_score.scaled', 'rlog_car_score.scaled')
+```
+
+## CAR score to baseline abundance
+```{r, fig.width=22.5, fig.height=7.5}
 plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.baseline.scaled')
+plot_measure_pair(comp.df, 'vst_car_score.scaled', 'car.abund.rel.baseline.scaled')
+plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'car.abund.rel.baseline.scaled')
+```
+
+### CAR score to prev abundance
+```{r, fig.width=22.5, fig.height=7.5}
 plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.prev.scaled')
-plot_measure_pair(comp.df, 'car.abund.rel.baseline.scaled',
-    'car.abund.rel.prev.scaled')
+plot_measure_pair(comp.df, 'vst_car_score.scaled', 'car.abund.rel.prev.scaled')
+plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'car.abund.rel.prev.scaled')
+```
+
+### CAR score to prev baseline
+```{r, fig.width=22.5, fig.height=7.5}
+plot_measure_pair(comp.df, 'car.abund.rel.baseline.scaled', 'car.abund.rel.prev.scaled')
+```
+
+### CAR score to deseq2
+
+```{r, fig.width=22.5, fig.height=7.5}
+plot_measure_pair(deseq2_rc_measures,
+  'log2FoldChange_D_v_A',
+  'car.abund.rel.prev.scaled') +
+  labs(title='DeSeq2 D:A vs Abundance-Prev')
 
 plot_measure_pair(deseq2_rc_measures,
   'log2FoldChange_D_v_A',
@@ -722,27 +859,47 @@ plot_measure_pair(deseq2_rc_measures,
 
 ```
 
-### All Reps, Abundance relative to T0 (baseline)
+## multivariate linear regression
 
-```{r, fig.width=6, fig.height=18}
+```{r}
 
-all_rep_comparisons <- read.counts[
-  grepl('CTV', assay), 
-  data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
-  by=c('assay','t.type','k.type')]
+bin_pcts <- dcast(
+  comp.df[, 
+    list(bin, cell.count, car.bin.pct, sort.group, 
+      assay_group= paste(.BY[c(2,3,4)], collapse='_')), 
+    by=c('CAR.align','assay','t.type','k.type')], 
+    CAR.align + assay + t.type + k.type + sort.group + assay_group ~ cell.count, 
+    value.var='car.bin.pct')
 
-names(all_rep_comparisons)[4:5] <- c('x.group','y.group')
+cell_counts <- dcast(comp.df[, 
+  list(bin, cell.count, car.bin.pct, sort.group, car.bin.read.pct, 
+    assay_group= paste(.BY[c(2,3,4)], collapse='_')), 
+      by=c('CAR.align','assay','t.type','k.type')][, 
+        cell.bin.count := round(car.bin.read.pct * cell.count)], 
+  CAR.align + assay + t.type + k.type + sort.group ~ bin,
+  value.var='cell.bin.count')
 
-all_rep_comparisons <- all_rep_comparisons[, 
-  cast_comparison(read.counts, 
-    x.group, y.group, value_col='car.abund.rel.baseline')[, c('x.group','y.group') := NULL],
-  by=c('assay','t.type','k.type','x.group','y.group')]
+cell_totals <- dcast(
+  unique(comp.df[, list(bin, cell.count, sort.group)][, 
+    bin := paste(bin,'total',sep='.')])[, 
+    cell.pct := cell.count/sum(cell.count, na.rm=T), by=c('sort.group')], 
+  sort.group  ~ bin, 
+  value.var='cell.pct')
 
-ggplot(all_rep_comparisons) + 
-  geom_point(aes(x_scaled_sep, y_scaled_sep)) + 
-  facet_wrap(assay + k.type + t.type ~ x.group + y.group, ncol=4) +
-  labs(title='CAR Abundance comparison') + 
-  theme_minimal(base_size=9)
+cell_pcts <- dcast(
+  cell_counts[, data.table(bins=c('A','B','C','D'), 
+    c(A,B,C,D)/sum(c(A,B,C,D), na.rm=T)), by=.(CAR.align, sort.group)], 
+    CAR.align + sort.group ~ bins, 
+    value.var='V2')
+
+cell_counts[cell_pcts, on=c('CAR.align','sort.group')][cell_totals, on=c('sort.group')]
+
+cell_counts[cell_pcts, on=c('CAR.align','sort.group')][
+    cell_totals, on=c('sort.group')][
+  sort.group == 'prolif2_d2_4d_CTV1_CD8_pos' & CAR.align == 'TNR8', list(
+  theta_hat= ddirichlet(c(i.A, i.B, i.C, i.D), c(A, B, C, D)), 
+  theta=ddirichlet(c(A.total, B.total, C.total, D.total), c(A, B, C, D))), 
+  by=c('CAR.align','sort.group')]
 
 ```
 
@@ -1292,11 +1449,3 @@ prolif_posneg <- ggplot(cast_posneg,
 ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
        height=4.5, width=7)
 ```
-
-
-## DEseq2 notes on more complex contrasts
-
-We'd like to use DESeq2's normalization for CAR-score and for 
-
-
-https://www.biostars.org/p/188808/
