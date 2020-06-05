@@ -414,6 +414,7 @@ make_volcanoes <- function(data.dt) {
     label=CAR.align,
     size=CAR.type)) + 
   geom_point() +
+  geom_hline(yintercept=-log10(0.05), linetype=2) +
   facet_grid(test_set + ref_set ~ t.type + assay + k.type) +
   scale_color_manual('',
     labels=c('Other Receptors', 'CD28/4-1BB', 'New Receptors','Negative'),
@@ -894,12 +895,12 @@ cell_pcts <- dcast(
 
 cell_counts[cell_pcts, on=c('CAR.align','sort.group')][cell_totals, on=c('sort.group')]
 
-cell_counts[cell_pcts, on=c('CAR.align','sort.group')][
-    cell_totals, on=c('sort.group')][
-  sort.group == 'prolif2_d2_4d_CTV1_CD8_pos' & CAR.align == 'TNR8', list(
-  theta_hat= ddirichlet(c(i.A, i.B, i.C, i.D), c(A, B, C, D)), 
-  theta=ddirichlet(c(A.total, B.total, C.total, D.total), c(A, B, C, D))), 
-  by=c('CAR.align','sort.group')]
+# cell_counts[cell_pcts, on=c('CAR.align','sort.group')][
+#     cell_totals, on=c('sort.group')][
+#   sort.group == 'prolif2_d2_4d_CTV1_CD8_pos' & CAR.align == 'TNR8', list(
+#   theta_hat= ddirichlet(c(i.A, i.B, i.C, i.D), c(A, B, C, D)), 
+#   theta=ddirichlet(c(A.total, B.total, C.total, D.total), c(A, B, C, D))), 
+#   by=c('CAR.align','sort.group')]
 
 ```
 
