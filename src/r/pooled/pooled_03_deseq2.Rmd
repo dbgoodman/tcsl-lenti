@@ -39,6 +39,8 @@ rerun_deseq <- F
 # arrayed list of CARs
 array.list <- c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')
 
+
+
 ```
 
 ## deSeq2 normalization followed by CAR score calculation
@@ -85,6 +87,9 @@ read.counts[,
 read.counts[, 
   rlog_car_score := sum((rlog - mean(rlog)) * sqrt(ctv.bin.score)),
   by=c('CAR.align','sort.group')]
+
+# save an uneditied copy of read.counts for cytokines later
+read.counts.complete <- copy(read.counts)
 
 ggplot(read.counts) + 
     geom_boxplot(
@@ -564,7 +569,7 @@ top_x_mad <- function(x, top=5, na.rm = TRUE) {
 }
 
 
-plot_all_reps <- function(df=read.counts, value_col) {
+plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
   
   all_rep_comparisons <- df[
     grepl('CTV', assay), 
@@ -618,6 +623,8 @@ plot_all_reps <- function(df=read.counts, value_col) {
   non_na_comps <- all_rep_comparisons[, 
     !any(is.na(list(var(x_scaled_sep), var(y_scaled_sep)))), 
     by=.(rep_pair, k.type, t.type, assay)]
+  
+  if (df_only) return(all_rep_comparisons)
   
   r_squareds <- all_rep_comparisons[
     non_na_comps[V1==T], on=.(rep_pair, k.type, t.type, assay)][V1 == T][, 
@@ -705,6 +712,44 @@ plot_all_reps(value_col='rlog_car_score')  +
 
 
 ```
+
+#### Combining these together to summarize correlation among replicates
+
+```{r}
+ggplot(data=plot_all_reps(df=read.counts[(CAR.align != 'TNR8')], 
+        value_col='car.abund.rel.baseline', df_only=T), 
+       aes(x_scaled_sep, y_scaled_sep)) + 
+    geom_point(shape = 21, colour = "grey30", aes(fill=rep_pair)) + 
+    geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
+    geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
+    theme_bw() + 
+    facet_grid(k.type + t.type ~ assay)
+
+ggplot(data=plot_all_reps(df=read.counts[(CAR.align != 'TNR8')], 
+        value_col='car.abund.rel.prev', df_only=T), 
+       aes(x_scaled_sep, y_scaled_sep)) + 
+    geom_point(shape = 21, colour = "grey30", aes(fill=rep_pair)) + 
+    geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
+    geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
+    theme_bw() + 
+    facet_grid(k.type + t.type ~ assay)
+
+ggplot(data=plot_all_reps(df=read.counts, 
+        value_col='rlog_car_score', df_only=T), 
+       aes(x_scaled_sep, y_scaled_sep)) + 
+    geom_point(shape = 21, colour = "grey30", aes(fill=rep_pair)) + 
+    geom_text_repel(size=2.5, color='grey20', aes(label=label_outliers)) +
+    geom_text_repel(size=2.5, color='lightsalmon4', aes(label=label_arrayed)) + 
+    theme_bw() + 
+    facet_grid(k.type + t.type ~ assay)
+
+
+
+```
+
+For figure 2B, we will combine rlog_car_score for 
+CTV1 & 2 with baseline abundance for CTV3.
+
 
 ### Individual Replicate, comparison among different measurements
 
@@ -858,49 +903,56 @@ plot_measure_pair(deseq2_rc_measures,
   'car.abund.rel.baseline.scaled') +
   labs(title='DeSeq2 CD:AB vs Abundance-Baseline')
 
+plot_measure_pair(deseq2_rc_measures[, log2FoldChange_CD_v_A.scaled := scales::rescale(log2FoldChange_CD_v_A), by=.(k.type, t.type, assay)],
+                  'log2FoldChange_CD_v_A.scaled',
+                  'rlog_car_score.scaled') +
+    labs(title='DeSeq2 CD:A vs R-log-scaled CAR score')
 ```
+
+The final plot - *r-log-scaled car score to CD:A deseq ratio*, seems to be the best correspondence I have seen. 
 
 ## multivariate linear regression
 
+Not using this right now. 
 ```{r}
 
-bin_pcts <- dcast(
-  comp.df[, 
-    list(bin, cell.count, car.bin.pct, sort.group, 
-      assay_group= paste(.BY[c(2,3,4)], collapse='_')), 
-    by=c('CAR.align','assay','t.type','k.type')], 
-    CAR.align + assay + t.type + k.type + sort.group + assay_group ~ cell.count, 
-    value.var='car.bin.pct')
-
-cell_counts <- dcast(comp.df[, 
-  list(bin, cell.count, car.bin.pct, sort.group, car.bin.read.pct, 
-    assay_group= paste(.BY[c(2,3,4)], collapse='_')), 
-      by=c('CAR.align','assay','t.type','k.type')][, 
-        cell.bin.count := round(car.bin.read.pct * cell.count)], 
-  CAR.align + assay + t.type + k.type + sort.group ~ bin,
-  value.var='cell.bin.count')
-
-cell_totals <- dcast(
-  unique(comp.df[, list(bin, cell.count, sort.group)][, 
-    bin := paste(bin,'total',sep='.')])[, 
-    cell.pct := cell.count/sum(cell.count, na.rm=T), by=c('sort.group')], 
-  sort.group  ~ bin, 
-  value.var='cell.pct')
-
-cell_pcts <- dcast(
-  cell_counts[, data.table(bins=c('A','B','C','D'), 
-    c(A,B,C,D)/sum(c(A,B,C,D), na.rm=T)), by=.(CAR.align, sort.group)], 
-    CAR.align + sort.group ~ bins, 
-    value.var='V2')
-
-cell_counts[cell_pcts, on=c('CAR.align','sort.group')][cell_totals, on=c('sort.group')]
-
-# cell_counts[cell_pcts, on=c('CAR.align','sort.group')][
-#     cell_totals, on=c('sort.group')][
-#   sort.group == 'prolif2_d2_4d_CTV1_CD8_pos' & CAR.align == 'TNR8', list(
-#   theta_hat= ddirichlet(c(i.A, i.B, i.C, i.D), c(A, B, C, D)), 
-#   theta=ddirichlet(c(A.total, B.total, C.total, D.total), c(A, B, C, D))), 
-#   by=c('CAR.align','sort.group')]
+# bin_pcts <- dcast(
+#   comp.df[, 
+#     list(bin, cell.count, car.bin.pct, sort.group, 
+#       assay_group= paste(.BY[c(2,3,4)], collapse='_')), 
+#     by=c('CAR.align','assay','t.type','k.type')], 
+#     CAR.align + assay + t.type + k.type + sort.group + assay_group ~ cell.count, 
+#     value.var='car.bin.pct')
+# 
+# cell_counts <- dcast(comp.df[, 
+#   list(bin, cell.count, car.bin.pct, sort.group, car.bin.read.pct, 
+#     assay_group= paste(.BY[c(2,3,4)], collapse='_')), 
+#       by=c('CAR.align','assay','t.type','k.type')][, 
+#         cell.bin.count := round(car.bin.read.pct * cell.count)], 
+#   CAR.align + assay + t.type + k.type + sort.group ~ bin,
+#   value.var='cell.bin.count')
+# 
+# cell_totals <- dcast(
+#   unique(comp.df[, list(bin, cell.count, sort.group)][, 
+#     bin := paste(bin,'total',sep='.')])[, 
+#     cell.pct := cell.count/sum(cell.count, na.rm=T), by=c('sort.group')], 
+#   sort.group  ~ bin, 
+#   value.var='cell.pct')
+# 
+# cell_pcts <- dcast(
+#   cell_counts[, data.table(bins=c('A','B','C','D'), 
+#     c(A,B,C,D)/sum(c(A,B,C,D), na.rm=T)), by=.(CAR.align, sort.group)], 
+#     CAR.align + sort.group ~ bins, 
+#     value.var='V2')
+# 
+# cell_counts[cell_pcts, on=c('CAR.align','sort.group')][cell_totals, on=c('sort.group')]
+# 
+# # cell_counts[cell_pcts, on=c('CAR.align','sort.group')][
+# #     cell_totals, on=c('sort.group')][
+# #   sort.group == 'prolif2_d2_4d_CTV1_CD8_pos' & CAR.align == 'TNR8', list(
+# #   theta_hat= ddirichlet(c(i.A, i.B, i.C, i.D), c(A, B, C, D)), 
+# #   theta=ddirichlet(c(A.total, B.total, C.total, D.total), c(A, B, C, D))), 
+# #   by=c('CAR.align','sort.group')]
 
 ```
 
@@ -1215,7 +1267,7 @@ ggsave(here::here('..','figs','pooled','scaled_prolif_t_mean_ctv1.pdf'),
        ggplot_pos_neg_assay, height=4, width=7, useDingbats=FALSE)
 ```
 
-# Figure 2 Deseq2 Panels
+# GGplotly interactive comparisons
 
 ## Bin vs baseline measurements
 
@@ -1288,6 +1340,38 @@ data.dt[, CAR.type := factor(
   CAR.type,levels=c('other','4-1BB','CD28'))]
 ```
 
+#### Replicate Comparison
+```{r}
+
+# combined rlog car score for CTV1 & CTV2, baseline abundance for CTV3
+fig2_rep_comp <- rbind(
+    plot_all_reps(
+        df=read.counts, 
+        value_col='rlog_car_score', df_only=T)[assay == 'CTV1'],
+    plot_all_reps(
+        df=read.counts[CAR.align != 'TNR8'], 
+        value_col='car.abund.rel.baseline', df_only=T)[assay != 'CTV1'])
+
+fig2_rep_comp[, assay := factor(assay, 
+    labels=c('Initial Proliferation\n(d0-d3/d4)', 
+             'Cumulative Proliferation\n(d0-d16)', 
+             'Cumulative Proliferation,\n(d0-d24)'))]
+
+ggplot(data=fig2_rep_comp, 
+       aes(x_scaled_sep, y_scaled_sep)) + 
+    geom_point(aes(color=interaction(rep_pair, k.type)), size=0.8) +
+    theme_minimal() + 
+    theme(panel.border=element_rect(fill=NA)) + 
+    facet_grid(t.type ~ assay) +
+    scale_color_manual('', 
+        values=brewer.pal(11,'PRGn')[c(2,3,4,8,9,10)],
+        labels=c(
+            'CD19-, A v B', 'CD19-, A v C', 'CD19-, B v C',
+            'CD19+, A v B', 'CD19+, A v C', 'CD19+, B v C')) +
+    labs(x='Scaled replicate 1', y='Scaled replicate 2')
+
+```
+
 #### Interbin Volcano
 
 ```{r fig.width=7, fig.height=4}
@@ -1308,9 +1392,9 @@ data.dt[CAR.type.size != 'other',
 
 # plot subset - CTV1, CTV2, and cumulative of all 3
 data.subset.dt <- data.dt[
-  k.type == 'pos' & (
-      (ref_set == 'baseline' & test_set == 'ABCD' & assay == 'CTV3') | 
-      (ref_set == 'D' & test_set == 'A' & assay != 'CTV3'))]
+    k.type == 'pos' & 
+        ((ref_set == 'baseline' & test_set == 'A' & assay != 'CTV1') | 
+        (ref_set == 'CD' & test_set == 'A' & assay == 'CTV1'))]
 
 # rename facets
 data.subset.dt[, assay := factor(assay, 
@@ -1320,15 +1404,16 @@ data.subset.dt[, assay := factor(assay,
 
 # max out at log10-15
 data.subset.dt[, padj.disp := -log10(padj)]
-data.subset.dt[padj.disp > 15, padj.disp := Inf]
+data.subset.dt[padj.disp > 8, padj.disp := Inf]
+data.subset.dt[, order := ifelse(CAR.type=="other", 2, 1)]
 
-interbin_volcano <- ggplot(data.subset.dt, 
+interbin_volcano <- ggplot(data.subset.dt[order(CAR.type)], 
   aes(
-    x=log2FoldChange, y=padj.disp, 
+    x=log2FoldChange, y=padj.disp,
     color=CAR.type,
     label=CAR.label.sig,
     size=CAR.type.size)) + 
-  geom_point() +
+  geom_point() + 
   facet_grid(t.type ~ assay) +
   scale_color_manual('',
     labels=c('New Receptors', '4-1BB', 'CD28'),
@@ -1340,7 +1425,7 @@ interbin_volcano <- ggplot(data.subset.dt,
   geom_hline(yintercept=-log10(0.05), linetype = 'dashed') +
   labs(x='Relative Proliferation,\nLog2 Fold Change from Mean', 
        y='-log10(P-value)') + 
-  scale_y_continuous(limits=c(0, 15)) +
+  scale_y_continuous(limits=c(0, 8)) +
   geom_text_repel() +
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA))
@@ -1355,9 +1440,9 @@ ggsave(here::here('..','figs','pooled','interbin_volcano.pdf'),
 
 ```{r fig.width=7, fig.height=4}
 cast_4v8 <- dcast(data.dt[
-      k.type == 'pos' & 
-        ((ref_set == 'baseline' & test_set == 'ABCD' & assay != 'CTV1') | 
-        (ref_set == 'D' & test_set == 'A' & assay == 'CTV1'))], 
+    k.type == 'pos' & 
+        ((ref_set == 'baseline' & test_set == 'A' & assay != 'CTV1') | 
+        (ref_set == 'CD' & test_set == 'A' & assay == 'CTV1'))], 
       CAR.align + assay + CAR.type ~ t.type, 
     value.var = c("log2FoldChange", "padj.disp"))
 
@@ -1379,7 +1464,7 @@ cast_4v8[CAR.type.size != 'other',
     CAR.label.sig := CAR.align]
     
 
-prolif_4v8 <- ggplot(cast_4v8, 
+prolif_4v8 <- ggplot(cast_4v8[order(CAR.type)], 
   aes(y=log2FoldChange_CD8, x=log2FoldChange_CD4,
       color=CAR.type,
       label=CAR.label.sig,
@@ -1388,10 +1473,10 @@ prolif_4v8 <- ggplot(cast_4v8,
   facet_grid(. ~  assay) +
   scale_color_manual('',
     labels=c('New Receptors', '4-1BB', 'CD28'),
-    values=c('grey50', receptor_cols)) +
+    values=c('grey50', receptor_cols), guide=F) +
   scale_size_manual('',
     labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors'),
-    values=c(0.8,3,3,2.5)) +
+    values=c(0.8,3,3,2.5), guide=F) +
   geom_abline(linetype='dashed') +
   geom_text_repel() +
   theme_minimal() + 
@@ -1399,6 +1484,8 @@ prolif_4v8 <- ggplot(cast_4v8,
        y='CD8, relative log2 fold change') +
   theme(panel.border=element_rect(fill=NA)) +
   guides(size=F)
+
+prolif_4v8
   
 ggsave(here::here('..','figs','pooled','mixed_4v8.pdf'), prolif_4v8,
        height=2.5, width=7)
@@ -1446,7 +1533,229 @@ prolif_posneg <- ggplot(cast_posneg,
        x='Relative log2 fold change, no antigen') +
   theme(panel.border=element_rect(fill=NA)) +
   guides(size=F)
+
+prolif_posneg
   
 ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
        height=4.5, width=7)
+```
+
+## Dendroheatmap from #02, copied here to make fig2 panels
+
+First, pare down LFC deseq data to single measures.
+```{r}
+
+all.deseq.results.dt[, comparison := paste(test_set,ref_set,'.')]
+
+tiles_combined <- all.deseq.results.dt[comparison %in% c('A.CD') | 
+  (comparison == 'ABCD.baseline' & assay == 'CTV3')][,
+    combined_var := paste(comparison, assay)]
+tiles_combined[, rank.LFC := rank(-LFC), by = .(t.type, assay, comparison)]
+
+```
+
+Next, add cytokines and CD69, skipping IL4. Check different metrics.
+```{r}
+cytokine_ranks <- melt(
+  read.counts[batch == 'post-cytof' & assay != 'IL4'], 
+  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','CAR.score'))[
+    bin == 'A' & k.type == 'pos']
+cytokine_ranks[variable != 'CAR.score', value := -value]
+cytokine_ranks[, value.rank := rank(-value), by=.(sort.group,variable,t.type)]
+cytokine_ranks[, mean.value.rank := mean(value.rank), by = .(t.type, CAR.align)]
+cytokine_ranks[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+cytokine_ranks[, 
+  combined.var := paste(assay,variable, sep='.'), by=.(t.type)]
+
+```
+
+Use CAR score for cytokine ranking. Combine with tile plot above:
+
+```{r fig.height=4, fig.width=2.5, units='inches'}
+library(ggforce)
+
+total_combined <- rbind(
+  tiles_combined[, -'mean.LFC', with=F],
+  cytokine_ranks[variable == 'CAR.score', c(names(tiles_combined)[1:7], 'value','value.rank','mean.value.rank','combined.var'), with=F],
+  use.names=F)
+
+# relabel x axis assays
+total_combined[, combined_var := factor(combined_var, labels=c('CTV1','CTV2','CTV3','prolif', 'CD69','IFNy','IL2'))]
+
+# mask receptor names except for known ones
+unmasked_names <- c('41BB','CD28')
+masked_names <- c('BAFF-R','CD40','KLRG1','TACI','TNR8')
+mask_receptor <- function(receptor) {
+  if (receptor %in% unmasked_names) return(receptor)
+  else if (receptor %in% masked_names) return(paste(match(receptor, masked_names)))
+  else return('-')
+}
+
+rank.lfc.tile.plot <- ggplot(total_combined) + 
+  geom_tile(aes(x = combined_var, y = reorder(car.axis, -mean.rank.LFC), 
+                fill = rank.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
+  facet_row(~ t.type, scales = 'free', space='free') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          mask_receptor(strsplit(str, '|',fixed=T)[[1]][1]))))) +
+  labs(title = 'Receptors Ranked Across Metrics') + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+
+rank.lfc.tile.plot
+
+```{r}
+mask_receptor_prolif <- function(receptor) {
+  if (receptor %in% unmasked_names) return(receptor)
+  else if (receptor %in% masked_names) return(paste('Receptor', match(receptor, masked_names)))
+  else return('')
+}
+
+
+car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
+
+car.abund.set <- car.abund.set[CAR.align %in% c(masked_names, unmasked_names)]
+car.abund.set <- car.abund.set[, masked_name := mask_receptor_prolif(CAR.align), by=.(CAR.align)]
+
+read.counts.abund.set <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)][]
+
+read.counts.abund.set[, car.abund.rel.baseline := car.abund/car.abund.baseline,
+            by=.(donor, t.type, batch)]
+
+read.counts.abund.set[assay == 'baseline',
+            car.abund.rel.baseline := 1,
+            by=.(batch, donor, t.type, CAR.align)]
+
+abund.data <- rbind(read.counts.abund.set[batch != 'post-cytof'],
+      copy(read.counts.abund.set[batch != 'post-cytof' & 
+        assay == 'baseline'])[,k.type := 'pos'])[
+        k.type != 'NA'][k.type == 'pos']
+
+abund.data[, masked_name := factor(masked_name, levels=c(unmasked_names, paste('Receptor', 1:length(masked_names))))]
+
+car.abund.plot <- ggplot(abund.data) + 
+  geom_line(aes(
+    x=day, y=log2(car.abund.rel.baseline),
+    color= interaction(t.type), group= interaction(k.type, t.type, 
+                                                   batch, donor))) + 
+  facet_wrap(~masked_name, nrow=1) + scale_linetype_manual(values=c(2,1)) +
+  labs(x='Timepoint (days)', y='log2 Car Abundance relative 
+       to Starting abundance') + geom_hline(linetype=2, yintercept=0) +
+  geom_vline(xintercept=-Inf) +
+  geom_hline(yintercept=-Inf) +
+  scale_x_continuous(breaks=c(0, 6, 12, 18, 24)) +
+  theme_minimal(base_size=18) +
+  theme(panel.grid.minor = element_blank()) +
+  scale_color_brewer('T Cell\nSubset', palette='Set1')
+
+car.abund.plot
+```
+
+### 2020.04.09 tile plot with car scores
+
+Copied from Banff tile plot, switched to scaled CAR score
+```{r}
+
+tiles_combined <- all.deseq.results.dt[, 
+    comparison := paste(test_set, ref_set, sep='.')][(
+        comparison %in% c('A.CD') & (assay != 'CTV3' | t.type == 'CD4')) | 
+            (comparison == 'ABCD.baseline' & assay == 'CTV3' & t.type == 'CD8')][,
+    combined_var := paste(comparison, assay)]
+
+tiles_combined[, scale.LFC := scale(LFC), by = .(t.type, assay, variable)]
+
+tiles_combined[, mean.scale.LFC := mean(scale.LFC), by = .(t.type, CAR.align)]
+tiles_combined[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+
+
+cytokine_ranks <- melt(
+  read.counts[batch == 'post-cytof' & assay != 'IL4'], 
+  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','CAR.score'))[
+    bin == 'A' & k.type == 'pos']
+cytokine_ranks[variable != 'CAR.score',]
+cytokine_ranks[, value.scale := scale(value), by=.(sort.group,variable,t.type)]
+cytokine_ranks[, mean.value.scale := mean(value.scale), by = .(t.type, CAR.align)]
+cytokine_ranks[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+cytokine_ranks[, 
+  combined.var := paste(assay,variable, sep='.'), by=.(t.type)]
+
+
+total_combined <- rbind(
+  tiles_combined[, -'mean.LFC', with=F],
+  cytokine_ranks[variable == 'CAR.score', c(names(tiles_combined)[1:7], 'value','combined.var','value.scale','mean.value.scale'), with=F],
+  use.names=F)
+
+# relabel x axis assays
+total_combined[, assay := factor(assay, 
+  labels=c('CTV1','CTV2','CTV3','CD69','IFNy','IL2'))]
+
+library(ggdendro)
+library(cowplot)
+
+# Make dendrogram
+car_mean_cast <- dcast(
+  total_combined, 
+  CAR.align ~ assay + t.type, 
+  value.var='scale.LFC')
+
+car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
+rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
+dendro_vars <- rev(as.dendrogram(hclust(d = dist(x = car_dendro_m))))
+
+# Create dendrogram plot
+dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
+  theme(axis.text.y = element_text(size = 6))
+
+# row order
+var_order <- order.dendrogram(dendro_vars)
+var_names <- row.names(car_dendro_m[var_order, ])
+total_combined$CAR.align <- factor(
+    total_combined$CAR.align,
+    levels = var_names)
+
+# heatmap
+var_heatmap <- ggplot(total_combined) + 
+  geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller('Z-score', 
+    palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Receptors Ranked Across Metrics') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+# col dendro
+dendro_data_col <- dendro_data(dendro_vars, type = "rectangle")
+
+dendro_col <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
+  geom_segment(data = segment(dendro_data_col), 
+      aes(x = x, y = y, xend = xend, yend = yend)) +
+    coord_flip()
+plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
+  dendro_col, grid::unit(0.2, "null"), position = "right")
+ggdraw(plot_dendroheat)
+```
+
+### Save workspace for later analyses
+```{r}
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+save(list=ls(),
+  file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
 ```

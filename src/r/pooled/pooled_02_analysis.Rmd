@@ -4252,7 +4252,6 @@ var_heatmap <- ggplot(total_combined) +
       axis.title.y = element_blank())
 
 
-
 # col dendro
 dendro_data_col <- dendro_data(dendro_vars, type = "rectangle")
 
@@ -4264,6 +4263,9 @@ plot_dendroheat <- insert_yaxis_grob(var_heatmap,
   dendro_col, grid::unit(0.2, "null"), position = "right")
 ggdraw(plot_dendroheat)
 ```
+
+### Patent Version
+
 
 
 ```{r}

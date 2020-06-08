@@ -559,27 +559,17 @@ plot_set_time(incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' &
 ```
 
 ### Dan's ranked dot version
-```{r}
-#display all colors: display.brewer.all(type="seq")
-blues <- brewer.pal(9,'Blues')[c(6,8)] #41bb, cd28
-greens <- brewer.pal(9,'Greens')[c(5,7)] #baffr, taci
-oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
-red <- brewer.pal(9,'PuRd')[c(7)] #klrg1
-purple <- brewer.pal(9,'Purples')[c(7)] #zeta
-grey <- 'grey30' #unt
-car_colors <- c(
-  '41BB'=blues[1], 'BAFF-R'=greens[1], 
-  'CD28'=blues[2], 'CD40'=oranges[1], 
-  'KLRG1'=red, 'TACI'=greens[2], 
-  'TNR8'=oranges[2], 'zeta'=purple)
-car_order=c('CD28','41BB','BAFF-R','TACI','CD40','TNR8','KLRG1','zeta')
+```{r fig.width=8, fig.height=4}
+source(here::here('r','fig_colors.R'))
 
-
-plot_set_time <- function(df, elapsed_hr){
+plot_set_time <- function(df, elapsed_hr, cast_y=donor){
 
   df_plot <- unique(df[Elapsed==elapsed_hr,
     list(k562, day, t_type, donor, car, mean_value_none,
          std_dev_value_none, day_f, Elapsed)])
+  
+  # use % killed insted of % remaning
+  df_plot[, mean_pct_killed := 1-mean_value_none]
 
   t_type <- df_plot[, unique(t_type)]
   stopifnot(length(t_type) == 1)
@@ -587,22 +577,25 @@ plot_set_time <- function(df, elapsed_hr){
   
   # we are creating a name which will be unique per dot, and include the rank
   df_plot[, 
-    day_rank := factor(paste(rank(mean_value_none), car, day, donor, t_type, sep= '|')), 
+    day_rank := factor(paste(rank(mean_pct_killed), 
+      car, day, donor, t_type, sep= '|')), 
     by=c('k562','day','t_type','donor')]
+  
+  cast_y=enquo(cast_y)
 
   plot <- ggplot(df_plot,
     aes(x=day_rank, 
-      y=mean_value_none, 
+      y=mean_pct_killed, 
       fill=car, color=car, group=car)) +
     geom_linerange(aes(
-      ymin=mean_value_none-std_dev_value_none,
-      ymax=mean_value_none+std_dev_value_none)) +
+      ymin=mean_pct_killed-std_dev_value_none,
+      ymax=mean_pct_killed+std_dev_value_none)) +
     geom_point(
       color='grey30', 
       shape=21, position=position_dodge(width=1),
       size=3) +
-    facet_grid(donor ~ day_f, space='free', scales='free') +
-    theme_minimal(base_size=9) +
+    facet_grid(vars(!!cast_y), vars(day_f), space='free', scales='free') +
+    theme_minimal(base_size=10) +
     theme(
       plot.title = element_text(size = 25),
       panel.spacing.y=unit(80,'pt'), 
@@ -612,40 +605,86 @@ plot_set_time <- function(df, elapsed_hr){
     scale_fill_manual(values=rev(car_colors)) +
     scale_color_manual(values=rev(car_colors)) +
     scale_y_continuous(labels = scales::percent,
-      limits=c(0,1.1),
+      limits=c(0,1.05),
       breaks=c(0, 0.25, 0.5, 0.75, 1)) +
-    geom_hline(yintercept=1, color='gray30') +
+    geom_hline(yintercept=1, color='gray60', linetype=2) +
     labs(x=" ", y=" ")
 
   return(plot)
 }
 
-killing_plots_combined_cd8 <- plot_grid(
+combine_plots <- function(plot1, plot2, legend_pct) {
+  leg <- get_legend(plot1 + theme(legend.box.margin = margin(0, 0, 0, 12)))
+  prow <- plot_grid(
+    plot1 + theme(legend.position="none"),
+    plot2 + theme(legend.position="none"),
+    ncol= 1, align= 'v', axis= 'l')
+  plot_grid(prow, leg, rel_widths = c(1-legend_pct, legend_pct))
+}
+
+killing_plots_combined_cd8 <- combine_plots(
   plot_set_time(
     incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & donor == 1 &
       measurement==chosen_measure & car!='none'], 30),
   plot_set_time(
     incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd8' & donor == 2 &
       measurement==chosen_measure & car!='none'], 32),
-  ncol = 1, align = 'v', axis = 'l')
+  0.2)
 
-killing_plots_combined_cd4 <- plot_grid(
+killing_plots_combined_cd4 <- combine_plots(
   plot_set_time(
     incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & donor == 1 &
       measurement==chosen_measure & car!='none'], 80),
   plot_set_time(
     incucyte_dt[k562=='mkate_cd19' & !noise & t_type == 'cd4' & donor == 2 &
-      measurement==chosen_measure & car!='none'], 76),
-  ncol = 1, align = 'v', axis = 'l')
+      measurement==chosen_measure & car!='none'], 76), 
+  0.2)
+  
+
+killing_plots_combined_cd8
+killing_plots_combined_cd4
 
 ggsave(paste0(output_dir, '/incucyte_ranked_dots_cd4_76_hrs.pdf'),
        killing_plots_combined_cd4, width = 8, height = 4,
-       units = 'in', dpi = 300)
+       units = 'in', dpi = 300, useDingbats=FALSE)
 
 ggsave(paste0(output_dir, '/incucyte_ranked_dots_cd8_32_hrs.pdf'),
        killing_plots_combined_cd8, width = 8, height = 4,
-       units = 'in', dpi = 300)
+       units = 'in', dpi = 300, useDingbats=FALSE)
 
+
+### combined 4 and 8
+
+cd4_mean_dt <- incucyte_dt[
+  k562=='mkate_cd19' & !noise & t_type == 'cd4' & 
+  measurement==chosen_measure & car!='none' & 
+  ((donor == 1 & Elapsed == 80) | (donor == 2 & Elapsed == 76))][, 
+    `:=`(
+      Elapsed= 80, 
+      mean_value_none=mean(mean_value_none, na.rm=T), 
+      std_dev_value_none=sd(mean_value_none, na.rm=T)),
+    by=c('day_f','car_f','t_type')]
+
+cd8_mean_dt <- incucyte_dt[
+  k562=='mkate_cd19' & !noise & t_type == 'cd8' & 
+  measurement==chosen_measure & car!='none' & 
+  ((donor == 1 & Elapsed == 30) | (donor == 2 & Elapsed == 32))][, 
+    `:=`(
+      Elapsed= 32, 
+      mean_value_none=mean(mean_value_none, na.rm=T), 
+      std_dev_value_none=sd(mean_value_none, na.rm=T)),
+    by=c('day_f','car_f','t_type')]
+
+killing_plots_combined_all <- combine_plots(
+  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
+  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
+  0.2)
+
+killing_plots_combined_all
+
+ggsave(paste0(output_dir, '/incucyte_ranked_dots_combined.pdf'),
+       killing_plots_combined_all, width = 8, height = 4,
+       units = 'in', dpi = 300, useDingbats=FALSE)
 
 ```
 
