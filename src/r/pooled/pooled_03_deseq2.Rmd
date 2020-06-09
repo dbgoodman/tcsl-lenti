@@ -76,9 +76,18 @@ names(rlog_cts) <- c('CAR.align','sort.group.bin', 'rlog')
 rlog_cts$CAR.align <- factor(rlog_cts$CAR.align, levels=1:40, 
   labels=levels(vst_cts$CAR.align))
 
-norm_cts <- merge(vst_cts, rlog_cts, by=c('CAR.align','sort.group.bin'))
+norm_cts <- merge(
+  vst_cts, rlog_cts, by=c('CAR.align','sort.group.bin'))
 
-read.counts <- merge(read.counts, norm_cts, by=c('CAR.align','sort.group.bin'))
+# convert 'post.cytof' to 'post-cytof'
+levels(norm_cts$sort.group.bin) <- gsub(
+  '\\.','-',levels(norm_cts$sort.group.bin))
+
+read.counts <- merge(
+  read.counts, norm_cts, by=c('CAR.align','sort.group.bin'), all=T)
+read.counts <- read.counts[!is.na(t.type)]
+
+#prolif 1 & 2
 
 read.counts[, 
   vst_car_score := sum((vst - mean(vst)) * sqrt(ctv.bin.score)),
@@ -86,6 +95,16 @@ read.counts[,
 
 read.counts[, 
   rlog_car_score := sum((rlog - mean(rlog)) * sqrt(ctv.bin.score)),
+  by=c('CAR.align','sort.group')]
+
+## post-cytof
+
+read.counts[batch=='post-cytof', 
+  vst_car_score := sum((vst - mean(vst)) * sqrt(bin.score)),
+  by=c('CAR.align','sort.group')]
+
+read.counts[batch=='post-cytof', 
+  rlog_car_score := sum((rlog - mean(rlog)) * sqrt(bin.score)),
   by=c('CAR.align','sort.group')]
 
 # save an uneditied copy of read.counts for cytokines later
@@ -572,7 +591,7 @@ top_x_mad <- function(x, top=5, na.rm = TRUE) {
 plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
   
   all_rep_comparisons <- df[
-    grepl('CTV', assay), 
+    grepl('CTV', assay)][order(assay)][order(t.type)][order(k.type)][, 
     data.table(matrix(combn(unique(sort.group), 2), ncol=2, byrow=T)),
     by=c('assay','t.type','k.type')]
   
@@ -598,6 +617,9 @@ plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
     gsub('(prolif\\d_d\\d).*','\\1', x.group), 
     gsub('(prolif\\d_d\\d).*','\\1', y.group), 
     sep='\n')]
+  
+  all_rep_comparisons[
+    rep_pair == "prolif2_d2\nprolif1_d2", rep_pair := "prolif1_d2\nprolif2_d2"] 
   
   all_rep_comparisons[, assay_kt := paste(assay,t.type,k.type, sep='\n')]
   
@@ -1346,10 +1368,10 @@ data.dt[, CAR.type := factor(
 # combined rlog car score for CTV1 & CTV2, baseline abundance for CTV3
 fig2_rep_comp <- rbind(
     plot_all_reps(
-        df=read.counts, 
+        df=read.counts[batch != 'post-cytof'], 
         value_col='rlog_car_score', df_only=T)[assay == 'CTV1'],
     plot_all_reps(
-        df=read.counts[CAR.align != 'TNR8'], 
+        df=read.counts[batch != 'post-cytof' & CAR.align != 'TNR8'], 
         value_col='car.abund.rel.baseline', df_only=T)[assay != 'CTV1'])
 
 fig2_rep_comp[, assay := factor(assay, 
@@ -1357,7 +1379,7 @@ fig2_rep_comp[, assay := factor(assay,
              'Cumulative Proliferation\n(d0-d16)', 
              'Cumulative Proliferation,\n(d0-d24)'))]
 
-ggplot(data=fig2_rep_comp, 
+replicate_comp_plot <- ggplot(data=fig2_rep_comp, 
        aes(x_scaled_sep, y_scaled_sep)) + 
     geom_point(aes(color=interaction(rep_pair, k.type)), size=0.8) +
     theme_minimal() + 
@@ -1369,6 +1391,9 @@ ggplot(data=fig2_rep_comp,
             'CD19-, A v B', 'CD19-, A v C', 'CD19-, B v C',
             'CD19+, A v B', 'CD19+, A v C', 'CD19+, B v C')) +
     labs(x='Scaled replicate 1', y='Scaled replicate 2')
+
+ggsave(here::here('..','figs','pooled','pooled_replicate_comparison.pdf'), 
+       replicate_comp_plot, height=4, width=7, useDingbats=FALSE)
 
 ```
 
@@ -1399,7 +1424,7 @@ data.subset.dt <- data.dt[
 # rename facets
 data.subset.dt[, assay := factor(assay, 
     labels=c('Initial Proliferation\n(d0-d3/d4)', 
-             'Proliferation after 1 week\n(d8-d16)', 
+             'Cumulative Proliferation\n(d0-d16)', 
              'Cumulative Proliferation\n(d0-d24)'))]
 
 # max out at log10-15
@@ -1542,213 +1567,146 @@ ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
 
 ## Dendroheatmap from #02, copied here to make fig2 panels
 
-First, pare down LFC deseq data to single measures.
-```{r}
-
-all.deseq.results.dt[, comparison := paste(test_set,ref_set,'.')]
-
-tiles_combined <- all.deseq.results.dt[comparison %in% c('A.CD') | 
-  (comparison == 'ABCD.baseline' & assay == 'CTV3')][,
-    combined_var := paste(comparison, assay)]
-tiles_combined[, rank.LFC := rank(-LFC), by = .(t.type, assay, comparison)]
-
-```
-
-Next, add cytokines and CD69, skipping IL4. Check different metrics.
-```{r}
-cytokine_ranks <- melt(
-  read.counts[batch == 'post-cytof' & assay != 'IL4'], 
-  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','CAR.score'))[
-    bin == 'A' & k.type == 'pos']
-cytokine_ranks[variable != 'CAR.score', value := -value]
-cytokine_ranks[, value.rank := rank(-value), by=.(sort.group,variable,t.type)]
-cytokine_ranks[, mean.value.rank := mean(value.rank), by = .(t.type, CAR.align)]
-cytokine_ranks[, 
-  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
-cytokine_ranks[, 
-  combined.var := paste(assay,variable, sep='.'), by=.(t.type)]
-
-```
-
-Use CAR score for cytokine ranking. Combine with tile plot above:
+### Single heatmap, CD4 plus CD8.
 
 ```{r fig.height=4, fig.width=2.5, units='inches'}
-library(ggforce)
-
-total_combined <- rbind(
-  tiles_combined[, -'mean.LFC', with=F],
-  cytokine_ranks[variable == 'CAR.score', c(names(tiles_combined)[1:7], 'value','value.rank','mean.value.rank','combined.var'), with=F],
-  use.names=F)
-
-# relabel x axis assays
-total_combined[, combined_var := factor(combined_var, labels=c('CTV1','CTV2','CTV3','prolif', 'CD69','IFNy','IL2'))]
-
-# mask receptor names except for known ones
-unmasked_names <- c('41BB','CD28')
-masked_names <- c('BAFF-R','CD40','KLRG1','TACI','TNR8')
-mask_receptor <- function(receptor) {
-  if (receptor %in% unmasked_names) return(receptor)
-  else if (receptor %in% masked_names) return(paste(match(receptor, masked_names)))
-  else return('-')
-}
-
-rank.lfc.tile.plot <- ggplot(total_combined) + 
-  geom_tile(aes(x = combined_var, y = reorder(car.axis, -mean.rank.LFC), 
-                fill = rank.LFC), colour = "black", size = .20) + 
-  scale_fill_distiller(palette = 'YlGnBu', direction = 1) +
-  facet_row(~ t.type, scales = 'free', space='free') +
-  scale_x_discrete(expand=c(0,0)) +
-  scale_y_discrete(labels= (
-      function (breaks)
-        unlist(lapply(breaks, function(str)
-          mask_receptor(strsplit(str, '|',fixed=T)[[1]][1]))))) +
-  labs(title = 'Receptors Ranked Across Metrics') + 
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-      axis.title.x = element_blank(),
-      axis.title.y = element_blank()) 
-
-rank.lfc.tile.plot
-
-```{r}
-mask_receptor_prolif <- function(receptor) {
-  if (receptor %in% unmasked_names) return(receptor)
-  else if (receptor %in% masked_names) return(paste('Receptor', match(receptor, masked_names)))
-  else return('')
-}
 
 
-car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
+##deseq2
 
-car.abund.set <- car.abund.set[CAR.align %in% c(masked_names, unmasked_names)]
-car.abund.set <- car.abund.set[, masked_name := mask_receptor_prolif(CAR.align), by=.(CAR.align)]
+all.deseq.results.dt[, comparison := paste(test_set,ref_set,sep= '.')]
 
-read.counts.abund.set <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)][]
-
-read.counts.abund.set[, car.abund.rel.baseline := car.abund/car.abund.baseline,
-            by=.(donor, t.type, batch)]
-
-read.counts.abund.set[assay == 'baseline',
-            car.abund.rel.baseline := 1,
-            by=.(batch, donor, t.type, CAR.align)]
-
-abund.data <- rbind(read.counts.abund.set[batch != 'post-cytof'],
-      copy(read.counts.abund.set[batch != 'post-cytof' & 
-        assay == 'baseline'])[,k.type := 'pos'])[
-        k.type != 'NA'][k.type == 'pos']
-
-abund.data[, masked_name := factor(masked_name, levels=c(unmasked_names, paste('Receptor', 1:length(masked_names))))]
-
-car.abund.plot <- ggplot(abund.data) + 
-  geom_line(aes(
-    x=day, y=log2(car.abund.rel.baseline),
-    color= interaction(t.type), group= interaction(k.type, t.type, 
-                                                   batch, donor))) + 
-  facet_wrap(~masked_name, nrow=1) + scale_linetype_manual(values=c(2,1)) +
-  labs(x='Timepoint (days)', y='log2 Car Abundance relative 
-       to Starting abundance') + geom_hline(linetype=2, yintercept=0) +
-  geom_vline(xintercept=-Inf) +
-  geom_hline(yintercept=-Inf) +
-  scale_x_continuous(breaks=c(0, 6, 12, 18, 24)) +
-  theme_minimal(base_size=18) +
-  theme(panel.grid.minor = element_blank()) +
-  scale_color_brewer('T Cell\nSubset', palette='Set1')
-
-car.abund.plot
-```
-
-### 2020.04.09 tile plot with car scores
-
-Copied from Banff tile plot, switched to scaled CAR score
-```{r}
-
-tiles_combined <- all.deseq.results.dt[, 
+deseq2_combined <- all.deseq.results.dt[,
     comparison := paste(test_set, ref_set, sep='.')][(
-        comparison %in% c('A.CD') & (assay != 'CTV3' | t.type == 'CD4')) | 
-            (comparison == 'ABCD.baseline' & assay == 'CTV3' & t.type == 'CD8')][,
-    combined_var := paste(comparison, assay)]
+      (ref_set == 'baseline' & test_set == 'ABCD' & assay == 'CTV3') |
+        (ref_set == 'CD' & test_set == 'A' & assay != 'CTV3'))][,
+    combined_var := paste(comparison, assay)][, value := log2FoldChange]
 
-tiles_combined[, scale.LFC := scale(LFC), by = .(t.type, assay, variable)]
+deseq2_combined[, value.scale := scale(value), by = .(t.type, k.type, assay, comparison)]
 
-tiles_combined[, mean.scale.LFC := mean(scale.LFC), by = .(t.type, CAR.align)]
-tiles_combined[, 
+deseq2_combined[, 
   car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
 
+## rlog car score
+
+car_score_means <- read.counts[assay != 'baseline' & batch != 'post-cytof'][,
+  value.scale := scales::rescale(rlog_car_score), by=sort.group][,
+    value.mean :=  mean(value.scale, na.rm=T), 
+      by=.(CAR.align, t.type, k.type, assay)][,
+        value.scale := scale(value.mean), by=.(t.type, k.type, assay)]
+
+car_score_means[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+car_score_means[, comparison := 'rlog_car_score']
+car_score_means[, 
+  combined_var := paste(assay,comparison, sep='.'), by=.(t.type)]
+
+
+### Cytokines
 
 cytokine_ranks <- melt(
   read.counts[batch == 'post-cytof' & assay != 'IL4'], 
-  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','CAR.score'))[
-    bin == 'A' & k.type == 'pos']
-cytokine_ranks[variable != 'CAR.score',]
-cytokine_ranks[, value.scale := scale(value), by=.(sort.group,variable,t.type)]
-cytokine_ranks[, mean.value.scale := mean(value.scale), by = .(t.type, CAR.align)]
+  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','rlog_car_score'),
+  variable.name='comparison')[bin == 'A' & k.type == 'pos']
+cytokine_ranks[, value.scale := scale(value), by=.(sort.group,comparison,t.type)]
 cytokine_ranks[, 
   car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
 cytokine_ranks[, 
-  combined.var := paste(assay,variable, sep='.'), by=.(t.type)]
+  combined_var := paste(assay,comparison, sep='.'), by=.(t.type)]
 
+### Combined
 
-total_combined <- rbind(
-  tiles_combined[, -'mean.LFC', with=F],
-  cytokine_ranks[variable == 'CAR.score', c(names(tiles_combined)[1:7], 'value','combined.var','value.scale','mean.value.scale'), with=F],
-  use.names=F)
+shared_cols <- intersect(
+  intersect(names(deseq2_combined), names(cytokine_ranks)), 
+    names(car_score_means))
+
+total_combined <- unique(rbind(
+  deseq2_combined[, shared_cols, with=F],
+  cytokine_ranks[comparison == 'rlog_car_score', shared_cols, with=F],
+  car_score_means[comparison == 'rlog_car_score', shared_cols, with=F],
+  use.names=F))
+
 
 # relabel x axis assays
-total_combined[, assay := factor(assay, 
-  labels=c('CTV1','CTV2','CTV3','CD69','IFNy','IL2'))]
+#total_combined[, assay := factor(assay, 
+#  labels=c('CTV1','CTV2','CTV3','CD69','IFNy','IL2'))]
 
+```
+
+### Together and separate CD4 and CD8 heatmaps.
+
+```{r fig.height=8, fig.width=6}
+library(dendextend)
 library(ggdendro)
 library(cowplot)
 
-# Make dendrogram
-car_mean_cast <- dcast(
-  total_combined, 
-  CAR.align ~ assay + t.type, 
-  value.var='scale.LFC')
+make_dendroheatmap <- function(df, title) {
+  
+  # Make dendrogram
+  car_mean_cast <- dcast(
+    df[k.type == 'pos'], 
+    CAR.align ~ assay + t.type, 
+    value.var='value.scale')
+  
+  car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
+  rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
+  car_dendro <- as.dendrogram(hclust(d = dist(x = car_dendro_m)))
+  car_dendro <- rotate(car_dendro, names(sort(rowMeans(car_dendro_m))))
 
-car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
-rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
-dendro_vars <- rev(as.dendrogram(hclust(d = dist(x = car_dendro_m))))
+  # Create dendrogram plot
+  dendro_vars_plot <- ggdendrogram(data = car_dendro, rotate = TRUE) + 
+    theme(axis.text.y = element_text(size = 6))
+  
+  # row order
+  df$CAR.align <- factor(
+      df$CAR.align,
+      levels = labels(car_dendro))
+  
+  # heatmap
+  var_heatmap <- ggplot(df) + 
+    geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
+                  fill = value.scale), colour = "black", size = .20) + 
+    scale_fill_distiller('Z-score', 
+      palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
+    scale_x_discrete(expand=c(0,0)) +
+    scale_y_discrete(labels= (
+        function (breaks)
+          unlist(lapply(breaks, function(str)
+            strsplit(str, '|',fixed=T)[[1]][1])))) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+    labs(title=title)
+  
+  # col dendro
+  dendro_data_col <- dendro_data(car_dendro, type = "rectangle")
+  
+  dendro_col <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
+    geom_segment(data = segment(dendro_data_col), 
+        aes(x = x, y = y, xend = xend, yend = yend)) +
+      coord_flip()
+  plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
+    dendro_col, grid::unit(0.2, "null"), position = "right")
+  return(ggdraw(plot_dendroheat))
+}
 
-# Create dendrogram plot
-dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
-  theme(axis.text.y = element_text(size = 6))
+make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos'],
+  title='Deseq2 for CTV, car score for markers')
+make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos'],
+  title='car score for all')
 
-# row order
-var_order <- order.dendrogram(dendro_vars)
-var_names <- row.names(car_dendro_m[var_order, ])
-total_combined$CAR.align <- factor(
-    total_combined$CAR.align,
-    levels = var_names)
+make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos' & t.type == 'CD4'],
+  title='CD4 only, Deseq2 for CTV, car score for markers')
+make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos' & t.type == 'CD4'],
+  title='CD4 only, car score for all')
 
-# heatmap
-var_heatmap <- ggplot(total_combined) + 
-  geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
-                fill = scale.LFC), colour = "black", size = .20) + 
-  scale_fill_distiller('Z-score', 
-    palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
-  scale_x_discrete(expand=c(0,0)) +
-  scale_y_discrete(labels= (
-      function (breaks)
-        unlist(lapply(breaks, function(str)
-          strsplit(str, '|',fixed=T)[[1]][1])))) +
-  labs(title = 'Receptors Ranked Across Metrics') + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-      axis.title.x = element_blank(),
-      axis.title.y = element_blank())
+make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos' & t.type == 'CD8'],
+  title='CD8 only, Deseq2 for CTV, car score for markers')
+make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos' & t.type == 'CD8'],
+  title='CD8 only, car score for all')
 
-# col dendro
-dendro_data_col <- dendro_data(dendro_vars, type = "rectangle")
-
-dendro_col <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
-  geom_segment(data = segment(dendro_data_col), 
-      aes(x = x, y = y, xend = xend, yend = yend)) +
-    coord_flip()
-plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
-  dendro_col, grid::unit(0.2, "null"), position = "right")
-ggdraw(plot_dendroheat)
 ```
+
 
 ### Save workspace for later analyses
 ```{r}

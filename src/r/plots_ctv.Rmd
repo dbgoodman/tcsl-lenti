@@ -31,7 +31,7 @@ ctv_dt <- ctv_dt[
         by=c('well','plate','day', 't_type')], 
   on=c('well','plate','day','t_type','event_id')]
 
-#car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
+source(here::here('r','fig_colors.R'))
 
 make_ridge_plot <- function(df, var, show_line=F) {
   
@@ -185,19 +185,7 @@ ctv_fig_subset_dt <- ctv_fig_dt[!(car == 'zeta' & t_type == 'cd8' & day == 'd24'
 
 ```{r fig.width=7, fig.height=4}
 
-#display all colors: display.brewer.all(type="seq")
-blues <- brewer.pal(9,'Blues')[c(6,8)] #41bb, cd28
-greens <- brewer.pal(9,'Greens')[c(5,7)] #baffr, taci
-oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
-red <- brewer.pal(9,'PuRd')[c(7)] #klrg1
-purple <- brewer.pal(9,'Purples')[c(7)] #zeta
-grey <- 'grey30' #unt
-car_colors <- c(
-  '41BB'=blues[1], 'BAFF-R'=greens[1], 
-  'CD28'=blues[2], 'CD40'=oranges[1], 
-  'KLRG1'=red, 'TACI'=greens[2], 
-  'TNR8'=oranges[2], 'zeta'=purple)
-car_order=c('CD28','41BB','BAFF-R','TACI','CD40','TNR8','KLRG1','zeta')
+
 
 make_ridge_plot_panel <- function(df, var, show_line=F) {
   
@@ -339,7 +327,7 @@ ranked_dots_combined_plot
 
 ggsave(paste0(output_dir, '/ctv_ranked_dots_combined_plot.pdf'),
        ranked_dots_combined_plot, width = 8, height = 4,
-       units = 'in', dpi = 300)
+       units = 'in', dpi = 300, useDingbats=FALSE)
 ```
 
 ### Tile plot of means
