@@ -25,6 +25,9 @@ library(gridExtra) # add to AWS
 library(cowplot) # add to AWS
 library(slingshot) # add to AWS
 library(viridis) # add to AWS
+library(reshape2)
+library(RColorBrewer)
+library(ggrepel)
 use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 
 data_dir <- here::here('..','data')
@@ -967,6 +970,93 @@ for (i in nms) {
 }
 ```
 
+### Visualize parameters on umap
+```{r}
+viz.umap <- function(dat,dr,param.name,limits=NULL){
+  ColVal <- pull(dat %>% select(param.name))
+  if(is.null(limits)){
+    Lim <- quantile(ColVal,probs=seq(0,1,0.01))[c(2,100)]
+    p <- ggplot(dat, aes(x = umap_1, y =umap_2)) +geom_point(aes(color = ColVal), size=0.1)+theme_classic()+scale_color_distiller(name=param.name, palette = "RdYlBu", limits=Lim, oob=squish)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+ggtitle(param.name)
+  } else {
+    p <- ggplot(dat, aes(x = umap_1, y = umap_2)) +geom_point(aes(color = ColVal), size=0.1)+theme_classic()+scale_color_distiller(name=param.name, palette = "RdYlBu", limits=c(limits[1],limits[2]), oob=squish)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+ggtitle(param.name)
+  }
+  p
+}
+```
+
+#### CD8 markers 
+```{r}
+param_test <- colnames(umap_cd8_fcs_dt)[c(7, 9:13)]
+
+as.data.frame(umap_cd8_fcs_dt)[, param_test]
+
+#function to visualize diffusion map
+visualize_params_umap <- function(df) {
+  parameters <- colnames(df)[c(7, 9:13)]
+  for (i in 1:length(parameters)) {
+  p <- viz.umap(dat=df, param.name=parameters[i])
+  print(p)
+  }
+}
+
+visualize_params_umap(umap_cd8_fcs_dt)
+```
+
+#### visualize leiden clusters on umap (CD8)
+```{r}
+visualize_clusters_umap <- function(df) {
+  label_clusters_umap <- df %>% group_by(cluster) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(cluster)))+geom_point(size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=cluster), data=label_clusters_umap)+guides(colour=FALSE)+ggtitle('Leiden clusters')
+}
+  
+visualize_clusters_umap(umap_cd8_fcs_dt)
+```
+
+#### cd8 frequencies
+```{r}
+# Calculate the percentage of a certain sample (donor) present in a certain cluster
+visualize_counts <- function(df) {
+  counts <- as.data.frame.matrix(table(df$donor,df$cluster))
+  counts_percofsample = counts/rowSums(counts)*100
+  counts_percofsample$total <- rowSums(counts)
+  counts_percofsample$donor <- row.names(counts_percofsample)
+  counts_percofsample <- melt(counts_percofsample,  id.vars=c('donor', 'total'), variable.name='cluster', value.name='frequency')
+  ggplot(counts_percofsample, aes(x=reorder(cluster, frequency, FUN=median), y=frequency))+ geom_boxplot(position='dodge2', outlier.shape=NA)+geom_jitter(aes(colour=donor), size=2)+xlab('cluster')+ggtitle(" frequency = % of sample in cluster")
+}
+
+as.data.frame.matrix(table(umap_cd8_fcs_dt$donor,umap_cd8_fcs_dt$cluster))
+
+umap_cd8_fcs_dt$donor %>% head()
+visualize_counts(umap_cd8_fcs_dt)
+```
+
+#### visualize psuedotime (CD8)
+```{r}
+umap_cd8_fcs_pseudotime_dt <- cbind(umap_cd8_fcs_dt, slingPseudotime(crv_cd8) %>% as.data.frame())
+
+pseudotimevalues <- umap_cd8_fcs_pseudotime_dt %>% select(c(umap_1, umap_2,cluster, curve1, curve2, curve3, curve4))
+
+#reshape table 
+pseudotimevalues <- melt(pseudotimevalues, id.vars=c('cluster', 'umap_1', 'umap_2'), variable.name='lineage', value.name = 'pseudotime')
+
+#rename curve to lineage
+pseudotimevalues$lineage <- gsub('curve','lineage', pseudotimevalues$lineage)
+
+#exclude cells with NA pseudotimevalues (those cells are not present in all lineages and have NA values for the lineages in which they are absent)
+pseudotimevaluesexclNA <- pseudotimevalues%>%filter(pseudotime!='NA')
+
+#generate colorpalette
+colors <- colorRampPalette(rev(brewer.pal(11, 'Spectral'))[-6])(100)
+
+# plot lineages: cells are colored by psuedotime
+ggplot(pseudotimevaluesexclNA%>%arrange(pseudotime), aes(x=umap_1, y=umap_2))+geom_point(aes(color=pseudotime),size=0.1, alpha=0.3) +facet_wrap(~lineage)+scale_color_gradientn(colours=colors)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())
+
+# plot lineages: cells are colorted by cluster
+ggplot(pseudotimevaluesexclNA%>%arrange(pseudotime), aes(x=umap_1, y=umap_2))+geom_point(aes(color=cluster),size =0.1)+facet_wrap(~lineage)+theme_bw()+ guides(colour = guide_legend(override.aes = list(size=5)))
+
+# jitterplot per lineage: cells are colored by cluster
+ggplot(pseudotimevaluesexclNA%>%arrange(pseudotime), aes(x=pseudotime, y=lineage)) + geom_jitter(aes(color=cluster), size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+ guides(colour = guide_legend(override.aes = list(size=5)))
+```
 ### CD4 - prepare data
 ```{r fig.width=15, fig.height=11}
 # cluster labels
@@ -993,7 +1083,22 @@ lin_cd4
 # crv_cd4 <- getCurves(lin_cd4, approx_points=50) 
 ```
 
+#### CD4 markers
 
+#### visualize params on umap (CD4)
+```{r}
+visualize_params_umap(umap_cd4_fcs_dt)
+```
+
+#### visualize leiden clusters on umap (CD4)
+```{r}
+visualize_clusters_umap(umap_cd4_fcs_dt)
+```
+
+#### cd4 frequencies 
+```{r}
+visualize_counts(umap_cd4_fcs_dt)
+```
 
 
 
