@@ -139,6 +139,48 @@ ggplot(read.counts) +
     facet_grid(t.type ~ assay + k.type)
 ```
 
+# Raw bin plot (for fig1?)
+
+```{r}
+subset_barplot_reads <- read.counts[
+  assay == 'CTV1' & batch == 'prolif2' & donor == 'd1' & k.type == 'pos']
+
+subset_barplot_reads <- subset_barplot_reads[,
+  CAR.ranked.sep := factor(
+    paste(CAR.align,t.type,sep='|'))]
+
+subset_barplot_reads[,
+  CAR.ranked.sep := factor(CAR.ranked.sep, levels=levels(
+    reorder(
+      CAR.ranked.sep[k.type == 'pos'], 
+      -rlog_car_score[k.type == 'pos'])))]
+
+remove_t_type_sep <- function (breaks)
+  unlist(lapply(breaks, function(str)
+    strsplit(str, '|',fixed=T)[[1]][1]))
+
+barplot_stacked_plot <- ggplot(subset_barplot_reads) +
+  geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
+    stat='identity', width=1) +
+  scale_fill_brewer(palette = "YlGn") +
+  facet_grid(. ~ t.type, scales = 'free_x') +
+  labs(y='% sorted into each bin', x='CAR Costimulatory Domains, ranked') +
+  scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep) +
+  scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0, 0)), 
+                     breaks=c(0, .5, 1), labels=percent) +
+  theme_bw(base_size=18) + theme(axis.ticks = element_blank()) + 
+  theme(
+    axis.text.x = element_text(size=12, angle = 90, vjust = 0.5, hjust=1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_rect(colour = "black"))
+
+ggsave(here::here('..','figs','pooled','fig1_stacked_bar.pdf'), 
+       barplot_stacked_plot, height=3, width=9, useDingbats=FALSE)
+
+```
+
 # DeSeq2 Computation
 
 ## DESeq2 Function
