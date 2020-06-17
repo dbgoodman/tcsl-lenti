@@ -9,7 +9,7 @@ purple <- brewer.pal(9,'Purples')[c(7)] #zeta
 grey <- 'grey30' #unt
 
 # new set
-grey <- 'grey40' #zeta
+grey <- 'grey10' #zeta
 purples <- brewer.pal(9, 'Purples')[c(5, 7)] #TNR8, CD40
 
 # old set

@@ -1619,9 +1619,7 @@ ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
 all.deseq.results.dt[, comparison := paste(test_set,ref_set,sep= '.')]
 
 deseq2_combined <- all.deseq.results.dt[,
-    comparison := paste(test_set, ref_set, sep='.')][(
-      (ref_set == 'baseline' & test_set == 'ABCD' & assay == 'CTV3') |
-        (ref_set == 'CD' & test_set == 'A' & assay != 'CTV3'))][,
+    comparison := paste(test_set, ref_set, sep='.')][,
     combined_var := paste(comparison, assay)][, value := log2FoldChange]
 
 deseq2_combined[, value.scale := scale(value), by = .(t.type, k.type, assay, comparison)]
@@ -1682,7 +1680,9 @@ library(dendextend)
 library(ggdendro)
 library(cowplot)
 
-make_dendroheatmap <- function(df, title) {
+make_dendroheatmap <- function(
+  df, title, dendro_units=grid::unit(0.2, "null"), legend=T)
+{
   
   # Make dendrogram
   car_mean_cast <- dcast(
@@ -1720,6 +1720,10 @@ make_dendroheatmap <- function(df, title) {
         axis.title.y = element_blank()) +
     labs(title=title)
   
+  if (!legend) {
+    var_heatmap <- var_heatmap + theme(legend.position = "none") 
+  }
+  
   # col dendro
   dendro_data_col <- dendro_data(car_dendro, type = "rectangle")
   
@@ -1728,24 +1732,42 @@ make_dendroheatmap <- function(df, title) {
         aes(x = x, y = y, xend = xend, yend = yend)) +
       coord_flip()
   plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
-    dendro_col, grid::unit(0.2, "null"), position = "right")
+    dendro_col, dendro_units, position = "right")
   return(ggdraw(plot_dendroheat))
 }
 
-make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos'],
-  title='Deseq2 for CTV, car score for markers')
-make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos'],
-  title='car score for all')
+# make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos'],
+#   title='Deseq2 for CTV, car score for markers')
+# make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos'],
+#   title='car score for all')
+# 
+# make_dendroheatmap(total_combined[(assay == 'CTV1' & comparison == 'rlog_car_score') | (assay %in% c('CTV2','CTV3') & comparison == 'ABCD.baseline') | (!(assay %in% c('CTV1','CTV2','CTV3')) & comparison == 'rlog_car_score')],
+#   title='same_as_other_fig2_panels')
+# 
+# make_dendroheatmap(total_combined[t.type == 'CD4' & ((assay == 'CTV1' & comparison == 'rlog_car_score') | (assay %in% c('CTV2','CTV3') & comparison == 'ABCD.baseline') | (!(assay %in% c('CTV1','CTV2','CTV3')) & comparison == 'rlog_car_score'))],
+#   title='same_as_other_fig2_panels - cd4 only')
+# 
+# make_dendroheatmap(total_combined[t.type == 'CD8' & ((assay == 'CTV1' & comparison == 'rlog_car_score') | (assay %in% c('CTV2','CTV3') & comparison == 'ABCD.baseline') | (!(assay %in% c('CTV1','CTV2','CTV3')) & comparison == 'rlog_car_score'))],
+#   title='same_as_other_fig2_panels - cd8 only')
+# 
+# make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos' & t.type == 'CD4'],
+#   title='CD4 only, Deseq2 for CTV, car score for markers')
+# make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos' & t.type == 'CD4'],
+#   title='CD4 only, car score for all')
+# 
+# make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos' & t.type == 'CD8'],
+#   title='CD8 only, Deseq2 for CTV, car score for markers')
+# make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos' & t.type == 'CD8'],
+#   title='CD8 only, car score for all')
 
-make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos' & t.type == 'CD4'],
-  title='CD4 only, Deseq2 for CTV, car score for markers')
-make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos' & t.type == 'CD4'],
-  title='CD4 only, car score for all')
+## combined 4 and 8 with separate dendrograms
 
-make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos' & t.type == 'CD8'],
-  title='CD8 only, Deseq2 for CTV, car score for markers')
-make_dendroheatmap(total_combined[comparison == 'rlog_car_score' & k.type == 'pos' & t.type == 'CD8'],
-  title='CD8 only, car score for all')
+chosen_metrics <- total_combined[
+  ((assay == 'CTV1' & comparison == 'A.CD') | 
+    (assay %in% c('CTV2','CTV3') & comparison == 'ABCD.baseline') | 
+      (!(assay %in% c('CTV1','CTV2','CTV3')) & comparison == 'rlog_car_score'))]
+
+
 
 ```
 
