@@ -163,14 +163,14 @@ barplot_stacked_plot <- ggplot(subset_barplot_reads) +
   geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
     stat='identity', width=1) +
   scale_fill_brewer(palette = "YlGn") +
-  facet_grid(. ~ t.type, scales = 'free_x') +
+  facet_wrap(. ~ t.type, scales = 'free_x', ncol=1) +
   labs(y='% sorted into each bin', x='CAR Costimulatory Domains, ranked') +
   scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep) +
   scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0, 0)), 
                      breaks=c(0, .5, 1), labels=percent) +
   theme_bw(base_size=18) + theme(axis.ticks = element_blank()) + 
   theme(
-    axis.text.x = element_text(size=12, angle = 90, vjust = 0.5, hjust=1),
+    axis.text.x = element_text(size=9, angle = 90, vjust = 0.5, hjust=1),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
     strip.background = element_blank(),
