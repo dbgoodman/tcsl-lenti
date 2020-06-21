@@ -1287,8 +1287,6 @@ ggsave(here::here('..','figs','pooled','scaled_prolif_t_mean.pdf'),
        ggplot_pos_neg_assay, height=6, width=3.6, useDingbats=FALSE)
 ```
 
-Dan likes this one the best and will use for Fig 2B (until someone complains again).
-
 ### 2 panel - CTV1 only, +/- no ratio, all CD4s and CD8s averaged separately
 ```{r fig.height=4, fig.width=4}
 
@@ -1767,10 +1765,27 @@ chosen_metrics <- total_combined[
     (assay %in% c('CTV2','CTV3') & comparison == 'ABCD.baseline') | 
       (!(assay %in% c('CTV1','CTV2','CTV3')) & comparison == 'rlog_car_score'))]
 
+fig_2a_single_dendro <- make_dendroheatmap(chosen_metrics, title='')
+
+
 
 
 ```
+### Combined panels for figure 2
 
+```{r}
+
+plot_grid(fig_2a_single_dendro, 
+  plot_grid(
+    interbin_volcano,interbin_volcano,prolif_4v8,
+    rel_heights=c(2.3, 2.3, 1.3),
+    rel_widths=c(1,1,1),
+    labels = c("B", "C", "D"), align='v', axis='lr',
+    ncol = 1),
+  labels=c('A',''))
+
+
+```
 
 ### Save workspace for later analyses
 ```{r}
