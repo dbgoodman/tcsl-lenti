@@ -4171,7 +4171,7 @@ cytokine.rank.plot
 
 Use CAR score for cytokine ranking. Combine with tile plot above:
 
-### This is in the same style as bank, ranked separately
+### This is in the same style as banff, ranked separately
 
 ```{r fig.height=4, fig.width=2.5, units='inches'}
 library(ggforce)

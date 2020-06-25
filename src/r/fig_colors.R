@@ -36,3 +36,11 @@ show_colors <- function(car_colors, car_order) {
             fill=car_order, x=1)) + 
         scale_fill_manual(values=as.character(car_colors))
 }
+
+# other palettes
+
+outlier_cols <- brewer.pal(11, 'PiYG')[c(2,11)]
+
+outlier_cols_light <- brewer.pal(11, 'PiYG')[c(4,8)]
+
+cd19_val <- brewer.pal(11,'PRGn')[c(3,10)]
