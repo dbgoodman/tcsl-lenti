@@ -1870,7 +1870,7 @@ fig_2a_single_dendro
 
 ```{r}
 
-library(relayer)
+library(ggnewscale)
 
 prolif_data <- read.counts[
   (k.type =='pos' | is.na(k.type)) & batch != 'post-cytof'][,
@@ -2064,7 +2064,75 @@ ggsave(here::here('..','figs','compiled','fig2.pdf'), plot_abcde,
 
 plot_abcde
 ```
+## Fig 3 PCA
 
+```{r}
+
+cast_metrics <- dcast(
+  total_combined, CAR.align ~ group + assay + k.type + t.type + comparison, 
+  value.var='value.scale')
+
+combined_pca <- prcomp(cast_metrics[,-1])
+
+# calculate pca stats
+pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+    PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+    sd = combined_pca$sdev, 
+    var = combined_pca$sdev^2, 
+    var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+    var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+
+melt.pca.dt <- melt(
+  pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+
+pca.stats.plot <- ggplot(melt.pca.dt) +
+  geom_line(aes(x = pc, y = value, color = metric)) +
+  geom_point(aes(x = pc, y = value, color = metric)) +
+  scale_x_continuous(limits = c(1, NA)) +
+  labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+       x = "Principal Component", y = "Fraction of Variance") +
+  theme_bw()
+
+# project data onto principal components
+projected.metrics <- scale(cast_metrics[, setdiff(names(cast_metrics), 
+  c("CAR.align")), with = FALSE],
+  combined_pca$center, combined_pca$scale) %*% combined_pca$rotation
+
+projected.metrics <- cbind.data.frame(CAR.align=cast_metrics[, CAR.align],
+  projected.metrics)
+
+projected.metrics <- data.table(merge(projected.metrics, 
+  unique(read.counts[, .(CAR.align, len)]), 
+  by = "CAR.align"))
+
+projected.metrics[CAR.align == '4-1BB', CAR.align := '41BB']
+projected.metrics[, CAR.annot := 'none']
+projected.metrics[CAR.align %in% names(car_colors), CAR.annot := CAR.align]
+projected.metrics[, CAR.annot := factor(
+  CAR.annot, levels=c(names(car_colors)[1:7], 'none'))]
+
+pca.pos.sort.group.plot <- ggplot(projected.metrics,
+    aes(x = PC1, y = PC2, label = CAR.align, 
+      size=(CAR.align %in% names(car_colors)), 
+      color=CAR.annot)) +
+  geom_point() +
+  geom_text_repel(data=projected.metrics[CAR.annot != 'none'],
+    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+  scale_size_discrete(guide=F) +
+  scale_color_manual('',
+    labels=c(names(car_colors)[1:7], ''),
+    values=c(car_colors[1:7], 'grey')) +
+  labs(title = 'PCA Using CD19+ Sort Group Bins') +
+  theme_bw() +
+  labs(title='') +
+  theme(axis.text = element_blank())
+
+
+ggsave(here::here('..','figs','new_pca.pdf'), pca.pos.sort.group.plot,
+       height=4, width=5)
+
+pca.pos.sort.group.plot
+```
 
 ### Save workspace for later analyses
 ```{r}
