@@ -1,0 +1,460 @@
+---
+title: "Arrayed Screen Differentiation Exploration"
+output: html_document
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, 
+    encoding = encoding, output_dir = here::here(,'..','html'))})
+---
+
+# Load Data 
+```{r}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(ggridges)
+library(tidyverse)
+
+output_dir <- file.path(here::here('..','figs'))
+
+data_dir <- here::here('..','data')
+load(file.path(data_dir, 'exh.sampled.Rdata'))
+diff_dt <- fread(file.path(data_dir, 'exh.sampled.csv.gz'))
+
+cd4_marker_pos_threshold <- list(
+  tim3_t= 666,
+  gfp_t=1250,
+  zombie_t=750,
+  myc_t=1400,
+  lag3_t= 950, 
+  pd1_t= 1400,
+  cd39_t= 1100)
+
+cd8_marker_pos_threshold <- list(
+  tim3_t= 666,
+  gfp_t=1500,
+  zombie_t=750,
+  myc_t=1400,
+  lag3_t= 800, 
+  pd1_t= 1400,
+  cd39_t= 1250)
+
+censor_negative_min = -1500
+redo_umap_clustering = F
+redo_umap_param_search = F
+
+#only redo param search if doing clustering also:
+redo_umap_clustering = redo_umap_clustering && redo_umap_clustering
+
+# map day 0 to both plus and minus
+map_day_0 <- function(df) {
+  return(rbind(
+    df[k562!='none'],
+    df[k562=='none'][, k562 := 'cd19+'],
+    df[k562=='none'][, k562 := 'cd19-']
+  ))
+}
+
+exh_cast_dt <- dcast(exh_dt[!is.na(car) & !is.na(donor) & !is.na(event_id)], 
+    car + donor + day + well + plate + event_id + row + col + t_type + k562 ~ 
+      variable, value.var='value')
+```
+
+### CD27 expression in CD8s is maintined in BAFF-R
+
+```{r}
+
+#display all colors: display.brewer.all(type="seq")
+blues <- brewer.pal(9,'Blues')[c(5,8)] #41bb, cd28
+greens <- brewer.pal(9,'Greens')[c(5,8)] #baffr, taci
+oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
+red <- brewer.pal(9,'PuRd')[c(7)] #klrg1
+purple <- brewer.pal(9,'Purples')[c(7)] #zeta
+grey <- 'grey30' #unt
+car_colors <- c(
+  blues[1], greens[1], greens[1], blues[2], oranges[1], 
+  red, greens[2], oranges[2], grey, purple)
+car_linetypes <- c(1,1,3,1,1,1,1,1,1,1)
+
+ggplot(map_day_0(diff_dt)[
+        variable=='cd27_t' & k562 == 'cd19+' & value > censor_negative_min]) + 
+    geom_density(aes(x=value, color=factor(day), group=factor(day))) +
+    scale_color_manual(values=brewer.pal(9,'Greens')[rev(c(4,5,6,7,8))]) + 
+    facet_grid(car ~ t_type + donor)
+
+ggplot(map_day_0(diff_dt)[
+    variable=='cd27_t' & k562 == 'cd19+' & value > censor_negative_min & 
+        t_type == 'cd8']) + 
+    geom_boxplot(aes(x=day, y=value, fill=factor(day), group=factor(day)),
+        outlier.shape = NA) +
+    scale_fill_manual(values=brewer.pal(9,'Greens')[rev(c(4,5,6,7,8))]) + scale_y_continuous(limits=c(1000,3000)) +
+    facet_grid(t_type + donor ~ car)
+
+cd27_lines <- ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min & t_type == 'cd8'][,
+            list(val_sd= sd(value), val_mean= mean(value)),
+        by=.(car, day, donor, variable, t_type)][
+            car %in% c('BAFF-R','41BB','CD28','TACI','untrans') & 
+                (donor == 2 | (donor == 1 & day < 33))], 
+    aes(x=day, y=val_mean/1000, 
+        ymin=(val_mean-val_sd)/1000, 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car)) + 
+    geom_point() + 
+    geom_line() + 
+    facet_grid(~ donor, scale='free_x') + 
+    scale_x_continuous(breaks=c(0,6,15,24,33)) +
+    scale_y_continuous(limits=c(1.25,2.4)) +
+    scale_color_manual(
+        values=c(blues[1], greens[1], blues[2], greens[2], grey)) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+cd27_ridges <- ggplot(map_day_0(diff_dt)[
+    variable=='cd27_t' & k562 == 'cd19+' & value > -500 & t_type == 'cd8'][
+        car %in% c('BAFF-R','41BB','CD28','TACI','untrans') & 
+            (donor == 2 | (donor == 1 & day < 33))]) + 
+    geom_density_ridges(aes(x=value, y=factor(day), fill=factor(day), 
+      height =..ndensity..)) +
+    scale_fill_manual(values=brewer.pal(9,'Greens')[rev(c(4,5,6,7,8))]) +
+    facet_grid(car~donor, scales='free') + 
+    scale_x_continuous(limits=c(-500, 3000)) +
+    scale_y_discrete(expand=c(0,0), limits= rev(levels(factor(diff_dt$day)))) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(x='CD27 log MFI (AU)', y='Days in culture')
+
+cd27_ridges
+cd27_lines
+
+ggsave(paste0(output_dir, '/cd27_line_plot.pdf'),
+       cd27_lines, width = 6, height = 3,
+       units = 'in', dpi = 300)
+
+ggsave(paste0(output_dir, '/cd27_ridge_plot.pdf'),
+       cd27_ridges, width = 3, height = 10,
+       units = 'in', dpi = 300)
+
+```
+
+## Two Dimensional Diff Plots
+
+```{r fig.height=13, fig.width=20}
+
+xy_hist_plot <- function(df, x_var, y_var, t_type) {
+  
+  if (t_type == 'cd4') {
+    df_threshold = cd4_marker_pos_threshold
+  } else if (t_type == 'cd8') {
+    df_threshold = cd8_marker_pos_threshold
+  }
+  
+  x_thresh = df_threshold[[x_var]]
+  y_thresh = df_threshold[[y_var]]
+  
+  quadrants = df[, list(
+    total=.N, 
+    x_pos= get(x_var) > x_thresh, 
+    y_pos=get(y_var) > y_thresh), by=.(car, day)]
+  
+  
+  pct_plot = unique(quadrants[, pct := .N/total, by=.(car, day, x_pos, y_pos)])
+  
+  x_vals = c(-1,-1,1,1)
+  y_vals = c(-1,1,-1,1)
+  
+  pct_plot <- pct_plot[
+    data.table(
+      x_pos= x_vals==1, y_pos= y_vals==1,
+      x=Inf*x_vals, y=Inf*y_vals,
+      hjust=1*(x_vals==1),
+      vjust=1*(y_vals==1)),
+    on=.(x_pos, y_pos)]
+  
+  ggplot(df) + 
+    geom_density_2d(aes_string(x=x_var, y=y_var)) +
+    facet_grid(car ~ day) +
+    geom_vline(xintercept=x_thresh) +
+    geom_hline(yintercept=y_thresh) +
+    geom_text(data=pct_plot, aes(
+      x=x, y=y, 
+      label=percent(pct, 0.01),
+      hjust=hjust, vjust=vjust), size=3) +
+    theme_bw()
+}
+
+plot_grid(
+  xy_hist_plot(
+    df=map_day_0(diff_cast_dt)[k562 == 'cd19+' & t_type == 'cd4' & donor == 1],
+    x_var='cd45ra_t',
+    y_var='cd27_t',
+    t_type='cd4'),
+  xy_hist_plot(
+    df=map_day_0(diff_cast_dt)[k562 == 'cd19+' & t_type == 'cd4' & donor == 2],
+    x_var='cd45ra_t',
+    y_var='cd27_t',
+    t_type='cd4'), 
+  ncol=2, labels=c('Donor 1','Donor 2'))
+
+plot_grid(
+  xy_hist_plot(
+    df=map_day_0(diff_cast_dt)[k562 == 'cd19+' & t_type == 'cd4' & donor == 1],
+    x_var='cd45ra_t',
+    y_var='ccr7_t',
+    t_type='cd4'),
+  xy_hist_plot(
+    df=map_day_0(diff_cast_dt)[k562 == 'cd19+' & t_type == 'cd4' & donor == 2],
+    x_var='cd45ra_t',
+    y_var='ccr7_t',
+    t_type='cd4'), 
+  ncol=2, labels=c('Donor 1','Donor 2'))
+```
+
+## PCA Diff Plots
+
+```{r}
+df_subset <- map_day_0(exh_cast_dt)[k562 == 'cd19+' & t_type == 'cd8']
+
+pca <- prcomp(
+  df_subset[, grep('\\d+_t',names(df_subset), value=T), with=F])
+
+df_subset <- cbind(df_subset, pca$x)
+
+ggplot(df_subset) + 
+    geom_density_2d(
+        aes(
+            x=PC1, y=PC2, 
+            color=factor(day), 
+            group=factor(day))) + 
+    facet_grid(car ~ donor + day)
+
+
+
+
+```
+
+# Exh UMAP
+
+
+For now, skip straight to high dimensional plotting.
+
+## UMAP Functions
+```{r}
+
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(reticulate)
+library(uwot)
+library(gridExtra)
+#library(spatstat)
+library(ggdendro)
+library(cowplot)
+library(tidyverse)
+
+#grab channel map from cd4 data (cd4/8 are the same)
+channel_map <- exh_opt_cd4$channel_map
+
+# for now use all variables in the channel map except cd4/8
+umap_vars <- c(paste0(names(channel_map),'_t'))
+umap_vars <- umap_vars[umap_vars != 'cd_t']
+
+sample_for_umap <- function(df, sample_size) {
+  umap_dt <- diff_dt[!is.na(event_id), 
+    .SD[event_id %in% sample(unique(event_id), 
+      min(sample_size, length(unique(event_id))))],
+    by=c('well', 'plate', 'day')]
+}
+
+cast_for_umap <- function(df) {
+  #cast it so variables are columns and
+  #subset sample umap data on variables
+  umap_cast_dt <- dcast(df, 
+    event_id + well + plate + day + t_type ~ variable, 
+    value.var='value')
+  return(umap_cast_dt)
+}
+
+scale_for_umap <- function(df, umap_vars, censor_negative_min) {
+  umap_dt_in <- df[, ..umap_vars]
+  
+  # for points that are very negative, trim the to below the cutoff
+  umap_dt_in[umap_dt_in < censor_negative_min] <- censor_negative_min
+  
+  # scale each input column
+  umap_dt_in[ , 
+    (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+  
+  return(umap_dt_in)
+}
+  
+# check scales:
+# ggplot(melt(cbind(umap_dt_in, id=1:nrow(umap_dt_in)), id.var='id'), 
+#        aes(x=value)) +
+#     geom_density() +
+#     facet_grid(variable~.) +
+#     scale_fill_distiller(palette='RdYlBu') +
+#     theme_bw()
+
+```
+## Choose UMAP Params
+
+First, find parameters with a small sample.
+```{r eval=redo_umap_param_search}
+# use umap canned functions
+umap_dt <- sample_for_umap(exh_dt, 20)
+umap_cast_dt <- cast_for_umap(umap_dt)
+umap_dt_in <- scale_for_umap(umap_cast_dt, umap_vars, censor_negative_min)
+
+### Run across parameter list
+
+#umap parameter list
+min_dist_set <- c(0.0001, 0.005, 0.1)
+n_neighbor_set <- c(3,6,15,30)
+umap_params <- data.table(expand.grid(min_dist_set, n_neighbor_set))
+
+# run umap via uwot library
+umap_out <- umap_params[, {
+  print(paste0('Running: ',.BY)); 
+  as.data.table(umap(umap_dt_in, min_dist=as.numeric(.BY[1]),
+    n_neighbors=as.numeric(.BY[2]), verbose=F, n_threads=8, n_trees=50))
+  }, by=names(umap_params)]
+
+# rename the columns
+names(umap_out) <- c('min_dist','n_neighbor','umap_1','umap_2')
+
+# add the umap output to the input dt
+umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
+umap_fcs_dt[, id := 1:.N]
+
+umap_fcs_dt <- unique(umap_dt[, 
+  .(donor, car, k562, t_type, day, well, event_id)])[
+    umap_fcs_dt, on=.(t_type,well,day,event_id)]
+
+
+
+```
+
+```{r eval=redo_umap_param_search, fig.width=20, fig.height=10}
+color_points <- ggplot(umap_fcs_dt[car %in% c('CD28','41BB','KLRG1','BAFF-R','Zeta')], 
+    aes(x=umap_1, y=umap_2, color=interaction(car, t_type))) +
+  geom_point(size=0.1, alpha=0.1) + 
+  guides(colour = guide_legend(override.aes = list(alpha=1, size=3))) +
+  facet_grid(min_dist~n_neighbor) +
+  theme_bw()
+
+color_density <- ggplot(umap_fcs_dt, aes(x=umap_1, y=umap_2)) +
+  geom_hex(bins = 70) +
+  scale_fill_continuous(
+    type = "viridis", limits=c(0,30), oob=scales::squish) +
+  facet_grid(min_dist~n_neighbor) +
+  theme_bw()
+
+grid.arrange(color_points, color_density, ncol=2)
+```
+
+Choosing neighbors == 15 and min_dist == 1e-4. 
+
+## Checking UMAP Param space
+
+Scaling this to 200 events per well and checking CAR/condition separation.
+
+```{r, eval=redo_umap_clustering}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(reticulate)
+library(uwot)
+library(gridExtra)
+library(spatstat)
+library(ggdendro)
+library(cowplot)
+library(tidyverse)
+use_condaenv(condaenv = 'r-reticulate', required = TRUE)
+
+run_umap <- function(dt, chosen_dist, chosen_n_neighbor, sample_n, umap_vars) {
+  
+  umap_dt <- dt[!is.na(event_id), 
+    .SD[event_id %in% sample(unique(event_id), 
+      min(sample_n, length(unique(event_id))))],
+    by=c('well', 'plate', 'day')]
+  
+  #grab channel map from cd4 data (cd4/8 are the same)
+  #channel_map <- diff_opt_cd4$channel_map
+  
+  # for now use all variables in the channel map
+  #umap_vars <- c(paste0(names(channel_map),'_t'))
+  
+  #cast it so variables are columns and
+  #subset sample umap data on variables
+  umap_cast_dt <- dcast(umap_dt, 
+    event_id + well + plate + day + t_type ~ variable, 
+    value.var='value')
+  
+  umap_dt_in <- umap_cast_dt[, ..umap_vars]
+  
+  # scale each input column
+  umap_dt_in[ , 
+    (names(umap_dt_in)) := lapply(.SD, scale), .SDcols = names(umap_dt_in)]
+  
+  # run umap via uwot library
+  umap_out <- umap(umap_dt_in, min_dist=chosen_dist,
+      n_neighbors=chosen_n_neighbor, verbose=T, n_threads=8, n_trees=50,
+      ret_nn=T)
+  
+  # nearest neighbors in original space
+  nearest_neighbors <- umap_out$nn$euclidean$idx
+  neighbor_dist <- umap_out$nn$euclidean$dist
+  edge_weights <- scales::rescale(-neighbor_dist, to=c(0,1))
+  edge_weights <- edge_weights - min(edge_weights)
+  umap_out <- data.table(umap_out$embedding)
+  
+  #nearest neighbors in embedding
+  # umap_nn <- cbind(1:nrow(umap_fcs_dt), 
+  #     nnwhich(umap_fcs_dt[, list(umap_1, umap_2)], k=c(1:3)))
+  # umap_nd <- cbind(rep(0, nrow(umap_fcs_dt)), 
+  #     nndist(umap_fcs_dt[, list(umap_1, umap_2)], k=c(1:3)))
+  # umap_ew <- scales::rescale(-umap_nd, to=c(0,1))
+  # umap_ew <- umap_ew - min(umap_ew)
+      
+  # rename the columns
+  names(umap_out) <- c('umap_1','umap_2')
+  
+  # add the umap output to the input dt
+  umap_fcs_dt <- cbind(umap_cast_dt[, 1:length(names(umap_cast_dt))], umap_out)
+  umap_fcs_dt[, id := 1:.N]
+  
+  # add back the annotations
+  umap_fcs_dt <- unique(umap_dt[, 
+    .(donor, car, k562, t_type, day, well, event_id)])[
+      umap_fcs_dt, on=.(t_type,well,day,event_id)]
+  
+  print(edge_weights)
+  source_python(here::here('py/leiden_clust.py'))
+  clust_membership <- leiden_clust(nearest_neighbors,
+    edge_weights=scales::rescale(-neighbor_dist, to=c(0,1)))
+  umap_fcs_dt[, cluster := factor(clust_membership+1)]
+  
+  return(umap_fcs_dt)
+}
+
+umap_vars <- c("tim3_t","lag3_t","cd39_t","pd1_t" )
+umap_fcs_dt <- run_umap(exh_dt, 0.005, 15, 2500, umap_vars)
+
+# save the clustering data
+fwrite(umap_fcs_dt, 
+  compress='gzip', 
+  file=file.path(here::here('..','data','exh.sampled.umap.csv.gz')))
+
+# sync output back to s3
+system('aws s3 sync \\ 
+  --exclude "*" \\
+  --include "*.Rdata" \\
+  --include "*.csv*" \\
+  ~/local-tcsl/data s3://roybal-tcsl//lenti_screen_compiled_data/data')
+```
