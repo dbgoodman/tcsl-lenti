@@ -19,11 +19,6 @@ def leiden_clust(nearest_neighbors, edge_weights):
     
     part = leidenalg.find_partition(knn_graph, 
             leidenalg.ModularityVertexPartition, weights='weight')
-            
-    # another partition alg we tried
-    #part = leidenalg.find_partition(knn_graph, 
-    #    leidenalg.CPMVertexPartition, weights='weight', 
-    #    resolution_parameter=0.05)
     
     cluster_membership = [x for _,x in 
             sorted(zip(knn_graph.vs['name'], part.membership))]

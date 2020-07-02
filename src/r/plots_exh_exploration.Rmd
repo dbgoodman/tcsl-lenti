@@ -392,9 +392,9 @@ run_umap <- function(dt, chosen_dist, chosen_n_neighbor, sample_n, umap_vars) {
   
   #cast it so variables are columns and
   #subset sample umap data on variables
-  umap_cast_dt <- dcast(umap_dt, 
+  umap_cast_dt <- data.table(dcast(umap_dt, 
     event_id + well + plate + day + t_type ~ variable, 
-    value.var='value')
+    value.var='value'))
   
   umap_dt_in <- umap_cast_dt[, ..umap_vars]
   
