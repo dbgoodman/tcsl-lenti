@@ -28,6 +28,7 @@ library(viridis) # add to AWS
 library(reshape2)
 library(RColorBrewer)
 library(ggrepel)
+#library(monocle3)
 use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 
 data_dir <- here::here('..','data')
@@ -181,12 +182,13 @@ channel_map <- diff_opt_cd4$channel_map
 # for now use all variables in the channel map
 umap_vars <- c(paste0(names(channel_map),'_t'))
 
-# removing cd_t, zombie_t, myc_t, gfp_t from umap_vars
-umap_vars <- umap_vars[!umap_vars %in% c('zombie_t', 'myc_t', 'gfp_t')]
+# remove cd_t, zombie_t, myc_t, gfp_t from umap_vars
+umap_vars <- umap_vars[!umap_vars %in% c('cd_t', 'zombie_t', 'myc_t', 'gfp_t')]
+umap_vars # check umap vars
 
-# filter by cd4/8
-umap_cd4_dt <- umap_dt %>% filter(t_type=='cd4') 
-umap_cd8_dt <- umap_dt %>% filter(t_type=='cd8') 
+# filter by cd4/8, cd19+ and day 0 only
+umap_cd4_dt <- umap_dt %>% filter(t_type=='cd4', k562 %in% c('none', 'cd19+'))
+umap_cd8_dt <- umap_dt %>% filter(t_type=='cd8', k562 %in% c('none', 'cd19+'))
 ```
 ### CD4 UMAP
 ```{r, eval=redo_umap_clustering}
@@ -354,12 +356,22 @@ system('aws s3 sync \\
 # PCA (in the works)
 ```{r}
 # pca_cd8 <- prcomp(umap_cd8_dt_in) #data already scaled from above umap preprocessing
+#summary(pca_cd8) #PC1,PC2 explain ~55% of variance
+#names(pca_cd8)
 
-# pca_cd8_df <- as.data.frame(pca_cd8$x)
+#plot(pca_cd8$x[,1:2], main="first PCA")
 
+#pca_cd8$x %>% 
+  #as.data.frame %>%
+  #ggplot(aes(x=PC1,y=PC2)) + geom_point(size=1) +
+  #theme_bw(base_size=20)
+
+# pca_cd8_df <- as.data.frame(pca_cd8$x), 
 # pca_cd8_df %>% head()
 
 # umap_cd4_dt_in
+
+
 ```
 
 
@@ -466,10 +478,11 @@ color_plots <- function(umap_df) {
   grid.arrange(color_time, color_density, color_markers, ncol=3)
 }
 
-color_plots(umap_cd4_fcs_dt)
+#cd8
 color_plots(umap_cd8_fcs_dt)
 
-
+#cd4
+color_plots(umap_cd4_fcs_dt)
 ```
 
 ```{r, fig.width=15, fig.height=8}
@@ -912,144 +925,8 @@ all_plots(umap_cd8_fcs_dt, 'CD8')
 ```{r, fig.width=15, fig.height=30}
 all_plots(umap_cd4_fcs_dt, 'CD4')
 ```
-## Pseudotime Analysis
+## Temporal UMAP Visualizations 
 
-### CD8 - prepare data
-```{r fig.width=15, fig.height=11}
-# cluster labels
-clusterLabels_cd8 <- as.vector(umap_cd8_fcs_dt$cluster)
-
-# reduced dimensional matrix
-rd_matrix_cd8 <- umap_cd8_fcs_dt %>% remove_rownames %>% column_to_rownames(var="id") %>% select(umap_1, umap_2) %>% as.matrix()
-
-# get lineages, set clusters 5,6,10 as start and 13,8,11 as end (based on above cluster plot B)
-lin_cd8_path1 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '5', end.clus = '11')
-lin_cd8_path2 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '5', end.clus = '8')
-lin_cd8_path3 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '5', end.clus = '13')
-lin_cd8_path4 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '6', end.clus = '11')
-lin_cd8_path5 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '6', end.clus = '8')
-lin_cd8_path6 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '6', end.clus = '13')
-lin_cd8_path7 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '10', end.clus = '11')
-lin_cd8_path8 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '10', end.clus = '8')
-lin_cd8_path9 <- getLineages(rd_matrix_cd8, clusterLabels_cd8, start.clus = '10', end.clus = '13')
-
-
-
-# assign colors to each cluster (because slingshot does not support ggplot)
-cell_pal <- function(cell_vars, pal_fun,...) {
-  if (is.numeric(cell_vars)) {
-    pal <- pal_fun(100, ...)
-    return(pal[cut(cell_vars, breaks = 100)])
-  } else {
-    categories <- sort(unique(cell_vars))
-    pal <- setNames(pal_fun(length(categories), ...), categories)
-    return(pal[cell_vars])
-  }
-}
-cell_colors_clust_cd8 <- cell_pal(clusterLabels_cd8, hue_pal())
-```
-
-```{r}
-# plot lineages
-plot_lineages <- function(lin_path, cluster_start, cluster_end) {
-  plot(rd_matrix_cd8, col = cell_colors_clust_cd8, pch = 16, cex = 0.5, main=paste('Start:' ,as.character(cluster_start),' End:', as.character(cluster_end)))
-  lines(lin_path, lwd = 2, type = 'lineages', col = 'black', show.constraints = TRUE)
-}
-
-#1
-plot_lineages(lin_cd8_path1, '5','11')
-
-#2
-plot_lineages(lin_cd8_path2, '5','8')
-
-#3
-plot_lineages(lin_cd8_path3, '5','13')
-
-#4
-plot_lineages(lin_cd8_path4, '6','11')
-
-#5
-plot_lineages(lin_cd8_path5, '6','8')
-
-#6
-plot_lineages(lin_cd8_path6, '6','13')
-
-#7
-plot_lineages(lin_cd8_path7, '10','11')
-
-#8
-plot_lineages(lin_cd8_path8, '10','8')
-
-#9
-plot_lineages(lin_cd8_path9, '10','13')
-
-
-
-```
-
-
-
-### CD8 Fit curve (This takes a long time)
-```{r}
-# get smooth curves for lineages
-crv_cd8_path1 <- getCurves(lin_cd8_path1, approx_points=25)
-
-# compute the rest of these later
-#crv_cd8_path2 <- getCurves(lin_cd8_path2, approx_points=10)
-
-#crv_cd8_path3 <- getCurves(lin_cd8_path3, approx_points=10)
-
-#crv_cd8_path4 <- getCurves(lin_cd8_path4, approx_points=10)
-
-#crv_cd8_path5 <- getCurves(lin_cd8_path5, approx_points=10)
-
-#crv_cd8_path6 <- getCurves(lin_cd8_path6, approx_points=10)
-
-#crv_cd8_path7 <- getCurves(lin_cd8_path7, approx_points=10)
-
-#crv_cd8_path8 <- getCurves(lin_cd8_path8, approx_points=10)
-
-#crv_cd8_path9 <- getCurves(lin_cd8_path9, approx_points=10)
-```
-
-```{r}
-# save the trajectory inference data
-save(crv_cd8_path1, file=file.path(here::here('..','data','diff.sampled.umap_cd8_trajectory.Rdata')))
-
-# sync output back to s3
-system('aws s3 sync \\
-  --exclude "*" \\
-  --include "*.Rdata" \\
-  --include "*.csv*" \\
-  ~/local-tcsl/data s3://roybal-tcsl//lenti_screen_compiled_data/data')
-```
-
-### load trajectory data
-```{r}
-load(file.path(data_dir, 'diff.sampled.umap_cd8_trajectory.Rdata'))
-```
-
-### CD8 trajectory plots
-```{r}
-# plot trajectory on umap alongside original umap
-plot(rd_matrix_cd8, col = cell_colors_clust_cd8, pch = 16, cex = 0.5)
-lines(crv_cd8_path1, lwd = 2, type = 'lineages', col = 'black', show.constraints = TRUE)
-```
-
-```{r}
-# Psuedotime values for each lineage
-nc <- 3
-pt <- slingPseudotime(crv_cd8_path1)
-nms <- colnames(pt)
-nr <- ceiling(length(nms)/nc)
-pal <- viridis(100, end = 0.95)
-par(mfrow = c(nr, nc))
-for (i in nms) {
-  colors <- pal[cut(pt[,i], breaks = 100)]
-  plot(reducedDim(lin_cd8_path1), col = colors, pch = 16, cex = 0.5, main = i)
-  lines(crv_cd8_path1, lwd = 2, col = 'black', type = 'lineages')
-}
-```
 
 ### Visualize parameters on umap
 ```{r}
@@ -1083,7 +960,7 @@ visualize_params_umap <- function(df) {
 visualize_params_umap(umap_cd8_fcs_dt)
 ```
 
-#### visualize leiden clusters on umap (CD8)
+#### visualize leiden clusters on umap
 ```{r}
 visualize_clusters_umap <- function(df) {
   label_clusters_umap <- df %>% group_by(cluster) %>% select(umap_1, umap_2) %>% summarize_all(mean)
@@ -1091,6 +968,7 @@ visualize_clusters_umap <- function(df) {
 }
   
 visualize_clusters_umap(umap_cd8_fcs_dt)
+visualize_clusters_umap(umap_cd4_fcs_dt)
 ```
 
 #### visualize days UMAP
@@ -1102,14 +980,16 @@ visualize_days_umap <- function(df) {
 
 visualize_days_umap(umap_cd8_fcs_dt)
 
+visualize_days_umap(umap_cd4_fcs_dt)
 ```
 
 #### visualize CARS UMAP
 ```{r fig.width=15, fig.height=11}
 visualize_cars_umap <- function(df) {
   label_cars_umap <- df %>% group_by(car) %>% select(umap_1, umap_2) %>% summarize_all(mean)
-  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(car)))+geom_point(size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + guides(colour = guide_legend(override.aes = list(size=5)))
+  ggplot(df, aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = ..level..)) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + guides(colour = guide_legend(override.aes = list(size=5)))
 }
+
 
 #ALL CARS
 plot_grid(umap_cd8_fcs_dt %>% filter(day==0) %>% visualize_cars_umap()
@@ -1176,7 +1056,7 @@ cars_by_day_umap(umap_cd8_zeta)
 ```
 
 
-#### cd8 frequencies
+#### cd8 frequencies (maybe need to control for batch effect)
 ```{r}
 # Calculate the percentage of a certain sample (donor) present in a certain cluster
 visualize_counts <- function(df) {
@@ -1192,78 +1072,6 @@ as.data.frame.matrix(table(umap_cd8_fcs_dt$donor,umap_cd8_fcs_dt$cluster))
 
 umap_cd8_fcs_dt$donor %>% head()
 visualize_counts(umap_cd8_fcs_dt)
-```
-
-#### visualize psuedotime (CD8)
-```{r}
-umap_cd8_fcs_pseudotime_dt <- cbind(umap_cd8_fcs_dt, slingPseudotime(crv_cd8_path1) %>% as.data.frame())
-
-pseudotimevalues <- umap_cd8_fcs_pseudotime_dt %>% select(c(umap_1, umap_2, cluster, curve1, curve2, curve3, curve4))
-
-#reshape table 
-pseudotimevalues <- melt(pseudotimevalues, id.vars=c('cluster', 'umap_1', 'umap_2'), variable.name='lineage', value.name = 'pseudotime')
-
-#rename curve to lineage
-pseudotimevalues$lineage <- gsub('curve','lineage', pseudotimevalues$lineage)
-
-#exclude cells with NA pseudotimevalues (those cells are not present in all lineages and have NA values for the lineages in which they are absent)
-pseudotimevaluesexclNA <- pseudotimevalues%>%filter(pseudotime!='NA')
-
-#generate colorpalette
-colors <- colorRampPalette(rev(brewer.pal(11, 'Spectral'))[-6])(100)
-
-# plot lineages: cells are colored by psuedotime
-ggplot(pseudotimevaluesexclNA%>%arrange(pseudotime), aes(x=umap_1, y=umap_2))+geom_point(aes(color=pseudotime),size=0.1, alpha=0.3) +facet_wrap(~lineage)+scale_color_gradientn(colours=colors)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())
-
-# plot lineages: cells are colorted by cluster
-ggplot(pseudotimevaluesexclNA%>%arrange(pseudotime), aes(x=umap_1, y=umap_2))+geom_point(aes(color=cluster),size =0.1)+facet_wrap(~lineage)+theme_bw()+ guides(colour = guide_legend(override.aes = list(size=5)))
-
-# jitterplot per lineage: cells are colored by cluster
-ggplot(pseudotimevaluesexclNA%>%arrange(pseudotime), aes(x=pseudotime, y=lineage)) + geom_jitter(aes(color=cluster), size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+ guides(colour = guide_legend(override.aes = list(size=5)))
-```
-
-
-### CD4 - prepare data
-```{r fig.width=15, fig.height=11}
-# cluster labels
-clusterLabels_cd4 <- as.vector(umap_cd4_fcs_dt$cluster)
-
-# reduced dimensional matrix
-rd_matrix_cd4 <- umap_cd4_fcs_dt %>% remove_rownames %>% column_to_rownames(var="id") %>% select(umap_1, umap_2) %>%  as.matrix()
-
-# get lineages, set cluster 14 as the start (since likely naive T cells)
-lin_cd4 <- getLineages(rd_matrix_cd4, clusterLabels_cd4, start.clus = '6')
-
-cell_colors_clust_cd4 <- cell_pal(clusterLabels_cd4, hue_pal())
-# plot lineage (without curves)
-plot(rd_matrix_cd4, col = cell_colors_clust_cd4, pch = 16, cex = 0.5)
-lines(lin_cd4, lwd = 2, type = 'lineages', col = 'black', show.constraints = TRUE)
-
-lin_cd4
-```
-
-### CD4 Fit curve (This isn't working yet) - normally approx_points=100, but both 100 and even 50 currently crashing
-
-```{r}
-# get smooth curves for lineages
-# crv_cd4 <- getCurves(lin_cd4, approx_points=50) 
-```
-
-#### CD4 markers
-
-#### visualize params on umap (CD4)
-```{r}
-visualize_params_umap(umap_cd4_fcs_dt)
-```
-
-#### visualize leiden clusters on umap (CD4)
-```{r}
-visualize_clusters_umap(umap_cd4_fcs_dt)
-```
-
-#### cd4 frequencies 
-```{r}
-visualize_counts(umap_cd4_fcs_dt)
 ```
 
 
