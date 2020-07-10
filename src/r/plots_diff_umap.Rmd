@@ -834,7 +834,7 @@ all_plots <- function(umap_fcs_dt, cell_type) {
   '%notin%' <- Negate('%in%')
   annotations <- param_cluster_pct_dt %>%
   mutate(variable=gsub("\\_t$", "", variable)) %>%
-  filter(variable %notin% c('gfp','myc','cd','donor')) %>%
+  filter(variable %notin% c('gfp','myc','cd','donor', 'cd19')) %>%
   mutate(cluster=as.character(cluster)) %>%
   group_by(cluster) %>% 
   mutate(rk = rank(-abs(clust_mean))) %>%
@@ -919,6 +919,13 @@ all_plots <- function(umap_fcs_dt, cell_type) {
 } 
 
 all_plots(umap_cd8_fcs_dt, 'CD8')
+
+umap_cd8_fcs_dt %>% head()
+
+# manually determined 
+cd8_diff_by_cluster <- data.frame("cluster" = c(1:12), "cell_type" = c('TEM', 'TSCM', 'TCM', 'TSCM', 'TEM', 'TTM', 'TEM', 'TTM', 'TEM', 'TEM', 'TN', 'TN'))
+cd8_diff_by_cluster$cluster <- as.factor(cd8_diff_by_cluster$cluster)
+umap_cd8_fcs_dt <- left_join(umap_cd8_fcs_dt, cd8_diff_by_cluster, by='cluster')
 ```
 
 ### CD4 Cluster Plots
@@ -943,7 +950,7 @@ viz.umap <- function(dat,dr,param.name,limits=NULL){
 ```
 
 #### CD8 markers 
-```{r}
+```{r fig.width=15, fig.height=11}
 param_test <- colnames(umap_cd8_fcs_dt)[c(7, 9:13)]
 
 as.data.frame(umap_cd8_fcs_dt)[, param_test]
@@ -957,29 +964,40 @@ visualize_params_umap <- function(df) {
   }
 }
 
-visualize_params_umap(umap_cd8_fcs_dt)
+umap_marker_heatmap <- function(df) {
+plot_grid(viz.umap(dat=df, param.name='ccr7_t'), viz.umap(dat=df, param.name='cd27_t'), viz.umap(dat=df, param.name='cd45ra_t'), viz.umap(dat=df, param.name='cd45ro_t'), viz.umap(dat=df, param.name='cd62l_t'), viz.umap(dat=df, param.name='cd95_t'), row=2)
+}
+
+umap_marker_heatmap(umap_cd8_fcs_dt)
 ```
+#### CD4 markers
+```{r fig.width=15, fig.height=11}
+umap_marker_heatmap(umap_cd4_fcs_dt)
+```
+
 
 #### visualize leiden clusters on umap
 ```{r}
 visualize_clusters_umap <- function(df) {
-  label_clusters_umap <- df %>% group_by(cluster) %>% select(umap_1, umap_2) %>% summarize_all(mean)
-  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(cluster)))+geom_point(size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=cluster), data=label_clusters_umap)+guides(colour=FALSE)+ggtitle('Leiden clusters')
+  label_clusters_umap <- df %>% group_by(cluster, cell_type) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(cluster)))+geom_point(size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=cell_type), data=label_clusters_umap)+guides(colour=FALSE)+ggtitle('Leiden clusters')
 }
   
 visualize_clusters_umap(umap_cd8_fcs_dt)
-visualize_clusters_umap(umap_cd4_fcs_dt)
+# visualize_clusters_umap(umap_cd4_fcs_dt)
 ```
 
 #### visualize days UMAP
 ```{r}
 visualize_days_umap <- function(df) {
   label_days_umap <- df %>% group_by(day) %>% select(umap_1, umap_2) %>% summarize_all(mean)
-  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(day)))+geom_point(size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=day), data=label_days_umap)+guides(colour=FALSE)+ggtitle('UMAP by Day')
+  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(day)))+geom_point(size=0.1)+theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=day), data=label_days_umap)+guides(colour=FALSE)+ggtitle('UMAP by Day') + scale_color_viridis(discrete=TRUE)
 }
 
+#cd8
 visualize_days_umap(umap_cd8_fcs_dt)
 
+#cd4
 visualize_days_umap(umap_cd4_fcs_dt)
 ```
 
@@ -992,68 +1010,49 @@ visualize_cars_umap <- function(df) {
 
 
 #ALL CARS
-plot_grid(umap_cd8_fcs_dt %>% filter(day==0) %>% visualize_cars_umap()
-, umap_cd8_fcs_dt %>% filter(day==6) %>% visualize_cars_umap(), umap_cd8_fcs_dt %>% filter(day==15) %>% visualize_cars_umap(), umap_cd8_fcs_dt %>% filter(day==24) %>% visualize_cars_umap(), umap_cd8_fcs_dt %>% filter(day==33) %>% visualize_cars_umap(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24', 'Day 33'), nrow=3)
-
-# Day 0
-#umap_cd8_fcs_dt %>% filter(day==0) %>% visualize_cars_umap()
-
-# Day 6
-#umap_cd8_fcs_dt %>% filter(day==6) %>% visualize_cars_umap()
-
-# Day 15
-#umap_cd8_fcs_dt %>% filter(day==15) %>% visualize_cars_umap()
-
-# Day 24
-#umap_cd8_fcs_dt %>% filter(day==24) %>% visualize_cars_umap()
-
-# Day 33
-#umap_cd8_fcs_dt %>% filter(day==33) %>% visualize_cars_umap()
-
-
-#41BB
-cars_by_day_umap <- function(car_type) {
-plot_grid(car_type %>% filter(day==0) %>% visualize_cars_umap()
-, car_type %>% filter(day==6) %>% visualize_cars_umap(), car_type %>% filter(day==15) %>% visualize_cars_umap(), car_type %>% filter(day==24) %>% visualize_cars_umap(), car_type %>% filter(day==33) %>% visualize_cars_umap(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24', 'Day 33'), nrow=3)
+visualize_all_cars_by_day_umap <- function(df) {
+  plot_grid(df %>% filter(day==0) %>% visualize_cars_umap()
+, df %>% filter(day==6) %>% visualize_cars_umap(), df %>% filter(day==15) %>% visualize_cars_umap(), df %>% filter(day==24) %>% visualize_cars_umap(), df %>% filter(day==33) %>% visualize_cars_umap(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24', 'Day 33'), nrow=3)
 }
 
-umap_cd8_41bb <- umap_cd8_fcs_dt %>% filter(car=='41BB')
-cars_by_day_umap(umap_cd8_41bb)
+#ALL CARS - CD8
+visualize_all_cars_by_day_umap(umap_cd8_fcs_dt)
+
+#ALL CARS - CD4
+visualize_all_cars_by_day_umap(umap_cd4_fcs_dt)
+```
+#### Contour plot - visualize CARS by day, cluster
+##### CD8
+```{r fig.width=15, fig.height=11}
+'%notin%' <- Negate('%in%')
+
+#cars x day contour
+umap_cd8_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(car ~ day) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + ggtitle("CAR Densities by Day")
+
+# clusters x day contour
+umap_cd8_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(cluster ~ day) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + ggtitle("Cluster Densities by Day")
 
 
-#BAFFR
-umap_cd8_baffr <- umap_cd8_fcs_dt %>% filter(car=='BAFF-R')
-cars_by_day_umap(umap_cd8_baffr)
+# clusters by car contour
+umap_cd8_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(cluster ~ car) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank())+ ggtitle("CAR Densities by Cluster")
+```
+##### CD4 
+```{r fig.width=15, fig.height=11}
+#cars x day contour
+umap_cd4_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(car ~ day) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + ggtitle("CAR Densities by Day")
 
-#CD28
-umap_cd8_cd28 <- umap_cd8_fcs_dt %>% filter(car=='CD28')
-cars_by_day_umap(umap_cd8_cd28)
+# clusters x day contour
+umap_cd4_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(cluster ~ day) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + ggtitle("Cluster Densities by Day")
 
-#CD40
-umap_cd8_cd40 <- umap_cd8_fcs_dt %>% filter(car=='CD40')
-cars_by_day_umap(umap_cd8_cd40)
 
-#KLGR1
-umap_cd8_klrg1 <- umap_cd8_fcs_dt %>% filter(car=='KLRG1')
-cars_by_day_umap(umap_cd8_klrg1)
+# clusters by car contour
+umap_cd4_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(cluster ~ car) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank())+ ggtitle("CAR Densities by Cluster")
 
-#TACI
-umap_cd8_taci <- umap_cd8_fcs_dt %>% filter(car=='TACI')
-cars_by_day_umap(umap_cd8_taci)
-
-#TNR8
-umap_cd8_tnr8 <- umap_cd8_fcs_dt %>% filter(car=='TNR8')
-cars_by_day_umap(umap_cd8_tnr8)
-
-#untransduced
-umap_cd8_untrans <- umap_cd8_fcs_dt %>% filter(car=='untrans')
-cars_by_day_umap(umap_cd8_untrans)
-
-#zeta
-umap_cd8_zeta <- umap_cd8_fcs_dt %>% filter(car=='zeta')
-cars_by_day_umap(umap_cd8_zeta)
 
 ```
+
+
+
 
 
 #### cd8 frequencies (maybe need to control for batch effect)
@@ -1070,8 +1069,13 @@ visualize_counts <- function(df) {
 
 as.data.frame.matrix(table(umap_cd8_fcs_dt$donor,umap_cd8_fcs_dt$cluster))
 
-umap_cd8_fcs_dt$donor %>% head()
+
+#cd8
 visualize_counts(umap_cd8_fcs_dt)
+
+#cd4
+visualize_counts(umap_cd4_fcs_dt)
+
 ```
 
 
