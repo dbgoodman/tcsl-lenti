@@ -926,10 +926,15 @@ umap_cd8_fcs_dt %>% head()
 cd8_diff_by_cluster <- data.frame("cluster" = c(1:12), "cell_type" = c('TEM', 'TSCM', 'TCM', 'TSCM', 'TEM', 'TTM', 'TEM', 'TTM', 'TEM', 'TEM', 'TN', 'TN'))
 cd8_diff_by_cluster$cluster <- as.factor(cd8_diff_by_cluster$cluster)
 umap_cd8_fcs_dt <- left_join(umap_cd8_fcs_dt, cd8_diff_by_cluster, by='cluster')
+
 ```
 
 ### CD4 Cluster Plots
 ```{r, fig.width=15, fig.height=30}
+cd4_diff_by_cluster <- data.frame("cluster" = c(1:14), "cell_type" = c('TEM', 'TEM', 'TEM', 'TEM', 'TCM', 'TN', 'TN', 'TCM', 'TSCM', 'TEM', 'TCM', 'TCM', 'TSCM','TEM'))
+cd4_diff_by_cluster$cluster <- as.factor(cd4_diff_by_cluster$cluster)
+umap_cd4_fcs_dt <- left_join(umap_cd4_fcs_dt, cd4_diff_by_cluster, by='cluster')
+
 all_plots(umap_cd4_fcs_dt, 'CD4')
 ```
 ## Temporal UMAP Visualizations 
@@ -984,7 +989,7 @@ visualize_clusters_umap <- function(df) {
 }
   
 visualize_clusters_umap(umap_cd8_fcs_dt)
-# visualize_clusters_umap(umap_cd4_fcs_dt)
+visualize_clusters_umap(umap_cd4_fcs_dt)
 ```
 
 #### visualize days UMAP
@@ -1036,6 +1041,7 @@ umap_cd8_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, colo
 # clusters by car contour
 umap_cd8_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(cluster ~ car) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank())+ ggtitle("CAR Densities by Cluster")
 ```
+
 ##### CD4 
 ```{r fig.width=15, fig.height=11}
 #cars x day contour
@@ -1051,32 +1057,58 @@ umap_cd4_fcs_dt %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, colo
 
 ```
 
-
-
-
-
-#### cd8 frequencies (maybe need to control for batch effect)
+#### frequencies (checking for donor batch effect)
 ```{r}
-# Calculate the percentage of a certain sample (donor) present in a certain cluster
-visualize_counts <- function(df) {
+#cd8
+cluster_by_donor <- function(df, num_clusters){
   counts <- as.data.frame.matrix(table(df$donor,df$cluster))
-  counts_percofsample = counts/rowSums(counts)*100
-  counts_percofsample$total <- rowSums(counts)
-  counts_percofsample$donor <- row.names(counts_percofsample)
-  counts_percofsample <- melt(counts_percofsample,  id.vars=c('donor', 'total'), variable.name='cluster', value.name='frequency')
-  ggplot(counts_percofsample, aes(x=reorder(cluster, frequency, FUN=median), y=frequency))+ geom_boxplot(position='dodge2', outlier.shape=NA)+geom_jitter(aes(colour=donor), size=2)+xlab('cluster')+ggtitle(" frequency = % of sample in cluster")
+  counts$donor <- c(1:2)
+  counts %>% group_by(donor) %>% gather(1:num_clusters, key=cluster, value=samples) %>% ggplot(., aes(x="",y=samples, fill=factor(donor))) + facet_grid(.~cluster) + geom_bar(width = 1, stat='identity', position=position_dodge())
 }
 
-as.data.frame.matrix(table(umap_cd8_fcs_dt$donor,umap_cd8_fcs_dt$cluster))
-
-
-#cd8
-visualize_counts(umap_cd8_fcs_dt)
+cluster_by_donor(umap_cd8_fcs_dt, 12) #imbalances in clusters 1,10,2,4,7,9
 
 #cd4
-visualize_counts(umap_cd4_fcs_dt)
+cluster_by_donor(umap_cd4_fcs_dt, 14) #imbalances in clusters 14,7
 
 ```
+
+#### CD8 correlation
+```{r fig.width=15, fig.height=11}
+library(Hmisc)
+library(ggcorrplot) 
+#corr plot
+#biomarker_values <- umap_cd8_fcs_dt[,c(7,9:13)]
+#corr <- round(cor(biomarker_values), 2)
+#p.mat <- cor_pmat(biomarker_values) #pvals
+
+# visualize - positive corrs in red, neg in blue Color intensity and size are proportion to corr coefficients (legend).
+#ggcorrplot(corr, method = "circle", hc.order = TRUE, type = "upper", outline.col = "white",ggtheme = ggplot2::theme_gray, colors = c("#6D9EC1", "white", "#E46726"), p.mat = p.mat)
+
+biomarker_corr <- function(df) {
+  biomarkers <- df %>% 
+  select('ccr7_t', 'cd27_t', 'cd45ra_t', 'cd45ro_t', 'cd62l_t', 'cd95_t') 
+  corr <- round(cor(biomarkers),2)
+  p.mat <- cor_pmat(biomarkers)
+  ggcorrplot(corr, method = "circle", type = "upper", outline.col = "white", p.mat = p.mat, ggtheme= ggplot2::theme_gray, colors = c("#6D9EC1", "white", "#E46726"))
+}
+
+biomarker_corr_by_day <- function(df) {
+  plot_grid(df %>% filter(day==0) %>% biomarker_corr()
+, df %>% filter(day==6) %>% biomarker_corr(), df %>% filter(day==15) %>% biomarker_corr(), df %>% filter(day==24) %>% biomarker_corr(), df %>% filter(day==33) %>% biomarker_corr(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24', 'Day 33'), nrow=3)
+}
+
+#cd8
+biomarker_corr_by_day(umap_cd8_fcs_dt)
+```
+
+#### CD4 correlation
+```{r fig.width=15, fig.height=11}
+biomarker_corr_by_day(umap_cd4_fcs_dt)
+```
+
+
+
 
 
 
