@@ -11,15 +11,33 @@ knit: (function(inputFile, encoding) {
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
+library(tidyr)
+library(tidyr)
 library(Seurat)
 library(patchwork)
+library(cluster)
+library(parallelDist)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+
+reload_data=F
 ```
 
-```{r load_data}
-# Load the PBMC dataset
+```{r load_data, eval=reload_data}
+# Load the dataset
 scrna.data <- Read10X(data.dir = here::here(
     '..','..','scrnaseq_tcsl154',
     'cellranger','outs','raw_feature_bc_matrix'))
+
+#rename some adt features
+hto_rows <- paste('Hashtag',1:12,sep='_')
+
+adt_feature_names <- fread(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'meta','adt_names.tsv'))
+rownames(scrna.data$`Antibody Capture`) <- c(paste0(adt_feature_names$vis_name,'.adt'), hto_rows)
+
 
 #rna features
 scrna <- CreateSeuratObject(
@@ -28,12 +46,19 @@ scrna <- CreateSeuratObject(
     min.cells = 3,
     min.features = 200)
 
-rm('scrna.data')
+adt_rows <- setdiff(rownames(scrna.data$`Antibody Capture`), hto_rows)
+
+#adt features
+scrna[['ADT']] <- CreateAssayObject(
+    counts = scrna.data$`Antibody Capture`[adt_rows, colnames(scrna)])
 ```
 
 ## RNA QC metrics
 
-```{r rna_qc}
+```{r rna_qc, fig.width=4, fig.height=4, eval=reload_data}
+
+scrna[["percent.mt"]] <- PercentageFeatureSet(scrna, pattern = "^MT-")
+
 VlnPlot(scrna, 
   pt.size=F, 
   features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
@@ -48,34 +73,89 @@ plot1 + plot2
 
 scrna <- subset(
   scrna, 
-  subset = nFeature_RNA > 1000 & nFeature_RNA < 7000 & percent.mt < 15)
-```
-
-## ADT QC Metrics and subsetting
-
-```{r adt_qc}
-
-hto_rows <- paste('Hashtag',1:12,sep='_')
-adt_rows <- setdiff(rownames(scrna.data$`Antibody Capture`), hto_rows)
-
-#adt features
-scrna[['ADT']] <- CreateAssayObject(
-    counts = scrna.data$`Antibody Capture`[adt_rows, colnames(scrna)])
+  subset = nFeature_RNA > 800 & nFeature_RNA < 7000 & percent.mt < 15)
 ```
 
 ## HTO QC Metrics, subsetting, clustering
 
-```{r hto}
+```{r hto, fig.width=10, fig.height=10, eval=reload_data}
+
+source(here::here('r','scrna','HTOdemux.R'))
+
 scrna[['HTO']] <- CreateAssayObject(
   counts = scrna.data$`Antibody Capture`[hto_rows, colnames(scrna)])
 
+#all data loaded, clear raw data from memory and do garbage collect
+#rm('scrna.data')
+gc()
+
 scrna <- NormalizeData(scrna, assay = "HTO", normalization.method = "CLR")
 
-scrna <- DoubleHTODemux(scrna)
+scrna <- DoubleHTODemux(scrna, positive.quantile = 0.90, ncenters=25)
 
-gc()
+ggplot(
+    data.table(scrna@meta.data)[, .N, 
+      by=.(HTO_classification, HTO_clusters, hash.ID)],
+    aes(y=HTO_classification, x=hash.ID, fill=log10(N))) + 
+  geom_tile() + facet_wrap(~HTO_clusters, scales='free') +
+  labs(title='Cluster vs HTO assignment')
+
+# assign match for best cluster
+cluster.hash.ID <- data.table(scrna@meta.data)[, 
+  .N, by=.(HTO_classification, HTO_clusters, hash.ID)][, 
+    list(cluster.hash.ID= hash.ID[hash.ID != 'Triplets'][
+      which.max(N[hash.ID != 'Triplets'])]), by=.(HTO_clusters)]
+
+updated_metadata <- cluster.hash.ID[
+  data.table(scrna@meta.data), 
+    on='HTO_clusters', nomatch=NA, all=T][
+    is.na(cluster.hash.ID), cluster.hash.ID := 'Triplet']
+
+updated_metadata[, HTO_best_doublet := gsub('\\+\\d+','',HTO_classification)]
+updated_metadata[, HTO_miscluster := (
+  as.character(cluster.hash.ID) != as.character(HTO_best_doublet))]
+
+# margin to throw away clustering points if third-closest HTO's
+# signal strength relative to second is beyond this 
+HTO_margin_cutoff <- -1
+
+ggplot(updated_metadata[
+    HTO_miscluster == F & 
+    (as.character(hash.ID) != as.character(cluster.hash.ID))]) + 
+  geom_jitter(aes(x=HTO_margin, y=HTO_classification), alpha=0.2) + 
+  facet_wrap(~cluster.hash.ID, scales='free') + 
+  geom_vline(aes(xintercept=-1))
+
+# mark cells with HTO margin above cutoff as misclustered
+updated_metadata[
+  (as.character(hash.ID) != as.character(cluster.hash.ID)) & 
+  HTO_margin > HTO_margin_cutoff, 
+    HTO_miscluster := T]
+
+# assign cluster hashes if not misclustered
+updated_metadata[HTO_miscluster == F, hash.ID := cluster.hash.ID]
+
+# merge with metadata file, add to HTO scrna metadata
+HTO_sample_metadata <- fread(here::here(
+    '..','..','scrnaseq_tcsl154','meta','sample_metadata.csv'))
+names(HTO_sample_metadata)[2] <- 'hash.ID'
+updated_metadata <- HTO_sample_metadata[updated_metadata, on='hash.ID']
+
+#if hash combo is not a sample, label negative
+updated_metadata[
+  is.na(sample_num) & !(hash.ID %in% c('Triplets', 'Singlets', 'Negative')), 
+  hash.ID := 'Negative']
+
+# update metadata in object
+updated_metadata <- as.data.frame(updated_metadata)
+rownames(updated_metadata) <- colnames(scrna)
+scrna@meta.data <- updated_metadata
+
+#assign new cell identities
+Idents(object = scrna) <- scrna@meta.data$hash.ID
+
+#make a subset for tsne plot
 hto_subset <- subset(scrna, cells=sample(Cells(scrna), 10000))
-
 
 hto.dist.mtx <- as.matrix(parDist(t(
   GetAssayData(object = hto_subset, assay = "HTO"))))
@@ -84,145 +164,302 @@ hto_subset <- RunTSNE(hto_subset,
   distance.matrix = hto.dist.mtx,
   perplexity = 100)
 
-DimPlot(hto_subset)
+DimPlot(hto_subset, label=T)
+DimPlot(hto_subset, split='hash.ID',ncol=4)
 ```
-## Multiple HTO Assignments
-```{r}
-DoubleHTODemux <- function (object, assay = "HTO", positive.quantile = 0.99, init = NULL, 
-    nstarts = 100, kfunc = "clara", nsamples = 100, seed = 42, 
-    verbose = TRUE) 
-{
-    
-    MaxN <- function(x, N = 2){
-      len <- length(x)
-      if (N > len) {
-        warning('N greater than length(x).  Setting N=length(x)')
-        N <- length(x)
-      }
-      sort(x, partial = len - N + 1)[len - N + 1]
-    }
-    
-    whichpart <- function(x, n=30) {
-      nx <- length(x)
-      p <- nx-n
-      xp <- sort(x, partial=p)[p]
-      which(x > xp)[1]
-    }
+
+## Analyzing RNA Data for TCSL 155
+
+```{r initial_rna_analysis, fig.width=10, fig.height=10, eval=reload_data}
+scrna.hashed <- subset(scrna, idents = HTO_sample_metadata$hash.ID)
+
+DefaultAssay(scrna.hashed) <- "RNA"
+scrna.hashed <- NormalizeData(scrna.hashed, 
+    assay='RNA', 
+    normalization.method = "LogNormalize", scale.factor = 10000)
+
+scrna.hashed <- ScaleData(
+  scrna.hashed, assay='RNA',
+  features= VariableFeatures(scrna.hashed))
+ 
+scrna.hashed <- FindVariableFeatures(scrna.hashed,
+    selection.method = "vst",
+    nfeatures = 2000)
+
+saveRDS(scrna.hashed, file = here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+```
+## Separating CD4s and CD8s
+
+First, get adt tags that separate CD4s and CD8s, and add rnas as controls.
+
+```{r cd4_v_cd8, fig.width=4, fig.height=4}
+
+if (!('scrna.hashed' %in% ls()))
+  scrna.hashed <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+
+DefaultAssay(scrna.hashed) <- "ADT"
+scrna.hashed <- NormalizeData(scrna.hashed, assay = "ADT", normalization.method = "CLR")
+scrna.hashed <- ScaleData(scrna.hashed, assay = "ADT")
+scrna.hashed <- FindVariableFeatures(scrna.hashed)
+
+adt_features <- scrna.hashed@assays$ADT@var.features
+
+cd4v8_subset_vars <- c(adt_features, 'rna_CD8A','rna_CD8B','rna_CD4')
+
+cd4v8.dt <- data.table(FetchData(
+  object = scrna.hashed, 
+  vars = cd4v8_subset_vars))
+
+combined_pca <- prcomp(cd4v8.dt)
+
+# calculate pca stats
+pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+    PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+    sd = combined_pca$sdev, 
+    var = combined_pca$sdev^2, 
+    var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+    var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+
+melt.pca.dt <- melt(
+  pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+
+pca.stats.plot <- ggplot(melt.pca.dt) +
+  geom_line(aes(x = pc, y = value, color = metric)) +
+  geom_point(aes(x = pc, y = value, color = metric)) +
+  scale_x_continuous(limits = c(1, NA)) +
+  labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+       x = "Principal Component", y = "Fraction of Variance") +
+  theme_bw()
+
+pca.stats.plot
+```
+
+```{r cd4_v_cd8_pca, fig.width=6, fig.height=16, eval=reload_data}
+# project data onto principal components
+projected.metrics <- scale(cd4v8.dt, combined_pca$center, combined_pca$scale) %*% combined_pca$rotation
+
+#vectorized switch:
+names_4v8 <- c('4-8-', '8+4-', '4+8-', '4+8+')
+categories_4v8 <- c('CD8','intermediate','intermediate','CD4')
+
+projected.metrics <- cbind.data.frame(cd4v8.dt, projected.metrics)
+projected.metrics[, is_CD4_adt := CD4.adt > 1.2]
+projected.metrics[, is_CD8_adt := CD8A.adt > 0.5]
+projected.metrics[, adt_state := names_4v8[1+(2*is_CD4_adt + is_CD8_adt)]]
+projected.metrics[, is_CD4_rna := rna_CD4 > 0]
+projected.metrics[, is_CD8B_rna := rna_CD8B > 0]
+projected.metrics[, is_CD8A_rna := rna_CD8A > 0]
+projected.metrics[, rna_state := names_4v8[1+(2*is_CD4_rna + (is_CD8B_rna | is_CD8A_rna))]]
+
+intercepts <- c(.89, 1.95)
+slopes <- c(.77, 1.45)
+
+projected.metrics[, cd8_classify := PC2 > (slopes[1]*PC1 + intercepts[1])]
+projected.metrics[, cd4_classify := PC2 > (slopes[2]*PC1 + intercepts[2])]
+projected.metrics[, cd_category := categories_4v8[1+(2*cd4_classify + cd8_classify)]]
+
+plot_grid(
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=adt_state)) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=adt_state)) + 
+    facet_wrap(~adt_state) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=adt_state)) + 
+    facet_wrap(~rna_state) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=cd_category)) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ncol=1, 
+  labels=c('', 'Grouped by presence of CD4/CD8 ADT', 'Grouped by presence of CD4/CD8 RNA','Manual Classification'), 
+  scale=0.9)
+
+scrna.hashed@meta.data[['CD4v8']] <- projected.metrics$cd_category
+
+if (reload_data) saveRDS(scrna.hashed, file = here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+```
+
+## Make UMAP plots and objects for each subset
+
+```{r umap_each_subset, eval=reload_data}
+if (!('scrna.hashed' %in% ls()))
+  scrna.hashed <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+
+umap_plot <- function(subset, plot_title_text="", assay, cluster_resolution) {
+
+    subset.markers <- FindAllMarkers(subset,
+    features = VariableFeatures(subset),
+    min.pct = 0.5, logfc.threshold = 0.25)
   
-    if (!is.null(x = seed)) {
-        set.seed(seed = seed)
-    }
-    ncenters = nrow(x = data) + 1
-    data <- GetAssayData(object = object, assay = assay)
-    counts <- GetAssayData(object = object, assay = assay, slot = "counts")[, 
-        colnames(x = object)]
-    counts <- as.matrix(x = counts)
-    init.clusters <- clara(x = t(x = GetAssayData(object = object, 
-        assay = assay)), k = ncenters, samples = nsamples)
-    Idents(object = object, cells = names(x = init.clusters$clustering), 
-        drop = TRUE) <- init.clusters$clustering
-    average.expression <- AverageExpression(object = object, 
-        assays = assay, verbose = FALSE)[[assay]]
-    if (sum(average.expression == 0) > 0) {
-        stop("Cells with zero counts exist as a cluster.")
-    }
-    
-    discrete <- GetAssayData(object = object, assay = assay)
-    discrete[discrete > 0] <- 0
-    for (iter in rownames(x = data)) {
-        values <- counts[iter, colnames(object)]
-        values.use <- values[WhichCells(
-          object = object, 
-          idents = levels(x = Idents(object = object))[[
-            which.min(x = average.expression[iter, ])]])]
-        fit <- suppressWarnings(expr = fitdist(data = values.use, 
-            distr = "nbinom"))
-        cutoff <- as.numeric(x = quantile(
-          x = fit, probs = positive.quantile)$quantiles[1])
-        discrete[iter, names(x = which(x = values > cutoff))] <- 1
-        if (verbose) {
-            message(paste0("Cutoff for ", iter, " : ", cutoff, 
-                " reads"))
-        }
-    }
-    
-    npositive <- colSums(x = discrete)
-    classification.global <- npositive
-    classification.global[npositive == 0] <- "Negative"
-    classification.global[npositive == 1] <- "Singlet"
-    classification.global[npositive == 2] <- "Doublet"
-    classification.global[npositive == 3] <- "Triplet"
-    donor.id = rownames(x = data)
-    
-    hash.max <- apply(X = data, MARGIN = 2, FUN = max)
-    hash.maxID <- apply(X = data, MARGIN = 2, FUN = which.max)
-    hash.second <- apply(X = data, MARGIN = 2, FUN = MaxN, N = 2)
-    hash.secondID <- apply(X = data, MARGIN = 2, FUN = whichpart, n = 2)
-    hash.third <- apply(X = data, MARGIN = 2, FUN = MaxN, N = 3)
-    hash.thirdID <- apply(X = data, MARGIN = 2, FUN = whichpart, n = 3)
-
-    hash.maxID <- as.character(x = donor.id[sapply(X = 1:ncol(x = data), 
-        FUN = function(x) {
-            return(which(x = data[, x] == hash.max[x])[1])
-        })])
-    
-    hash.secondID <- as.character(x = donor.id[sapply(X = 1:ncol(x = data), 
-        FUN = function(x) {
-            return(which(x = data[, x] == hash.second[x])[1])
-        })])
-    
-    hash.margin <- hash.second - hash.third
-    hash.mean.margin <- mean(c(hash.max, hash.second)) - hash.third
-    
-    doublet_id <- sapply(X = 1:length(x = hash.maxID), FUN = function(x) {
-      return(paste(
-        sort(c(
-          as.numeric(gsub('Hashtag-','',hash.maxID[x])),
-          as.numeric(gsub('Hashtag-','',hash.secondID[x])))),
-        collapse = "_"))})
-
-    classification <- classification.global
-    
-    classification[classification.global == "Negative"] <- "Negative"
-    classification[classification.global == "Singlet"] <- gsub(
-      'Hashtag-','', hash.maxID[which(x = classification.global == "Singlet")])
-    classification[classification.global == "Doublet"] <- doublet_id[
-      which(x = classification.global == "Doublet")]
-    classification[classification.global == "Triplet"] <- paste(
-      doublet_id[which(x = classification.global ==  "Triplet")],
-        gsub('Hashtag-','',
-          hash.thirdID[which(x = classification.global ==  "Triplet")]),
-        sep='+')
-        
-    classification.metadata <- data.frame(hash.maxID, hash.secondID, 
-        hash.margin, hash.mean.margin, classification, classification.global)
-    
-    colnames(x = classification.metadata) <- paste(assay, c("maxID", 
-        "secondID", "margin", "mean_margin", "classification", 
-        "classification.global"), 
-        sep = "_")
-    
-    object <- AddMetaData(object = object, metadata = classification.metadata)
-    Idents(object) <- paste0(assay, "_classification")
-    
-    triplets <- rownames(x = object[[]])[which(object[[paste0(assay, 
-        "_classification.global")]] == "Triplet")]
-    singlets <- rownames(x = object[[]])[which(object[[paste0(assay, 
-        "_classification.global")]] == "Singlet")]
-    
-    Idents(object = object, cells = singlets) <- "Singlets"
-    Idents(object = object, cells = triplets) <- "Triplets"
-    object$hash.ID <- Idents(object = object)
-    return(object)
+  top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+  
+  top_genes_plot <- ggplot(top.subset.markers) + 
+    geom_bar(aes(y=avg_logFC, x=reorder(gene, avg_logFC)), stat='identity') + 
+    facet_wrap(~cluster, scales='free', ncol=3) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  
+  cluster_pct_plot <- ggplot(
+      data.table(subset@meta.data)[
+        CD4v8 != 'intermediate', .N, 
+        by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
+          list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
+          by=c('car', 'CD4v8', 'k_type')]) + 
+    geom_bar(aes(x=car, y=frac, fill=frac), stat='identity', color='grey50') +
+    scale_fill_distiller(palette='YlGnBu', direction=1) +
+    facet_grid(k_type+t_type~cluster) + 
+    theme_bw() +
+    coord_flip()
+  
+  plot_title <- ggdraw() + 
+    draw_label(
+      plot_title_text,
+      fontface = 'bold',
+      x = 0,
+      hjust = 0
+    ) +
+    theme(
+      # add margin on the left of the drawing canvas,
+      # so title is aligned with left edge of first plot
+      plot.margin = margin(0, 0, 0, 7)
+    )
+  
+  gene_heatmap <- DoHeatmap(subset,
+        features = unique(
+          (top.subset.markers %>% group_by(cluster) 
+            %>% top_n(n=5, wt= avg_logFC))$gene))
+      
+  umap_plots <- plot_grid(
+    plot_grid(
+      plot_title,
+      DimPlot(subset, reduction = "umap", label=T),
+      cluster_pct_plot,
+      rel_heights=c(0.2,1.25,1),
+      ncol=1),
+    gene_heatmap,
+    ncol=2)
+  
+  return(umap_plots)
 }
+
+umap_subset <- function(this_subset, 
+    plot_title_text="", assay='RNA', cluster_resolution=0.8, save=T, rerun=F) {
+  
+  DefaultAssay(this_subset) <- assay
+  this_subset <- subset(this_subset, 
+    features=rownames(this_subset@assays[[assay]]))
+  
+  rds_file <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds',
+    paste0(
+        'scrna.hashed.',
+        gsub(' ','.',plot_title_text),
+        '.rds'))
+  
+  if (rerun || !file.exists(rds_file)) {
+    
+      if (assay == 'RNA') {
+        this_subset <- NormalizeData(
+            this_subset,
+            normalization.method = "LogNormalize", 
+            scale.factor = 10000)
+      } else if (assay == 'ADT') {
+          this_subset <- NormalizeData(
+            this_subset,
+            normalization.method = "CLR")
+      }
+      
+      this_subset <- FindVariableFeatures(
+          this_subset, 
+          selection.method = "vst",
+          nfeatures = 2000)
+      
+      this_subset <- ScaleData(
+        this_subset, assay=assay,
+        features= VariableFeatures(this_subset))
+    
+      this_subset <- RunPCA(
+        this_subset, features = VariableFeatures(this_subset))
+    
+      this_subset <- FindNeighbors(this_subset, reduction = "pca", dims = 1:8)
+      this_subset <- FindClusters(this_subset, resolution = cluster_resolution, algorithm=1)
+      this_subset <- RunUMAP(this_subset, dims = 1:8)
+    
+      this_subset@meta.data[['car.ttype.ktype']] <- paste(
+        this_subset@meta.data[['car']],
+        this_subset@meta.data[['CD4v8']],
+        this_subset@meta.data[['k_type']], sep='_')
+  } else {
+      this_subset <- readRDS(rds_file)
+  }
+  
+  subset_umap_plot <- umap_plot(this_subset, plot_title_text, assay, cluster_resolution)
+  
+  if ((rerun | (!file.exists(rds_file))) & save)
+    saveRDS(this_subset, file = rds_file)
+      
+  return(list(plots=subset_umap_plot, rds_file=rds_file))
+}
+
+subset_fxns= list(
+    function(obj) obj,
+    function(obj) subset(obj, subset = (CD4v8 == 'CD4')),
+    function(obj) subset(obj, subset = (CD4v8 == 'CD8')),
+    function(obj) subset(obj, subset = (k_type == 'cd19+')),
+    function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4')),
+    function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8')))
+subset_names= c('all cells','CD4','CD8','CD19','CD4 CD19','CD8 CD19')
+
+umap_plots <- data.table(subset_name= subset_names, subset_fxn_num=1:6)
+
+umap_plots[, ADT := list(list(
+    umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))), 
+    by='subset_name']
+umap_plots[, RNA := list(list(
+    umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
+    by='subset_name']
+
+saveRDS(umap_plots, file = here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.umap.plots.rds'))
+
 ```
 
-## Including Plots
+## Show UMAP Plots
 
-You can also embed plots, for example:
+### ADT plots
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r, fig.width=18, fig.height=10}
+
+if (!('umap_plots' %in% ls()))
+  umap_plots <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.umap.plots.rds'))
+
+umap_plots[, print(ADT[[1]]), by='subset_name']
+
+if (!('scrna.hashed' %in% ls()))
+  scrna.hashed <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+### RNA plots
+
+```{r, fig.width=18, fig.height=10}
+
+umap_plots[, print(RNA[[1]]), by='subset_name']
+```
