@@ -1228,7 +1228,6 @@ pos_neg_assay_avg <- dcast(
   pos_neg_comparisons_melt, cast_formula, value.var='var_mean')
 
 pos_neg_assay_plot <- unique(
-  pos_neg_assay_avg[, list(t.type, x_scaled_comb, y_scaled_comb, CAR.align)])
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
   CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),
@@ -1569,7 +1568,7 @@ prolif_4v8 <- ggplot(cast_4v8[order(CAR.type)],
 prolif_4v8
   
 ggsave(here::here('..','figs','pooled','mixed_4v8.pdf'), prolif_4v8,
-       height=2.5, width=7)
+       height=2.5, width=7, useDingbats=FALSE)
 ```
 
 #### CD4 vs CD8s (new version, w/ mean prolif and diff)
@@ -1610,7 +1609,7 @@ prolif_4v8_rel <- ggplot(cast_4v8[order(CAR.type)],
   guides(size=F)
 
 ggsave(here::here('..','figs','pooled','mixed_4v8_rel.pdf'), prolif_4v8_rel,
-       height=2.5, width=7)
+       height=2.5, width=7, useDingbats=FALSE)
 
 prolif_4v8_rel
 ```
@@ -1662,7 +1661,7 @@ prolif_posneg <- ggplot(cast_posneg,
 prolif_posneg
   
 ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
-       height=4.5, width=7)
+       height=4.5, width=7, useDingbats=FALSE)
 ```
 
 ## Dendroheatmap from #02, copied here to make fig2 panels
@@ -1757,7 +1756,7 @@ library(grid)
 
 make_dendroheatmap <- function(
   df, title, dendro_units=grid::unit(0.2, "null"), 
-  legend_theme=theme(legend.position = "none"))
+  legend_theme=theme(legend.position = "none"), boxnumbers=F)
 {
   
   # Make dendrogram
@@ -1789,7 +1788,7 @@ make_dendroheatmap <- function(
   # heatmap
   var_heatmap <- ggplot(df) + 
     geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
-                  fill = value.scale), colour = "black", size = .20) + 
+                  fill = value.scale), colour = "black", size = .20, alpha=ifelse(boxnumbers, 0.5, 1)) + 
     scale_fill_distiller('Z-score', 
       palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
     scale_x_discrete(expand=c(0,0),
@@ -1800,8 +1799,15 @@ make_dendroheatmap <- function(
             strsplit(str, '|',fixed=T)[[1]][1])))) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
         axis.title.x = element_blank(),
+        panel.background = element_rect(fill='white'),
         axis.title.y = element_blank()) +
     labs(title=title)
+  
+    if (boxnumbers) {
+      var_heatmap <- var_heatmap + 
+        geom_text(aes(x = interaction(assay,t.type), y = CAR.align, 
+          label=round(value.scale,1)), colour = "black")
+    }
   
     var_heatmap <- var_heatmap + legend_theme
   
@@ -1866,6 +1872,22 @@ fig_2a_single_dendro <- make_dendroheatmap(
 fig_2a_single_dendro
 
 ```
+
+### single heatmap, with numbers in boxes
+
+```{r}
+patent_fig2a <- make_dendroheatmap(
+  chosen_metrics,
+  title='',
+  legend_theme=theme(
+      legend.position = c(1, 0), 
+      legend.justification = c(-1.7, 0),
+      plot.margin = unit(c(5.5,33,33,5.5), "pt")), boxnumbers=T)
+
+patent_fig2a
+
+```
+
 ### proliferation plot
 
 ```{r}
@@ -2011,6 +2033,79 @@ ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel,
 
 cytokine_panel
 ```
+### Cytokines, Patent Version
+
+```{r}
+
+# cd19+/cd19- cols
+
+cytokine.pct.pos <- dcast(
+  read.counts[batch == "post-cytof" & t.type == 'CD4'][
+    bin %in% c('C','D'), list(pct_pos= sum(car.bin.pct)), 
+      by=c('assay','CAR.align', 'k.type')],
+  assay + CAR.align ~ k.type, value.var='pct_pos')
+
+cytokine.pct.pos[, CAR.align.assay := factor(paste(CAR.align,assay,sep='|'))]
+cytokine.pct.pos[, CAR.align.assay := factor(
+  CAR.align.assay, 
+  levels=levels(CAR.align.assay),
+  labels=cytokine.pct.pos[, gsub('(.*)\\..*', '\\1', levels(CAR.align.assay))])]
+
+cytokine.pct.pos.melt <- melt(
+  cytokine.pct.pos[, dist := neg-pos], 
+  measure.vars=c('neg','pos'), value.name='value', variable.name='CD19')[
+      assay %in% c("IL2","IFNy", 'CD69','IL4')]
+
+cytokine.pct.pos.melt[, CD19 := factor(CD19, levels=c('pos','neg'), labels=c('CD19+','CD19-'))]
+
+cytokine_panel <- ggplot(cytokine.pct.pos.melt) + 
+  
+  geom_segment(data=cytokine.pct.pos.melt[CD19 == 'CD19+'], 
+    aes(
+      x = reorder(CAR.align.assay, dist), 
+      xend = reorder(CAR.align.assay, dist), 
+      y = value+dist, 
+      yend = value), color="grey") +
+  
+  geom_point(
+    aes(x = reorder(CAR.align.assay, dist), y = value, color=CD19, shape=CD19, fill=CD19), 
+    size=2.5) +
+
+  scale_color_manual(
+    labels=c('CD19+','CD19-'),
+    values=c(cd19_val[2], 'grey30')) +
+  scale_shape_manual(
+      labels=c('CD19+','CD19-'),
+      values=c(21, 21)) +
+  scale_fill_manual(
+      labels=c('CD19+','CD19-'),
+      values=c('CD19+'=cd19_val[2], 'CD19-'='white')) +
+  
+  facet_wrap(~ assay, scales='free', ncol=2) +
+  scale_y_continuous(label=percent) +
+  scale_x_discrete(labels= (
+        function (breaks)
+          unlist(lapply(breaks, function(str)
+            strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(y = '% Positive (ICS)') +
+  theme_minimal() +
+  theme(panel.border=element_rect(fill=NA),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        strip.background = element_rect(colour="white", fill="white"),
+        legend.title = element_blank(),
+        legend.justification=c(1,1),
+        legend.position=c(0.99,1.01)) +
+  expand_limits(x = 0, y = 0)
+
+ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel,
+       height=3, width=8)
+
+cytokine_panel
+
+```
+
 ### Combined panels for figure 2
 
 ```{r fig.height=15, fig.width=11}

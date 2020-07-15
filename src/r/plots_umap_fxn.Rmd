@@ -59,7 +59,7 @@ For now, skip straight to high dimensional plotting.
 ```{r}
 
 #grab channel map from cd4 data (cd4/8 are the same)
-channel_map <- exh_opt_cd4$channel_map
+channel_map <- diff_opt_cd4$channel_map
 
 # for now use all variables in the channel map except cd4/8
 # removing zombie, cd_t, myc_t, gfp_t
@@ -127,11 +127,15 @@ run_umap <- function(dt, chosen_dist, chosen_n_neighbor, sample_n, umap_vars,
     .(donor, car, k562, t_type, day, well, event_id)])[
       umap_fcs_dt, on=.(t_type,well,day,event_id)]
   
-  print(edge_weights)
   source_python(here::here('py/leiden_clust.py'))
   clust_membership <- leiden_clust(nearest_neighbors,
     edge_weights=scales::rescale(-neighbor_dist, to=c(0,1)))
   umap_fcs_dt[, cluster := factor(clust_membership+1)]
+  
+  #renumber the clusters
+  cluster_ranks <- umap_fcs_dt[, list(mean_day=mean(day)), by=cluster][, rank_day := rank(mean_day)]
+  
+  umap_fcs_dt <- umap_fcs_dt[cluster_ranks, on='cluster'][, c('cluster', 'rank_day') := list(rank_day, NULL)]
   
   return(umap_fcs_dt)
 }
@@ -144,7 +148,8 @@ Scaling this to 200 events per well and checking CAR/condition separation.
 
 ### UMAP
 ```{r, eval=redo_umap_clustering}
-umap_cd4_fcs_dt <- run_umap(exh_dt[t_type == 'cd4'], 0.005, 15, 2500, umap_vars)
+umap_cd4_fcs_dt <- run_umap(diff_dt[t_type == 'cd4'], 0.005, 15, 800, umap_vars)
+umap_cd8_fcs_dt <- run_umap(diff_dt[t_type == 'cd8'], 0.005, 15, 800, umap_vars)
 ```
 
 ## Cluster Analysis
@@ -158,6 +163,11 @@ One issue with these clusters is that they are not contiguous in the UMAP embedd
 # umap_cd8_fcs_dt[, cluster := factor(cluster)]
 
 umap_cd4_cluster_dt <- umap_cd4_fcs_dt[, list(
+  mean_umap_1= mean(umap_1), 
+  mean_umap_2= mean(umap_2), 
+  size= .N), by=cluster]
+
+umap_cd8_cluster_dt <- umap_cd4_fcs_dt[, list(
   mean_umap_1= mean(umap_1), 
   mean_umap_2= mean(umap_2), 
   size= .N), by=cluster]
@@ -356,36 +366,6 @@ cd4_dendro <- dendrogram(umap_cd4_fcs_dt, 'cd4')
 cd4_colnames <- cd4_dendro[[2]]
 ```
 
-### Percent of cells in day, by cluster
-
-```{r, echo=F, fig.width=15, fig.height=8}
-day_cluster <- function(umap_fcs_dt, cell_type, cluster_names) {
-  day_cluster_pct_dt <- map_day_0(umap_fcs_dt)[,
-    data.table(table(day,cluster, t_type, k562))][,
-      list(day, pct=N/sum(N)), by=c('k562','cluster','t_type')]
-  
-  day_cluster_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
-  
-  ggplot(day_cluster_pct_dt[k562=='cd19+'], aes(
-      x=cluster, 
-      y=factor(day, levels=c(0,6,15,24,33)), 
-      fill=pct)) + 
-    geom_tile( 
-        color='black') +
-    geom_text(aes(label=round(pct*100)), size=3, color='white') +
-    facet_grid(k562+t_type~., scales='free') +
-    scale_fill_viridis_b(direction=1, limits=c(0, 1)) +
-    labs(y='Day', subtitle='(cols sum to 100%)') +
-    theme_minimal() + ggtitle(paste('Percent of ',as.character(cell_type),' cells in each cluster by day'))
-}
-
-#cd8
-day_cluster(umap_cd8_fcs_dt, 'CD8', cd8_colnames)
-
-#cd4
-day_cluster(umap_cd4_fcs_dt, 'CD4', cd4_colnames)
-```
-
 ### Percent of cells in cluster, by day
 
 ```{r, echo=F, fig.width=15, fig.height=8}
@@ -551,12 +531,15 @@ car_clusters_by_square(umap_cd4_fcs_dt, "CD4", cd4_colnames)
 
 ### CD8 Cluster Plots
 ```{r, fig.width=15, fig.height=30}
-all_plots <- function(umap_fcs_dt, cell_type) {
+all_plots <- function(umap_fcs_dt, cell_type, dendro=T) {
   cluster_pct_vars <- c(paste0(
     names(channel_map),'_t'), 
     'FSC-A','SSC-A','donor','cd19')
   
-  max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+    max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+  
+  umap_fcs_dt[, cluster:= factor(cluster, levels = as.character(1:max_cluster))]
+  
   
   umap_var_melt_dt <-melt(
     umap_fcs_dt[!is.na(donor)], measure.vars= c(umap_vars,'donor', 'cd19', 'myc_t', 'gfp_t')) #add back in previously removed vars
@@ -570,34 +553,38 @@ all_plots <- function(umap_fcs_dt, cell_type) {
       clust_sd = sd(value_scaled)),
         by=c('variable','cluster')]
   
-  # Make dendrogram
-  cluster_mean_cast <- dcast(
-    param_cluster_pct_dt, 
-    variable ~ cluster, 
-    value.var='clust_mean')
-  
-  cluster_dendro_m <- as.matrix(cluster_mean_cast[, -c(1)])
-  rownames(cluster_dendro_m) <- unlist(cluster_mean_cast[,1])
-  dendro_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_m))))
-  dendro_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_m)))
-  
-  # Create dendrogram plot
-  dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
-    theme(axis.text.y = element_text(size = 6))
-  dendro_clusters_plot <- ggdendrogram(data = dendro_clusters, rotate = TRUE) + 
-    theme(axis.text.y = element_text(size = 6))
-  
-  # column order
-  cluster_order <- order.dendrogram(dendro_clusters)
-  cluster_names <- colnames(cluster_dendro_m[, cluster_order])
-  param_cluster_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
-  
-  # row order
-  var_order <- order.dendrogram(dendro_vars)
-  var_names <- row.names(cluster_dendro_m[var_order, ])
-  param_cluster_pct_dt$variable <- factor(
-      param_cluster_pct_dt$variable,
-      levels = var_names)
+  if (dendro) {
+    # Make dendrogram
+    cluster_mean_cast <- dcast(
+      param_cluster_pct_dt, 
+      variable ~ cluster, 
+      value.var='clust_mean')
+    
+    cluster_dendro_m <- as.matrix(cluster_mean_cast[, -c(1)])
+    rownames(cluster_dendro_m) <- unlist(cluster_mean_cast[,1])
+    dendro_clusters <- as.dendrogram(hclust(d = dist(x = t(cluster_dendro_m))))
+    dendro_vars <- as.dendrogram(hclust(d = dist(x = cluster_dendro_m)))
+    
+    # Create dendrogram plot
+    dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
+      theme(axis.text.y = element_text(size = 6))
+    dendro_clusters_plot <- ggdendrogram(data = dendro_clusters, rotate = TRUE) + 
+      theme(axis.text.y = element_text(size = 6))
+    
+    # column order
+    cluster_order <- order.dendrogram(dendro_clusters)
+    cluster_names <- colnames(cluster_dendro_m[, cluster_order])
+    param_cluster_pct_dt[, cluster:= factor(cluster, levels = cluster_names)]
+    
+    # row order
+    var_order <- order.dendrogram(dendro_vars)
+    var_names <- row.names(cluster_dendro_m[var_order, ])
+    param_cluster_pct_dt$variable <- factor(
+        param_cluster_pct_dt$variable,
+        levels = var_names)
+  } else {
+    param_cluster_pct_dt[, cluster:= factor(cluster, levels = as.character(1:max_cluster))]
+  }
   
    #annotate clusters as per variable values (removed gfp, myc, cd, donor)
   '%notin%' <- Negate('%in%')
@@ -614,23 +601,30 @@ all_plots <- function(umap_fcs_dt, cell_type) {
   data.table::transpose()
   colnames(annotations) <- as.character(unlist(annotations[1,]))
   annotations = annotations[-1, ]
-  annotations <- annotations[cluster_names]
+  if (dendro) {
+    annotations <- annotations[cluster_names]
+  } else {
+    annotations <- annotations[as.character(1:max_cluster)]
+  }
   row.names(annotations) <- NULL 
   
   # heatmap
   var_heatmap <- ggplot(param_cluster_pct_dt) + 
-      geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') + geom_text(aes(x=cluster, y=variable, label=round(clust_mean, 2)), size=3, color='black') +
+      geom_tile(aes(x=cluster, y=variable, fill=clust_mean), color='black') + 
+      geom_text(aes(x=cluster, y=variable, label=round(clust_mean, 2)), size=3, color='black') +
       scale_fill_distiller(palette='PiYG', limits=c(-3,3), oob=scales::squish) +
       theme_minimal() # + theme(axis.text.x = element_text(angle=90, hjust=1))
 
   # col dendro
-  dendro_data_col <- dendro_data(dendro_clusters, type = "rectangle")
-  dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
-      geom_segment(data = segment(dendro_data_col), 
-          aes(x = x, y = y, xend = xend, yend = yend))
-  plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
-              dendro_col, grid::unit(0.2, "null"), position = "top")
-  dendro_plot <- ggdraw(plot_dendroheat) # + draw_label(label=cell_type, x = 0.95, y = 0.95, hjust = 0.95, vjust = 0.95, size=40) 
+  if (dendro) {
+    dendro_data_col <- dendro_data(dendro_clusters, type = "rectangle")
+    dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
+        geom_segment(data = segment(dendro_data_col), 
+            aes(x = x, y = y, xend = xend, yend = yend))
+    plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
+                dendro_col, grid::unit(0.2, "null"), position = "top")
+    dendro_plot <- ggdraw(plot_dendroheat)
+  }
   
   # annotation table
   tt <- ttheme_default(core=list(fg_params = list(fontsize=10), colhead=list(fg_params = list(fontsize=10, parse=TRUE))))
@@ -644,7 +638,11 @@ all_plots <- function(umap_fcs_dt, cell_type) {
     data.table(table(day,cluster, t_type, k562))][,
       list(cluster, pct=N/sum(N)), by=c('k562','day','t_type')]
   
-  day_cluster_total_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
+  if (dendro) {
+    day_cluster_total_pct_dt[, cluster := factor(cluster, levels = cluster_names)]
+  } else {
+    day_cluster_total_pct_dt[, cluster := factor(cluster, levels = as.character(1:max_cluster))]
+  }
   
   clusters_by_day <- ggplot(day_cluster_total_pct_dt[k562=='cd19+'], aes(
       x=cluster, 
@@ -654,7 +652,7 @@ all_plots <- function(umap_fcs_dt, cell_type) {
     geom_text(aes(label=round(pct*100)), size=3, color='white') +
     facet_grid(k562+t_type~., scales='free') +
 
-    scale_fill_viridis_b('',direction=1, limits=c(0, 0.6)) +
+    scale_fill_viridis_c('',direction=1, limits=c(0, 0.6)) +
     labs(title='Percent of cells in each day by cluster', y='Day',
       subtitle='(rows sum to 100%)') +
     theme_minimal() + ggtitle(paste('Percent of ',as.character(cell_type),' cells in each day by cluster'))
@@ -665,8 +663,11 @@ all_plots <- function(umap_fcs_dt, cell_type) {
       list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
         pct_delta := scale(pct), by=c('car','k562','t_type','day')]
   
-  car_cluster_day_indiv_k562_total_pct_dt[,
-  cluster := factor(cluster, levels = cluster_names)]
+  if (dendro) {
+    car_cluster_day_indiv_k562_total_pct_dt[, cluster := factor(cluster, levels = cluster_names)] 
+  } else {
+    car_cluster_day_indiv_k562_total_pct_dt[, cluster := factor(cluster, levels = as.character(1:max_cluster))]
+  }
   
   car_cluster_day_indiv_k562_total_pct_dt$day <- factor(car_cluster_day_indiv_k562_total_pct_dt$day, levels=c('0','6','15','24','33'))
   
@@ -685,10 +686,10 @@ all_plots <- function(umap_fcs_dt, cell_type) {
       theme_minimal() + ggtitle(paste(as.character(cell_type),' CAR enrichment\nper day per cluster')) 
   
   # print all plots and table
-  plot_grid(dendro_plot, clusters_by_day, cars_by_cluster, tbl, labels = c('A', 'B', 'C', 'D'), nrow=4, rel_heights = c(1/8, 1/8, 1/2, 1/8))
+  plot_grid(var_heatmap, clusters_by_day, cars_by_cluster, tbl, labels = c('A', 'B', 'C', 'D'), nrow=4, rel_heights = c(1/8, 1/8, 1/2, 1/8))
 } 
 
-all_plots(umap_cd8_fcs_dt, 'CD8')
+all_plots(umap_cd8_fcs_dt, 'CD8', dendro=F)
 ```
 
 ### CD4 Cluster Plots
