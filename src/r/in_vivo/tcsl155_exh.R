@@ -187,11 +187,11 @@ exh_opt_cd8$marker_thresholds <- cd8_marker_pos_threshold
 
 fwrite(exh_dt, 
        compress='gzip', 
-       file=file.path(here::here('..','data','exh.sampled.csv.gz')))
+       file=file.path(here::here('..','data','tcsl155_exh.sampled.csv.gz')))
 
 save(
   'exh_opt_cd4',
   'exh_opt_cd8',
-  file=file.path(here::here('..','data','exh.sampled.Rdata')))
+  file=file.path(here::here('..','data','tcsl155_exh.sampled.Rdata')))
 
 
