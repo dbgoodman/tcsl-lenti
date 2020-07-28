@@ -120,13 +120,11 @@ load_exh_data <- function(experiment_dir, marker_pos_threshold, max_sample=Inf) 
 # CD4 ======
 
 cd4_marker_pos_threshold <- list(
-  cd4=1000,
-  cd8=1000,
-  tim3=1000,
-  gfp=1000,
-  lag3=1000,
-  pd1=1000,
-  cd39=1000)
+  tim3_t=1000,
+  gfp_t=1300,
+  lag3_t=700,
+  pd1_t=1400,
+  cd39_t=1000)
 
 #cd4_dir <- "flow/TCSL105 ALL FILES/Exhaust"
 #AWS Version:
@@ -137,13 +135,11 @@ cd4_dir <- "s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl155/exh/cd4"
 # CD8 ======
 
 cd8_marker_pos_threshold <- list(
-  cd4=1000,
-  cd8=1000,
-  tim3=1000,
-  gfp=1000,
-  lag3=1000,
-  pd1=1000,
-  cd39=1000)
+  tim3_t=1000,
+  gfp_t=1300,
+  lag3_t=700,
+  pd1_t=1000,
+  cd39_t=1000)
 
 #cd8_dir <- "flow/2019.06.07 TCSL091 ALL FILES/Exhaust"
 #AWS Version:
