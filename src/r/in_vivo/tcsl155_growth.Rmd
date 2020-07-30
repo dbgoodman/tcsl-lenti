@@ -14,7 +14,7 @@ library(ggplot2)
 library(cowplot)
 ```
 
-```{r cars}
+```{r cars, fig.width=10, fig.height=6}
 growth_dt <- fread("~/s3-roybal-tcsl/lenti_screen_compiled_data/data/invivo/tcsl155_growth.csv")
 
 growth_dt <- rbind(
@@ -24,14 +24,14 @@ growth_dt <- rbind(
         notes='', Area=0, Area2=0)]),
     growth_dt)
 
-growth_summ_dt <- data.table(growth_dt)[, {
+growth_summ_dt <- data.table(growth_dt)[!is.na(Area), {
     bps= boxplot.stats(log(Area))$stats
     list(var='Area', lo=bps[1],lhinge=bps[2],uhinge=bps[3],hi=bps[4], sd=sd(Area))
     },
     by=.(car, day)]
 
 growth_summ_dt <- rbind(growth_summ_dt, 
-    data.table(growth_dt)[, {
+    data.table(growth_dt)[!is.na(Area2), {
         bps= boxplot.stats(log(Area2))$stats
         list(var='Area2', lo=bps[1],lhinge=bps[2],uhinge=bps[3],hi=bps[4], sd=sd(Area))
         },
@@ -49,7 +49,7 @@ plot_grid(
             growth_dt[day>0], aes(x=car, y=Area2, color=day, group=interaction(day, car)), position='dodge') + 
         geom_boxplot() + 
         geom_point(position = position_jitterdodge()) + theme_bw(),
-    ncol=2, labels=c('Area=LWD','Area=LWW'))
+    ncol=2, labels=c('Area=0.5 x LWD','Area=0.5 x LWW'))
     
 plot_grid(
     ggplot(
@@ -65,7 +65,7 @@ plot_grid(
         facet_wrap(.~car) +
         theme_bw(), 
     scale=0.9,
-    ncol=2, nrow=1, labels=c('Area=LWD','Area=LWW'))
+    ncol=2, nrow=1, labels=c('Area=0.5 x LWD','Area=0.5 x LWW'))
 
 growth_dt[day  > 0, Area_from_d11 := Area - Area[day == 11], by=.(mouse, cage)]
 growth_dt[day  > 0, Area2_from_d11 := Area2 - Area2[day == 11], by=.(mouse, cage)]
@@ -84,11 +84,21 @@ plot_grid(
         facet_wrap(.~car) +
         theme_bw(), 
     scale=0.9,
-    ncol=2, nrow=1, labels=c('Area, vs d11=LWD','Area, vs d11=LWW'))
+    ncol=2, nrow=1, labels=c('Area, vs d11=0.5 x LWD','Area, vs d11=0.5 x LWW'))
 
-# ggplot(growth_dt) + 
-#     geom_line(aes(y=log(Area2), x=day, color=car, group=interaction(mouse, cage))) + 
-#     facet_wrap(.~car) + 
-#     geom_ribbon(data=growth_summ_dt, aes(x=day, ymin=lo, ymax=hi, color=car, fill=car), 
-#     alpha=0.2)
+plot_grid(
+    ggplot(
+            growth_dt,
+            aes(y=Area, x=day, color=car, group=interaction(mouse, cage))) + 
+        geom_line(show.legend = FALSE) + 
+        facet_wrap(.~car) +
+        theme_bw(),
+    ggplot(
+            growth_dt,
+            aes(y=Area2, x=day, color=car, group=interaction(mouse, cage))) + 
+        geom_line(show.legend = FALSE) + 
+        facet_wrap(.~car) +
+        theme_bw(), 
+    scale=0.9,
+    ncol=2, nrow=1, labels=c('Area=0.5 x LWD','Area=0.5 x LWW'))
 ```

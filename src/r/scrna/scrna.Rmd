@@ -354,6 +354,74 @@ umap_plot <- function(subset, plot_title_text="", assay, cluster_resolution) {
   return(umap_plots)
 }
 
+umap_plot_by_car <- function(subset, plot_title_text="", assay, cluster_resolution) {
+
+  Idents(subset) <- 'car'
+  subset.markers <- FindAllMarkers(subset,
+  features = VariableFeatures(subset),
+  min.pct = 0.5, logfc.threshold = 0.25)
+  
+  top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+  
+  top_genes_plot <- ggplot(top.subset.markers) + 
+    geom_bar(aes(y=avg_logFC, x=reorder(gene, avg_logFC)), stat='identity') + 
+    facet_wrap(~cluster, scales='free', ncol=3) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  
+  cluster_pct_plot <- ggplot(
+      data.table(subset@meta.data)[
+        CD4v8 != 'intermediate', .N, 
+        by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
+          list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
+          by=c('car', 'CD4v8', 'k_type')]) + 
+    geom_bar(aes_string(x='cluster', y='frac', fill='frac'), stat='identity', color='grey50') +
+    scale_fill_distiller(palette='YlGnBu', direction=1) +
+    facet_grid(k_type+t_type~car) + 
+    theme_bw() +
+    coord_flip()
+  
+  plot_title <- ggdraw() + 
+    draw_label(
+      plot_title_text,
+      fontface = 'bold',
+      x = 0,
+      hjust = 0
+    ) +
+    theme(
+      # add margin on the left of the drawing canvas,
+      # so title is aligned with left edge of first plot
+      plot.margin = margin(0, 0, 0, 7)
+    )
+  
+  gene_heatmap <- DoHeatmap(subset,
+        features = unique(
+          (top.subset.markers %>% group_by(cluster) 
+            %>% top_n(n=5, wt= avg_logFC))$gene))
+  
+  car_density_map <- ggplot(
+      cbind(subset@meta.data, Embeddings(object = subset[["umap"]]))) + 
+    geom_density2d(aes(x=UMAP_1, y=UMAP_2)) + facet_wrap(~car) +
+    theme_minimal()
+      
+  umap_plots <- plot_grid(
+    plot_grid(
+      plot_title,
+      car_density_map,
+      cluster_pct_plot,
+      rel_heights=c(0.2,1.25,1),
+      ncol=1),
+        plot_grid(
+      gene_heatmap,
+      top_genes_plot,
+      ncol=1,
+      rel_heights=c(3,2)),
+    ncol=2)
+  
+  return(umap_plots)
+}
+
 umap_subset <- function(this_subset, 
     plot_title_text="", assay='RNA', cluster_resolution=0.8, save=T, rerun=F) {
   
@@ -408,33 +476,45 @@ umap_subset <- function(this_subset,
   
   subset_umap_plot <- umap_plot(this_subset, plot_title_text, assay, cluster_resolution)
   
+  car_umap_plot <- umap_plot_by_car(this_subset, plot_title_text, assay, cluster_resolution)
+  
   if ((rerun | (!file.exists(rds_file))) & save)
     saveRDS(this_subset, file = rds_file)
       
-  return(list(plots=subset_umap_plot, rds_file=rds_file))
+  return(list(
+    cluster_plot=subset_umap_plot,
+    car_plot=car_umap_plot,
+    rds_file=rds_file))
 }
 
-subset_fxns= list(
-    function(obj) obj,
-    function(obj) subset(obj, subset = (CD4v8 == 'CD4')),
-    function(obj) subset(obj, subset = (CD4v8 == 'CD8')),
-    function(obj) subset(obj, subset = (k_type == 'cd19+')),
-    function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4')),
-    function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8')))
-subset_names= c('all cells','CD4','CD8','CD19','CD4 CD19','CD8 CD19')
-
-umap_plots <- data.table(subset_name= subset_names, subset_fxn_num=1:6)
-
-umap_plots[, ADT := list(list(
-    umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))), 
-    by='subset_name']
-umap_plots[, RNA := list(list(
-    umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
-    by='subset_name']
-
-saveRDS(umap_plots, file = here::here(
+if (!reload_data && !('umap_plots' %in% ls()) )
+{
+  umap_plots <- readRDS(here::here(
     '..','..','scrnaseq_tcsl154',
-    'rds','scrna.umap.plots.rds'))
+    'rds','scrna.umap.plots.rds')) 
+} else {
+  subset_fxns= list(
+      function(obj) obj,
+      function(obj) subset(obj, subset = (CD4v8 == 'CD4')),
+      function(obj) subset(obj, subset = (CD4v8 == 'CD8')),
+      function(obj) subset(obj, subset = (k_type == 'cd19+')),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4')),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8')))
+  subset_names= c('all cells','CD4','CD8','CD19','CD4 CD19','CD8 CD19')
+  umap_plots <- data.table(subset_name= subset_names, subset_fxn_num=1:6)
+  
+  umap_plots[, ADT := list(list(
+      umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))), 
+      by='subset_name']
+  umap_plots[, RNA := list(list(
+      umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
+      by='subset_name']
+
+  
+  saveRDS(umap_plots, file = here::here(
+      '..','..','scrnaseq_tcsl154',
+      'rds','scrna.umap.plots.rds'))
+}
 
 ```
 
@@ -450,16 +530,11 @@ if (!('umap_plots' %in% ls()))
     'rds','scrna.umap.plots.rds'))
 
 umap_plots[, print(ADT[[1]]), by='subset_name']
-
-if (!('scrna.hashed' %in% ls()))
-  scrna.hashed <- readRDS(here::here(
-    '..','..','scrnaseq_tcsl154',
-    'rds','scrna.hashed.rds'))
 ```
 
 ### RNA plots
 
 ```{r, fig.width=18, fig.height=10}
 
-umap_plots[, print(RNA[[1]]), by='subset_name']
+umap_plots[, print(RNA[[1]]$cluster_plot), by='subset_name']
 ```
