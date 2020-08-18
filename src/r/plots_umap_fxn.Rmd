@@ -531,7 +531,7 @@ car_clusters_by_square(umap_cd4_fcs_dt, "CD4", cd4_colnames)
 
 ### CD8 Cluster Plots
 ```{r, fig.width=15, fig.height=30}
-all_plots <- function(umap_fcs_dt, cell_type, dendro=T) {
+  all_plots <- function(umap_fcs_dt, cell_type, dendro=T) {
   cluster_pct_vars <- c(paste0(
     names(channel_map),'_t'), 
     'FSC-A','SSC-A','donor','cd19')

@@ -163,9 +163,6 @@ hto.dist.mtx <- as.matrix(parDist(t(
 hto_subset <- RunTSNE(hto_subset, 
   distance.matrix = hto.dist.mtx,
   perplexity = 100)
-
-DimPlot(hto_subset, label=T)
-DimPlot(hto_subset, split='hash.ID',ncol=4)
 ```
 
 ## Analyzing RNA Data for TCSL 155
@@ -200,6 +197,18 @@ if (!('scrna.hashed' %in% ls()))
   scrna.hashed <- readRDS(here::here(
     '..','..','scrnaseq_tcsl154',
     'rds','scrna.hashed.rds'))
+
+# old_idents <- Idents(scrna.hashed)
+# scrna.hashed@meta.data[['car_k_type']] <- paste(
+#   scrna.hashed@meta.data[['car']], 
+#   scrna.hashed@meta.data[['k_type']], sep='_')
+# Idents(scrna.hashed) <- 'car_k_type'
+# DimPlot(scrna.hashed, label=T)
+
+ggplot(data.table(hto_subset@meta.data)[!is.na(k_type) & !is.na(car)]) + 
+  geom_bar(aes(x=car, fill=k_type)) + 
+  facet_wrap(~k_type, scale='free_x') + 
+  theme_minimal()
 
 DefaultAssay(scrna.hashed) <- "ADT"
 scrna.hashed <- NormalizeData(scrna.hashed, assay = "ADT", normalization.method = "CLR")
@@ -286,6 +295,75 @@ scrna.hashed@meta.data[['CD4v8']] <- projected.metrics$cd_category
 if (reload_data) saveRDS(scrna.hashed, file = here::here(
     '..','..','scrnaseq_tcsl154',
     'rds','scrna.hashed.rds'))
+```
+
+## CiteSeq Subsetting
+
+```{r fig.width=15, fig.height=8, unit="inches"}
+
+make_citeseq_dt <- function(obj_subset) {
+  return(data.table(cbind(t(obj_subset@assays$ADT@data), obj_subset@meta.data))[car != 'K_only'])
+}
+
+make_pct_grid <- function(
+    obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, split=c('car','k_type','CD4v8')) {
+ pct_dt <- obj_subset[,
+  quadrant := factor((get(x_axis) > x_cutoff)*2 + (get(y_axis) > y_cutoff), 
+    levels=c(0:3), label=c('BL','TL','BR','TR'))][, 
+      .N, by=c('quadrant', split)][,
+        list(pct= N/sum(N), count= N, quadrant), by=split]
+ 
+pos_dt <- data.table(
+  quadrant=c('BL','TL','BR','TR'),
+  x=c(-Inf, -Inf, Inf, Inf),
+  y=c(-Inf,Inf,-Inf,Inf))
+ 
+  pct_dt <- pos_dt[pct_dt, on='quadrant']
+  
+  return(pct_dt)
+}
+
+scrna.cd4 <- subset(scrna.hashed, subset= (CD4v8 == 'CD4'))
+scrna.cd8 <- subset(scrna.hashed, subset= (CD4v8 == 'CD8'))
+
+citeseq_density_2d <- function(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, title=paste0(x_axis,' vs ',y_axis)) {
+  ggplot(obj_subset, aes_string(x=x_axis, y=y_axis)) + 
+      stat_density_2d(aes(fill = stat(ndensity)), geom = "raster", contour = FALSE) + 
+      scale_fill_distiller(palette='PuRd', direction=1) + facet_grid(k_type~car) +  
+      geom_hline(yintercept=y_cutoff) + geom_vline(xintercept=x_cutoff) + 
+      scale_y_continuous(expand = c(0, 0)) + 
+      scale_x_continuous(expand=c(0,0)) + 
+      labs(title=title) +
+      geom_text(
+        data=make_pct_grid(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff), 
+        size=3, 
+        aes(x=x, y=y, hjust=(x > 0), vjust=(y > 0), label=paste0(as.character(round(pct,3)*100),'%\n','(',count,')'))) +
+      theme_minimal()
+}
+
+plot_grid(
+  citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD4 RO v 62L'),
+  citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD8 RO v 62L'),
+  ncol=1
+)
+
+plot_grid(
+  citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD4 RO v CD27'),
+  citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD8 RO v CD27'),
+  ncol=1
+)
+
+plot_grid(
+  citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD4, RO+, 62L v CD27'),
+  citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
+  ncol=1
+)
+
+plot_grid(
+  citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD4, RO+, 62L v CCR7'),
+  citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD8, RO+, 62L v CCR7'),
+  ncol=1
+)
 ```
 
 ## Make UMAP plots and objects for each subset

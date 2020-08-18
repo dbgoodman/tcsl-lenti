@@ -1975,7 +1975,7 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
 
 
 ggsave(here::here('..','figs','pooled','abund_over_time.pdf'), fig2_abundance_over_time,
-       height=3, width=8)
+       height=3, width=8, useDingbats=FALSE)
 
 fig2_abundance_over_time
 ```
@@ -2029,7 +2029,7 @@ cytokine_panel <- ggplot(cytokine.pct.pos[assay %in% c("IL2","IFNy")]) +
         legend.position=c(0.99,1.01))
 
 ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel,
-       height=3, width=8)
+       height=3, width=8, useDingbats=FALSE)
 
 cytokine_panel
 ```
@@ -2100,7 +2100,7 @@ cytokine_panel <- ggplot(cytokine.pct.pos.melt) +
   expand_limits(x = 0, y = 0)
 
 ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel,
-       height=3, width=8)
+       height=3, width=8, useDingbats=FALSE)
 
 cytokine_panel
 
@@ -2155,7 +2155,7 @@ plot_abcde <- plot_grid(plot_abcd,
   rel_heights=c(1.1,0.3), labels=c('A','E'))
 
 ggsave(here::here('..','figs','compiled','fig2.pdf'), plot_abcde,
-       height=15, width=11)
+       height=15, width=11, useDingbats=FALSE)
 
 plot_abcde
 ```
@@ -2224,7 +2224,7 @@ pca.pos.sort.group.plot <- ggplot(projected.metrics,
 
 
 ggsave(here::here('..','figs','new_pca.pdf'), pca.pos.sort.group.plot,
-       height=4, width=5)
+       height=4, width=5, useDingbats=FALSE)
 
 pca.pos.sort.group.plot
 ```
