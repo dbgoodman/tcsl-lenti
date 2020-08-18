@@ -52,6 +52,17 @@ map_day_0 <- function(df) {
   ))
 }
 
+map_day_0 <- function(df) {
+  return(rbind(
+    df[k562!='none'], #gets all cd19+-
+    #df[rep(keep_none, .N) & k562=='none' & day > 0], 
+    df[k562=='none' & day == 0][, k562 := 'cd19+'], #none and day 0, assign as 19+
+    df[k562=='none' & day == 0][, k562 := 'cd19-'], #none and day 0, assign as 19-
+    df[car =='untrans' & day != 0][, k562 := 'cd19+'], #add back untrans
+    df[car =='untrans' & day != 0][, k562 := 'cd19-']
+  ))
+}
+
 '%notin%' <- Negate('%in%')
 ```
 
@@ -60,10 +71,35 @@ map_day_0 <- function(df) {
 #filter diff_dt by cd4/8 type, cd19+ (map day 0), donor == 1 or 2
 
 #cd4, cd19+, donor 
-diff_dt_cd4 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd4', k562=='cd19+', donor == 2)
+diff_dt_cd4 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd4', k562=='cd19+')
 
 #cd8, cd19+, donor
-diff_dt_cd8 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd8', k562=='cd19+', donor == 2)
+diff_dt_cd8 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd8', k562=='cd19+')
+
+
+## Remove car/day combinations that aren't in both donors, by t_type
+cd4_matches <- plyr::match_df(diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day) #43 matches
+
+cd8_matches <- plyr::match_df(diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day) #40 matches
+
+#filter diff_dt by matched combinations
+diff_dt_cd4 <- plyr::match_df(diff_dt_cd4, cd4_matches)
+diff_dt_cd8 <- plyr::match_df(diff_dt_cd8, cd8_matches)
+```
+
+## Double checking car/day combinations that aren't in both donors
+```{r, eval=F}
+diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
+#Donor 1 CD4: 43 combinations available (33 BAFF-R and CD28 missing)
+
+diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
+#Donor 1 CD8: 40 combinations available (24 zeta, 33 zeta, BAFF-R, TACI, and KLRG1 missing)
+
+diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
+#Donor 2 CD4: all 45 combinations available
+
+diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
+#Donor 2 CD8: 42 combinations available (33 zeta and KLRG1 missing)
 ```
 
 # UMAP
@@ -157,8 +193,8 @@ run_umap <- function(dt, chosen_dist, chosen_n_neighbor, sample_n, umap_vars,
 Scaling this to 200 events per well and checking CAR/condition separation.
 
 ```{r, eval=redo_umap_clustering}
-umap_cd4_fcs_dt <- run_umap(diff_dt_cd4, 0.005, 15, 200, umap_vars)
-umap_cd8_fcs_dt <- run_umap(diff_dt_cd8, 0.005, 15, 200, umap_vars)
+umap_cd4_fcs_dt <- run_umap(diff_dt_cd4, 0.005, 15, 1000, umap_vars)
+umap_cd8_fcs_dt <- run_umap(diff_dt_cd8, 0.005, 15, 1000, umap_vars)
 
 fwrite(umap_cd4_fcs_dt, 
   compress='gzip', 
@@ -236,7 +272,6 @@ ggumap(umap_cd8_fcs_dt, umap_cd8_cluster_dt)
 
 #CD4
 ggumap(umap_cd4_fcs_dt, umap_cd4_cluster_dt)
-
 ```
 
 ### UMAP Color Plots
@@ -446,7 +481,7 @@ all_plots <- function(umap_fcs_dt, umap_cluster_dt, cell_type, dendro=T) {
   tbl$widths <- unit(rep(1/ncol(tbl), ncol(tbl)), "npc")
   
   # CLUSTERS BY DAY
-  day_cluster_total_pct_dt <- map_day_0(umap_fcs_dt)[,
+  day_cluster_total_pct_dt <- umap_fcs_dt[,
     data.table(table(day,cluster, t_type, k562))][,
       list(cluster, pct=N/sum(N)), by=c('k562','day','t_type')]
   
@@ -468,7 +503,7 @@ all_plots <- function(umap_fcs_dt, umap_cluster_dt, cell_type, dendro=T) {
       subtitle='(rows sum to 100%)') +
     theme_minimal() + ggtitle(paste('Percent of ',as.character(cell_type),' cells in each day by cluster'))
   # CARs BY CLUSTER/DAY
-  car_cluster_day_indiv_k562_total_pct_dt <- map_day_0(umap_fcs_dt)[,
+  car_cluster_day_indiv_k562_total_pct_dt <- umap_fcs_dt[,
     data.table(table(car,cluster,k562,t_type,day))][,
       list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
         pct_delta := scale(pct), by=c('car','k562','t_type','day')]
@@ -496,7 +531,7 @@ all_plots <- function(umap_fcs_dt, umap_cluster_dt, cell_type, dendro=T) {
       theme_minimal() + ggtitle(paste(as.character(cell_type),' CAR enrichment\nper day per cluster')) 
   
   # print all plots and table
-  plot_grid(umap_plot, umap_heatmap, var_heatmap, clusters_by_day, cars_by_cluster, tbl, labels = c('A', 'B', 'C', 'D', 'E', 'F'), nrow=6, rel_heights = c(3/12, 3/12, 1/12, 1/12, 3/12, 1/12))
+  plot_grid(umap_plot, umap_heatmap, var_heatmap, clusters_by_day, cars_by_cluster, tbl, labels = "AUTO", align = "h", nrow=6, rel_heights = c(3/12, 3/12, 1/12, 1/12, 3/12, 1/12))
 } 
 
 #CD8
