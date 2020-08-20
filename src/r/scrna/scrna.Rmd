@@ -301,8 +301,12 @@ if (reload_data) saveRDS(scrna.hashed, file = here::here(
 
 ```{r fig.width=15, fig.height=8, unit="inches"}
 
-make_citeseq_dt <- function(obj_subset) {
-  return(data.table(cbind(t(obj_subset@assays$ADT@data), obj_subset@meta.data))[car != 'K_only'])
+make_citeseq_dt <- function(obj_subset, assay='ADT') {
+  return(data.table(cbind(t(obj_subset@assays[[assay]]@data), obj_subset@meta.data))[car != 'K_only'])
+}
+
+make_rna_dt <- function(obj_subset) {
+  return(data.table(cbind(t(obj_subset@assays$RNA@data), obj_subset@meta.data))[car != 'K_only'])
 }
 
 make_pct_grid <- function(
@@ -366,6 +370,54 @@ plot_grid(
 )
 ```
 
+# correlation plots
+
+```{r}
+library(spatstat)
+library(dendextend)
+library(ggdendro)
+
+
+corr_plots <- function(subset_obj, assay='ADT') {
+  
+  DefaultAssay(subset_obj) <- assay
+  
+  citeseq_cor <- make_citeseq_dt(subset_obj, assay=assay)[, 
+      data.table(cor(.SD[, c(rownames(subset_obj@assays[[assay]]@data)), with=F]), keep.rownames=T)]
+  
+  #remove NA rows
+  citeseq_cor <- na.omit(citeseq_cor[, which(colSums(is.na(citeseq_cor)) != (nrow(citeseq_cor) - 1)), with=F])
+   
+  # generate heirarchical clustering
+  dendro_m <- as.matrix(citeseq_cor[, -1])
+  rownames(dendro_m) <- unlist(citeseq_cor[,1])
+  dendro <- as.dendrogram(hclust(d = dist(x = dendro_m)))
+  dendro <- rotate(dendro, names(sort(rowMeans(dendro_m))))
+  
+  # row order from clustering
+  citeseq_cor_melt <- melt(citeseq_cor, id.vars='rn')
+  
+  # melt and reorder rows
+  citeseq_cor_melt$rn <- factor(
+      citeseq_cor_melt$rn,
+      levels = labels(car_dendro))
+  citeseq_cor_melt$variable <- factor(
+      citeseq_cor_melt$variable,
+      levels = labels(car_dendro))
+  
+  # remove markers that are not strongly correlated with anything
+  var_has_corr <- citeseq_cor_melt[variable != rn, max(abs(value)) > 0.075, by='variable'][V1 == T]$variable
+  citeseq_cor_melt_subset <- citeseq_cor_melt[variable %in% var_has_corr & rn %in% var_has_corr]
+  
+  average_corr <- ggplot(copy(citeseq_cor_melt_subset)[value > 0.5, value := 0.5]) + 
+    geom_tile(aes(x=rn, y=variable, fill=value)) + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+    scale_fill_distiller(palette='PRGn', limits=c(-0.5, 0.5))
+  
+  return(average_corr)
+}
+```
+
 ## Make UMAP plots and objects for each subset
 
 ```{r umap_each_subset, eval=reload_data}
@@ -376,9 +428,9 @@ if (!('scrna.hashed' %in% ls()))
 
 umap_plot <- function(subset, plot_title_text="", assay, cluster_resolution) {
 
-    subset.markers <- FindAllMarkers(subset,
-    features = VariableFeatures(subset),
-    min.pct = 0.5, logfc.threshold = 0.25)
+  subset.markers <- FindAllMarkers(subset,
+  features = VariableFeatures(subset),
+  min.pct = 0.5, logfc.threshold = 0.25)
   
   top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
   
