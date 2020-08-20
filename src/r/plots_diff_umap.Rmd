@@ -246,7 +246,7 @@ ggumap <- function(df, df_cluster) {
   geom_label(data=df_cluster, aes(
     x=mean_umap_1, y=mean_umap_2,
     label=paste(cluster,size,sep='\n'), 
-    color=cluster), alpha=0.3) +
+    color=cluster)) +
   theme_minimal() + ggtitle('UMAP by Cluster')
 
   # individual plots
@@ -339,6 +339,18 @@ visualize_params_umap <- function(df) {
 ```
 
 ### Contour Plots
+
+```{r, fig.width=15, fig.height=3}
+#all cars by day
+all_by_day <- function(umap_df) {
+  umap_df %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(. ~ day) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + ggtitle("All Peaks by Day")
+}
+
+all_by_day(umap_cd8_fcs_dt)
+
+all_by_day(umap_cd4_fcs_dt)
+```
+
 ```{r fig.width=15, fig.height=30}
 umap_contour_plots <- function(umap_df){
   #car x day
@@ -373,7 +385,7 @@ all_plots <- function(umap_fcs_dt, umap_cluster_dt, cell_type, dendro=T) {
   geom_label(data=umap_cluster_dt, aes(
     x=mean_umap_1, y=mean_umap_2,
     label=paste(cluster,size,sep='\n'), 
-    color=cluster), alpha=0.3) +
+    color=cluster)) +
   theme_minimal()
   
   #UMAP biomarker Heatmap
@@ -542,23 +554,23 @@ all_plots(umap_cd4_fcs_dt,umap_cd4_cluster_dt, 'CD4', dendro=F)
 ```
 
 ### Labeled Leiden Clusters Map
-```{r fig.width=30, fig.height=22, eval=F}
+```{r fig.width=15, fig.height=8}
 # manually determined 
 
 #CD8
-cd8_diff_by_cluster <- data.frame("cluster" = c(1:12), "cell_type" = c('1-TEM', '2-TSCM', '3-TCM', '4-TSCM', '5-TEM', '6-TTM', '7-TEM', '8-TTM', '9-TEM', '10-TEM', '11-TN', '12-TN'))
+cd8_diff_by_cluster <- data.frame("cluster" = c(1:20), "cell_type" = c('1-TN', '2-TN', '3-TEM', '4-TSCM (cd95-)', '5-TCM', '6-TEM', '7-TEMRA', '8-TEFF (cd27+)', '9-TEM', '10-TEM (cd27+)', '11-TN', '12-TEM', '13-TCM', '14-TEM', '15-TEM (cd27+)', '16-TN', '17-TEM', '18-TEM', '19-TEFF', '20-TN'))
 cd8_diff_by_cluster$cluster <- as.factor(cd8_diff_by_cluster$cluster)
 umap_cd8_fcs_dt <- left_join(umap_cd8_fcs_dt, cd8_diff_by_cluster, by='cluster')
 
 #CD4
-cd4_diff_by_cluster <- data.frame("cluster" = c(1:14), "cell_type" = c('1-TEM', '2-TEM', '3-TEM', '4-TEM', '5-TCM', '6-TN', '7-TN', '8-TCM', '9-TSCM', '10-TEM', '11-TCM', '12-TCM', '13-TSCM','14-TEM'))
+cd4_diff_by_cluster <- data.frame("cluster" = c(1:20), "cell_type" = c('1-TN', '2-TN', '3-TEM', '4-TSCM', '5-TEM', '6-TCM', '7-TEM (cd27+)', '8-TEMRA (cd62l+, cd27+)', '9-TEMRA', '10-TEMRA (cd61l+, cd27+)', '11-TEM (cd27+)', '12-TCM', '13-TEM', '14-TEMRA', '15-TEM (cd27+)', '16-TEM (cd27+)', '17-TEM', '18-TEMRA (cd27+)', '19-TEM', '20-TEM'))
 cd4_diff_by_cluster$cluster <- as.factor(cd4_diff_by_cluster$cluster)
 umap_cd4_fcs_dt <- left_join(umap_cd4_fcs_dt, cd4_diff_by_cluster, by='cluster')
 
 #Labeled Leiden Clusters Map
 visualize_clusters_umap <- function(df) {
   label_clusters_umap <- df %>% group_by(cluster, cell_type) %>% select(umap_1, umap_2) %>% summarize_all(mean)
-  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(cluster)))+geom_point(size=0.1)+facet_grid(car ~ day) +theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=cell_type, size=0.5), data=label_clusters_umap)+guides(colour=FALSE)+ggtitle('Leiden clusters')
+  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(cluster)))+geom_point(size=0.1) +theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=cell_type, size=10), data=label_clusters_umap)+guides(colour=FALSE)+ggtitle('Leiden clusters')
 }
 
 #cd8
@@ -569,23 +581,46 @@ visualize_clusters_umap(umap_cd4_fcs_dt)
 ```
 
 ## Batch Effect (Run when using both donors for UMAP)
-```{r fig.width=20, fig.height=11, eval=F}
+```{r fig.width=20, fig.height=11}
+# bar plot showing points per cluster by donor
+batch_effect_bars <- function(umap_df) {
+  umap_df %>% 
+  group_by(cluster, car, day) %>% 
+  count(donor) %>% rename(donor_count = n) %>% 
+  group_by(cluster, donor) %>% 
+  summarise(Sum = sum(donor_count)) %>% 
+  ggplot(., aes(x=cluster, y=Sum, fill=factor(donor))) + 
+  geom_bar(stat="identity", position = position_dodge()) + 
+  theme_minimal() + 
+  scale_fill_discrete(name="Donor", breaks=c("1", "2"), labels=c("Donor 1", "Donor 2"))
+}
+
+batch_effect_bars(umap_cd8_fcs_dt)
+
+label_donor_umap <- umap_cd8_fcs_dt %>% group_by(donor) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+ggplot(umap_cd8_fcs_dt, aes(x=umap_1, y=umap_2, color=as.factor(donor)))+geom_point(size=0.1,alpha = 0.5, position=position_jitter(h=0.15,w=0.15))+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label(aes(label=donor), data=label_donor_umap, size=5)+guides(colour=FALSE)+ggtitle('UMAP by Donor') + scale_color_viridis(discrete=TRUE)+theme_minimal()
+
+batch_effect_bars(umap_cd4_fcs_dt)
+
+label_donor_umap_cd4 <- umap_cd4_fcs_dt %>% group_by(donor) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+ggplot(umap_cd4_fcs_dt, aes(x=umap_1, y=umap_2, color=as.factor(donor)))+geom_point(size=0.1,alpha = 0.5, position=position_jitter(h=0.15,w=0.15))+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label(aes(label=donor), data=label_donor_umap_cd4, size=5)+guides(colour=FALSE)+ggtitle('UMAP by Donor') + scale_color_viridis(discrete=TRUE)+theme_minimal()
+
+#tile plots
 #cd8
-umap_cd8_fcs_dt %>% group_by(cluster, car, day) %>% count(donor) %>% rename(donor_count = n) %>% group_by(cluster,car,day, donor) %>% summarise(Sum = sum(donor_count)) %>% spread(key = donor, value = Sum) %>% rename(donor1=4, donor2=5) %>% replace(is.na(.), 1) %>% mutate(ratio = donor1/donor2) %>% mutate(ratio = log(ratio)) %>% ggplot(., aes(x=cluster,y=factor(day), fill=ratio)) + geom_tile(colour="white",size=0.25) + scale_fill_gradientn(colors=c('red','white','blue'),values=c(0,.75,1))+ labs(x='Cluster', y='Day') + scale_y_discrete(expand=c(0,0)) + theme_grey(base_size=8) + theme_bw() + theme(legend.text=element_text(face="bold"),axis.ticks=element_line(size=0.4),plot.background=element_blank(),panel.border=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + facet_grid(.~car)
-     
+#umap_cd8_fcs_dt %>% group_by(cluster, car, day) %>% count(donor) %>% rename(donor_count = n) %>% group_by(cluster,car,day, donor) %>% summarise(Sum = sum(donor_count)) %>% spread(key = donor, value = Sum) %>% rename(donor1=4, donor2=5) %>% replace(is.na(.), 1) %>% mutate(ratio = donor1/donor2) %>% mutate(ratio = log(ratio)) %>% ggplot(., aes(x=cluster, y=1, fill=ratio)) + geom_tile(colour="white",size=0.25) + scale_fill_gradientn(colors=c('red','white','blue'),values=c(0,.75,1))+ labs(x='Cluster', y='Day') + scale_y_discrete(expand=c(0,0)) + theme_grey(base_size=8) + theme_bw() + theme(legend.text=element_text(face="bold"),axis.ticks=element_line(size=0.4),plot.background=element_blank(),panel.border=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 
 #cd4
-umap_cd4_fcs_dt %>% group_by(cluster, car, day) %>% count(donor) %>% rename(donor_count = n) %>% group_by(cluster,car,day, donor) %>% summarise(Sum = sum(donor_count)) %>% spread(key = donor, value = Sum) %>% rename(donor1=4, donor2=5) %>% replace(is.na(.), 1) %>% mutate(ratio = donor1/donor2) %>% mutate(ratio = log(ratio)) %>% ggplot(., aes(x=cluster,y=factor(day), fill=ratio)) + geom_tile(colour="white",size=0.25) + scale_fill_gradientn(colors=c('red','white','blue'),values=c(0,.33,1))+ labs(x='Cluster', y='Day') + scale_y_discrete(expand=c(0,0)) + theme_grey(base_size=8) + theme_bw() + theme(legend.text=element_text(face="bold"),axis.ticks=element_line(size=0.4),plot.background=element_blank(),panel.border=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + facet_grid(.~car)
+#umap_cd4_fcs_dt %>% group_by(cluster, car, day) %>% count(donor) %>% rename(donor_count = n) %>% group_by(cluster,car,day, donor) %>% summarise(Sum = sum(donor_count)) %>% spread(key = donor, value = Sum) %>% rename(donor1=4, donor2=5) %>% replace(is.na(.), 1) %>% mutate(ratio = donor1/donor2) %>% mutate(ratio = log(ratio)) %>% ggplot(., aes(x=cluster,y=1, fill=ratio)) + geom_tile(colour="white",size=0.25) + scale_fill_gradientn(colors=c('red','white','blue'),values=c(0,.33,1))+ labs(x='Cluster', y='Day') + theme_grey(base_size=8) + theme_bw() + theme(legend.text=element_text(face="bold"),axis.ticks=element_line(size=0.4),plot.background=element_blank(),panel.border=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 ```
 
 ## Correlation
 
-```{r fig.width=15, fig.height=11, eval=F}
+```{r fig.width=15, fig.height=11}
 library(Hmisc)
 library(ggcorrplot) 
 
 biomarker_corr <- function(df) {
-  biomarkers <- colnames(df)[c(9, 11:15)]
+  biomarkers <- df[, c(9, 11:15)]
   corr <- round(cor(biomarkers),2)
   p.mat <- cor_pmat(biomarkers)
   ggcorrplot(corr, method = "circle", type = "upper", outline.col = "white", p.mat = p.mat, ggtheme= ggplot2::theme_gray, colors = c("#6D9EC1", "white", "#E46726"))
