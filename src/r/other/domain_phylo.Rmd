@@ -1,0 +1,160 @@
+---
+title: "domain_phylo.Rmd"
+output: html_document
+---
+
+Plot domain phylogeny and presence of motifs.
+
+```{r setup, include=FALSE}
+library(phytools)
+library(data.table)
+library(dplyr)
+library(ggdendro)
+library(seqinr)
+library(ggplot2)
+library(phylogram)
+library(ggtree)
+```
+
+## Alignment
+
+Alignment was done with MAFFT webserver.
+
+`https://mafft.cbrc.jp/alignment/server/spool/_ho.200416091310164zWTgaexSpCLucsw7fBEZMlsfnormal.html`
+`% mafft-homologs.rb -N 8 -l -d uniref50 -o '--reorder --auto' -a 600 -e 0.1 -s input `
+Tree was made with `UPGMA`.
+
+## Make Tree
+```{r cars}
+
+data.dir <- tcsl.dir <- here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data','other')
+
+tree <- ggtree::read.tree(text=paste(c(readLines(
+  file.path(data.dir, 'mafft_pilot_lib.clustal.newick'))), 
+  collapse="\n"))
+
+#changing tip label names
+#tree$tip.label.clean <- 
+
+# set xlim
+#https://guangchuangyu.github.io/2016/10/xlim_tree-set-x-axis-limits-for-only-tree-panel/
+d <- data.frame(
+  label= tree$tip.label,
+  fasta_name= gsub('\\n\\d+_(.*)\\n', '\\1', tree$tip.label),
+  tip.label.clean= gsub('\\n\\d+_([^_]*).*\\n', '\\1', tree$tip.label))
+```
+
+## Add in domain annotations
+
+```{r}
+
+csv.dir <- here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data','csv')
+
+# domain annotations from larger library
+domain_annot <- fread(file.path(csv.dir, 'domain_annotations.csv'))
+
+# names of domains to get uniprot IDs
+domain_names <- fread(file.path(csv.dir, 'costim_table.csv'), fill=T)
+
+# get domain sequences for annotation matching
+domain_seqs <- fread(file.path(csv.dir, 'all_domains.csv'))
+
+# get synthesized sequences from pilot
+domain_synth_seqs <- read.fasta(
+  file.path(data.dir, 'updated_pilot_lib.fa'), seqtype='AA', as.string=T)
+domain_synth_seqs <-data.table(
+ fasta_name=names(domain_synth_seqs), seq=unlist(domain_synth_seqs))
+
+merged_dom_dt <- domain_seqs[domain_names,
+  on=c(mnemonic='uniprot'), nomatch=NA][
+    domain_synth_seqs, on='fasta_name']
+
+# map motifs to domains
+motif_table <- domain_annot[domain_names,
+  on=c(mnemonic='uniprot'), nomatch=NA][
+    source != 'ens_protvar'][,
+      .N, by='orig_name']
+
+#original motif groupings
+# motif_groupings <- c(
+#   'MAPK','PP2A','ITIM','ITSM','PDZ','PTB',
+#   'SH2_GRB2','SH2_SRC','SH2_STAT5','SH3',
+#   'TRAF2','TRAF6','PKB')
+
+# reduced set
+motif_groupings <- c(
+  'ITIM','ITSM','SH2_GRB2','SH2_SRC','SH3',
+  'TRAF2','TRAF6','PKB')
+
+motif_annot_subset <- domain_annot[domain_names,
+  on=c(mnemonic='uniprot'), nomatch=NA][
+    !is.na(real_name) & 
+      !(source %in% c('ens_protvar','phosphosite')) &
+        motif_name != 'phos-unsp'][
+      grep(paste0(motif_groupings, collapse='|'), motif_name)]
+
+motif_annot_subset[, motif_group := gsub(
+  paste0('.*(', paste0(motif_groupings, collapse='|'),').*'),
+  '\\1',
+  motif_name)]
+
+motif_annot_subset[, source := factor(
+  source, 
+  levels=c('uniprot','netphos','elm_curated','elm_predict'), 
+  ordered=T)]
+
+motif_annot_subset[, max_source := min(source), by=.(motif_group, fasta_name)]
+motif_annot_subset[, predicted := max_source=='elm_predict', by=.(motif_group, fasta_name)]
+motif_annot_subset[, predicted := factor(predicted, labels=c('curated','predicted'))]
+
+motif_heatmap <- ggplot(
+    tidyr::complete(motif_annot_subset[label %in% d$label], motif_group, label)) + 
+  geom_tile(aes(
+    x=factor(motif_group, labels=gsub('_',', ',unique(motif_group))),
+    y=factor(label, levels=d$label, labels=d$tip.label.clean), 
+    fill=predicted), color='gray80') +
+  scale_fill_manual('', na.value = 'white',
+    values=c(curated='cornsilk4',predicted='cornsilk2'),
+    labels=c(curated='Curated', predicted='Predicted')) +
+  theme_bw() +
+  theme(
+    axis.text.x=element_text(angle = -90, hjust = 0), 
+    axis.ticks.y = element_blank()) +
+  labs(y='Domain Sequence Phylogeny', x='Presence of Signaling Motif')
+
+```
+
+```{r, fig.height=8, fig.width=4}
+
+library(ggdendro)
+library(cowplot)
+
+dendro_cars <- as.dendrogram(tree)
+
+tree_plot <- ggtree(tree) %<+% d + 
+  geom_tiplab(aes(label=tip.label.clean)) +
+  xlim(NA, 1.5)
+
+# col dendro
+# https://github.com/tleonardi/ggheatmap/blob/master/R/ggheatmap.R
+dendro_data_row <- dendro_data(dendro_cars, type = "rectangle")
+dendro_row <- axis_canvas(motif_heatmap, axis = "y", coord_flip=T) + 
+    geom_segment(data = segment(dendro_data_row), 
+        aes(x = x, y = -y, xend = xend, yend = -yend)) + 
+    coord_flip()
+plot_motifheat <- insert_yaxis_grob(motif_heatmap, 
+            dendro_row, grid::unit(0.3, "null"), position = "left")
+grob_motif_heat <- ggdraw(plot_motifheat)
+grob_motif_heat
+
+ggsave(here::here('..','figs','domain_phylo_motif.pdf'), 
+  grob_motif_heat, height=8, width=4, useDingbats=FALSE)
+
+
+```

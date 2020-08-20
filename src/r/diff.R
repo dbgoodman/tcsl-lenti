@@ -234,5 +234,5 @@ system('aws s3 sync \\
   --exclude "*" \\
   --include "*.Rdata" \\
   --include "*.csv*" \\
-  ~/local-tcsl/data s3://roybal-tcsl//lenti_screen_compiled_data/data')
+  ~/local-tcsl/data s3://roybal-tcsl/lenti_screen_compiled_data/data')
 

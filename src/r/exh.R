@@ -1,8 +1,8 @@
-require(data.table)
-require(scales)
-require(here)
-require(flowCore)
-require(flowWorkspace)
+library(data.table)
+library(scales)
+library(here)
+library(flowCore)
+library(flowWorkspace)
 
 parent_folder = here::here('..','..')
 
@@ -31,7 +31,7 @@ load_platemaps <- function(exh_dir) {
 }
 
 load_fcs <- function(exh_dir) {
-  exh_fcs_dir <- file.path(exh_dir,'processed')
+  exh_fcs_dir <- file.path(exh_dir)
   
   # load fcs filenames
   fcs_paths <- data.table(
@@ -53,7 +53,7 @@ load_fcs <- function(exh_dir) {
   fcs_dt[, event_id := .I, by=c('well','plate','day')]
   
   channel_map <- list(
-    cd8="FJComp-379_28 UV-A",
+    cd="FJComp-379_28 UV-A",
     tim3="FJComp-450_50 Violet-A",
     gfp="FJComp-515_20 Blue-A",
     zombie="FJComp-586_15 Violet-A",
@@ -137,9 +137,11 @@ cd4_marker_pos_threshold <- list(
   pd1_t= 1400,
   cd39_t= 1100)
 
-cd4_dir <- "flow/TCSL105 ALL FILES/Exhaust"
+#cd4_dir <- "flow/TCSL105 ALL FILES/Exhaust"
+#AWS Version:
+cd4_dir <- "s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl105/exh"
 
-cd4_out <- load_exh_data(cd4_dir, cd4_marker_pos_threshold)
+#cd4_out <- load_exh_data(cd4_dir, cd4_marker_pos_threshold)
 
 # CD8 ======
 
@@ -152,11 +154,37 @@ cd8_marker_pos_threshold <- list(
   pd1_t= 1400,
   cd39_t= 1250)
 
-cd8_dir <- "flow/2019.06.07 TCSL091 ALL FILES/Exhaust"
+#cd8_dir <- "flow/2019.06.07 TCSL091 ALL FILES/Exhaust"
+#AWS Version:
+cd8_dir <- "s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl091/exh"
 
-cd8_out <- load_exh_data(cd8_dir, cd8_marker_pos_threshold)
+#cd8_out <- load_exh_data(cd8_dir, cd8_marker_pos_threshold)
 
+# exh_dt <- rbind(
+#   cd8_out$fcs_melt_dt[, t_type := 'cd8'],
+#   cd4_out$fcs_melt_dt[, t_type := 'cd4'])
+
+# cd4_out$fcs_melt_dt <- NULL
+# cd8_out$fcs_melt_dt <- NULL
+# 
+# exh_opt_cd4 <- cd4_out
+# exh_opt_cd8 <- cd8_out
+# 
+# exh_opt_cd4$marker_thresholds <- cd4_marker_pos_threshold
+# exh_opt_cd8$marker_thresholds <- cd8_marker_pos_threshold
+
+
+#save('exh_opt_cd4', 'exh_opt_cd8', 'exh_dt', file=file.path(here::here('..','data','exh.Rdata')))
+
+
+# ------
+# make a downsampled version for faster plotting and analysis
+
+n_events_per_well <- 2500
+cd8_out <- load_exh_data(cd8_dir, cd8_marker_pos_threshold, max_sample=n_events_per_well)
+cd4_out <- load_exh_data(cd4_dir, cd4_marker_pos_threshold, max_sample=n_events_per_well)
 exh_dt <- rbind(cd8_out$fcs_melt_dt[, t_type := 'cd8'], cd4_out$fcs_melt_dt[, t_type := 'cd4'])
+
 cd4_out$fcs_melt_dt <- NULL
 cd8_out$fcs_melt_dt <- NULL
 
@@ -166,15 +194,12 @@ exh_opt_cd8 <- cd8_out
 exh_opt_cd4$marker_thresholds <- cd4_marker_pos_threshold
 exh_opt_cd8$marker_thresholds <- cd8_marker_pos_threshold
 
+fwrite(exh_dt, 
+       compress='gzip', 
+       file=file.path(here::here('..','data','exh.sampled.csv.gz')))
 
-save('exh_opt_cd4', 'exh_opt_cd8', 'exh_dt', file=file.path(here::here('..','data','exh.Rdata')))
-
-# ------
-# make a downsampled version for faster plotting and analysis
-
-n_events_per_well <- 2500
-cd8_out <- load_exh_data(cd8_dir, cd8_marker_pos_threshold, max_sample=n_events_per_well)
-cd4_out <- load_exh_data(cd4_dir, cd4_marker_pos_threshold, max_sample=n_events_per_well)
-exh_dt <- rbind(cd8_out$fcs_melt_dt[, t_type := 'cd8'], cd4_out$fcs_melt_dt[, t_type := 'cd4'])
-save('exh_opt_cd4', 'exh_opt_cd8', 'exh_dt', file=file.path(here::here('..','data','exh.sampled.Rdata')))
+save(
+  'exh_opt_cd4',
+  'exh_opt_cd8',
+  file=file.path(here::here('..','data','exh.sampled.Rdata')))
 

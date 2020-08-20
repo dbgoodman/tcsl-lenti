@@ -1,0 +1,161 @@
+---
+title: "TCSL105 Cytokines"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r fig.width=12}
+
+require(data.table)
+require(ggplot2)
+require(scales)
+require(here)
+require(flowCore)
+require(flowWorkspace)
+require(RColorBrewer)
+
+parent_folder = here::here('..')
+#flow.dt <- fread("/Users/camilliaazimi/Box\ Sync/tcsl/flow/TCSL105\ ALL\ FILES/Cytokines/tcsl105cytokines.csv")
+
+cytokine_fn <- file.path(parent_folder,"Cytokines/tcsl105cytokines.csv")
+flow.dt <- fread(cytokine_fn)
+#getting rid of outliers with the next line
+flow.dt <- flow.dt[outlier == FALSE]
+
+```
+
+```{r fig.width=12}
+
+flow.means.dt <- flow.dt[, list(
+  pct.mean= mean(pct, na.rm=T), 
+  pct.stdev= sd(pct, na.rm=T)),
+    by=c('k562','cell.type','car',
+         'days','cytokine', 'donor')]
+
+# bar charts for one cytokine
+ggplot(flow.means.dt[cytokine == 'IFNg', ]) + 
+  geom_bar(aes(y=pct.mean, x=as.factor(days), fill=k562), stat='identity', position='dodge') +
+  geom_errorbar(aes(
+    x=as.factor(days), group=k562,
+    ymax=pct.mean+pct.stdev, ymin=pct.mean-pct.stdev), position='dodge') +
+  labs(title='% IFNg Production') +
+  facet_grid(donor ~ car)
+
+ggplot(flow.means.dt[cytokine == 'TNFa', ]) + 
+  geom_bar(aes(y=pct.mean, x=as.factor(days), fill=k562), stat='identity', position='dodge') +
+  geom_errorbar(aes(
+    x=as.factor(days), group=k562,
+    ymax=pct.mean+pct.stdev, ymin=pct.mean-pct.stdev), position='dodge') +
+  labs(title='% TNFa Production') +
+  facet_grid(donor ~ car)
+
+ggplot(flow.means.dt[cytokine == 'IL2', ]) + 
+  geom_bar(aes(y=pct.mean, x=as.factor(days), fill=k562), stat='identity', position='dodge') +
+  geom_errorbar(aes(
+    x=as.factor(days), group=k562,
+    ymax=pct.mean+pct.stdev, ymin=pct.mean-pct.stdev), position='dodge') +
+  labs(title='% IL2 Production') +
+  facet_grid(donor ~ car)
+
+
+```
+##Difference between + and -
+```{r fig.width=12}
+
+#diff, plus - minus
+
+flow.diff.dt <- flow.means.dt[, list(
+  pct.diff=pct.mean[k562=="+"] - pct.mean[k562=='-']),
+  by=c('donor','car','days','cytokine')]
+
+ggplot(flow.diff.dt) + 
+  geom_tile(aes(y=cytokine, x=as.factor(days), fill=pct.diff)) +
+  scale_fill_distiller('Difference in\nCytokine Production,\nCD19+ vs CD19-', palette='Blues', direction = 1) +
+  facet_grid(donor ~ car, scales='free') +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines') +
+  theme_minimal() + 
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+```
+
+## Normalized difference between + and - to the mean
+```{r fig.width=12}
+
+flow.diff.dt[,pct.diff.norm := (pct.diff - mean(pct.diff, na.rm = TRUE))/sd(pct.diff, na.rm=T), by=c('cytokine')]
+
+#faceted by cytokine and car
+ggplot(flow.diff.dt) + 
+  geom_tile(aes(y=as.factor(donor), x=as.factor(days), fill=pct.diff.norm), color="white") +
+  scale_fill_distiller('Normalized Difference in\nCytokine Production,\nCD19+ vs CD19-', palette='Blues', direction = 1) +
+  facet_grid(cytokine ~ car, scales='free') +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines Normalized') +
+  theme_minimal() + 
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+#faceted by car and day
+ggplot(flow.diff.dt) + 
+  geom_tile(aes(y=car, x=as.factor(donor), fill=pct.diff.norm), color="white") +
+  scale_fill_distiller('Normalized Difference in\nCytokine Production,\nCD19+ vs CD19-', palette='Blues', direction = 1) +
+  facet_grid(cytokine ~ days, scales='free') +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines Normalized') +
+  theme_minimal() + 
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r fig.width=12}
+ggplot(flow.diff.dt) + 
+  geom_line(aes(y=pct.diff.norm, x=days, color=car)) +
+  scale_color_brewer(palette="Set1") +
+  facet_grid(cytokine ~ donor, scales='free') +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines Normalized') +
+  theme_minimal() + 
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+
+ggplot(flow.means.dt[k562 == '+']) + 
+  geom_tile(aes(x=as.factor(days), y=car, fill=pct.mean)) + 
+  facet_grid(donor ~ cytokine) + scale_fill_viridis_c() +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines % Positive') +
+  theme_minimal() +
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+
+
+```
+
+## Banff Viridis Cytokine Plot
+
+```{r}
+
+
+# mask receptor names except for known ones
+unmasked_names <- c('41BB','CD28')
+masked_names <- c('BAFFR','CD40','KLRG1','TACI','TNR8')
+mask_receptor <- function(receptor) {
+  if (receptor %in% unmasked_names) return(receptor)
+  else if (receptor %in% masked_names) return(paste('Receptor', match(receptor, masked_names)))
+  else return('-')
+}
+
+flow.means.dt[, masked_car := mask_receptor(.BY[1]), by=.(car)]
+
+ggplot(flow.means.dt[k562 == '+' & donor == 2]) + 
+  geom_tile(aes(x=as.factor(days), y=masked_car, fill=pct.mean), color='black') + 
+  geom_text(aes(x=as.factor(days), y=masked_car, label=round(pct.mean,1), color=pct.mean > 16)) +
+  scale_color_manual(label=c(F,T), values=c('white','black')) +
+  facet_grid(donor ~ cytokine) + scale_fill_distiller('% Cytokine Positive', palette='YlGnBu') +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines % Positive') +
+  theme_minimal(base_size=18) +
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+ggplot(flow.means.dt[k562 == '+' & donor == 2]) + 
+  geom_tile(aes(x=as.factor(days), y=car, fill=pct.mean), color='black') + 
+  geom_text(aes(x=as.factor(days), y=car, label=round(pct.mean,1), color=pct.mean > 16)) +
+  scale_color_manual(label=c(F,T), values=c('white','black')) +
+  facet_grid(donor ~ cytokine) + scale_fill_distiller('% Cytokine Positive', palette='YlGnBu') +
+  labs(x='Days of Stimulation\n(pre-Golgi)', title='TCSL105 CD4 Cytokines % Positive') +
+  theme_minimal(base_size=18) +
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+```
+

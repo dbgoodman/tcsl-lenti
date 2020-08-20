@@ -4,7 +4,7 @@ author: "Daniel Goodman & Kiavash Garakani"
 date: "originally 3/28/2019, refreshed 4/4/2020"
 output: html_document
 knit: (function(inputFile, encoding) {
-  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','..','html','pooled'))})
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html','pooled'))})
 ---
 
 ```{r, message=FALSE, warning=FALSE}
@@ -40,7 +40,7 @@ output.dir <- file.path(here::here('..','figs','pooled'))
 metadata.filename <- file.path(tcsl.dir, 
     dataset.name, paste0(dataset.name, '_layout.csv'))
 car.seq.filename <- file.path(tcsl.dir, dataset.name, 'fa/ref.csv')
-remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt')
+remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt','TIIM1')
 
 car.seq <- fread(car.seq.filename, header=F)
 names(car.seq) <- c('CAR.align','seq')
@@ -352,6 +352,20 @@ ggplotly(ggplot(dcast(unique(read.counts[assay != 'baseline' & k.type == 'pos' &
 
 ggplotly(ggplot(dcast(unique(read.counts[assay != 'baseline' & k.type == 'pos' & t.type == 'CD4',
   .(CAR.align, sort.group, k.type, t.type, batch, assay, donor, CAR.score.norm)]),CAR.align ~ sort.group, value.var='CAR.score.norm')) + geom_point(aes(x=prolif1_d2_24d_CTV3_CD4_pos, y=prolif2_d1_24d_CTV3_CD4_pos)))
+```
+
+
+### April 2020: New Replicate Comparison Plots
+```{r}
+ggplot(
+  dcast(
+  unique(read.counts[assay != 'baseline' & k.type == 'pos',
+    .(CAR.align, sort.group, k.type, t.type, batch, assay, donor, CAR.score.norm)])[,
+      .(CAR.align, sort.group, CAR.score.norm, CAR.score.rank = frank(CAR.score.norm)),
+        by = .(k.type, t.type, batch, assay, donor)],
+    CAR.align + t.type + assay + donor ~ batch+k.type,
+    value.var='CAR.score.norm')) + 
+  geom_point(aes(x=prolif2_pos, y=prolif1_pos)) + facet_grid(assay+donor~t.type)
 
 ```
 
@@ -362,12 +376,12 @@ ggplotly(ggplot(dcast(unique(read.counts[assay != 'baseline' & k.type == 'pos' &
 ```{r}
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
 
 read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
 
 read.counts[,
-            car.abund.rel.baseline := car.abund/car.abund.adj,
+            car.abund.rel.baseline := car.abund/car.abund.baseline,
             by=.(donor, t.type, batch)]
 
 read.counts[assay == 'baseline',
@@ -380,7 +394,7 @@ ggplot(
           k.type != 'NA']) + 
   geom_line(aes(
     x=day, y=log2(car.abund.rel.baseline),
-    group=CAR.align, color= log10(car.abund.adj))) + 
+    group=CAR.align, color= log10(car.abund.baseline))) + 
   facet_grid(t.type ~ donor + batch) +
   scale_color_distiller('log2 Starting CAR abundance', palette='Spectral') +
   labs(x='Timepoint (days)', y='log2 Car Abundance relative to Starting abundance') +
@@ -831,11 +845,11 @@ cd8.bin.plot
 ```{r}
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
 
 read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
 
-read.counts[, car.abund.rel.baseline := car.abund/car.abund.adj,
+read.counts[, car.abund.rel.baseline := car.abund/car.abund.baseline,
             by=.(donor, t.type, batch)]
 
 read.counts[assay == 'baseline',
@@ -1925,7 +1939,7 @@ cd4.indiv.pca.car.len.plots <- ggplot(pc.projected.dt[t.type == "CD4"],
   theme_bw()
 
 cd8.indiv.pca.car.score.plots <- ggplot(pc.projected.dt[t.type == "CD8"], 
-                                        aes(x = PC1, y = PC2, å
+                                        aes(x = PC1, y = PC2,
                                             label = CAR.align)) +
   scale_color_distiller(palette = 'Spectral') +
   # geom_text_repel() +
@@ -1933,7 +1947,7 @@ cd8.indiv.pca.car.score.plots <- ggplot(pc.projected.dt[t.type == "CD8"],
   facet_grid(batch + donor ~ assay) +
   labs(title = "CD8 car.bin.read.pct.norm PCA, Colored by CAR Score, CD19+") +
   theme_bw()
-e
+
 cd8.indiv.pca.car.len.plots <- ggplot(pc.projected.dt[t.type == "CD8"], 
                                       aes(x = PC1, y = PC2, 
                                           label = CAR.align)) +
@@ -4048,14 +4062,14 @@ mask_receptor_prolif <- function(receptor) {
 
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
-          list(car.abund.adj= car.abund, donor, CAR.align, t.type)]
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
 
 car.abund.set <- car.abund.set[CAR.align %in% c(masked_names, unmasked_names)]
 car.abund.set <- car.abund.set[, masked_name := mask_receptor_prolif(CAR.align), by=.(CAR.align)]
 
 read.counts.abund.set <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)][]
 
-read.counts.abund.set[, car.abund.rel.baseline := car.abund/car.abund.adj,
+read.counts.abund.set[, car.abund.rel.baseline := car.abund/car.abund.baseline,
             by=.(donor, t.type, batch)]
 
 read.counts.abund.set[assay == 'baseline',
@@ -4085,4 +4099,180 @@ car.abund.plot <- ggplot(abund.data) +
   scale_color_brewer('T Cell\nSubset', palette='Set1')
 
 car.abund.plot
+```
+
+### 2020.04.09 tile plot with car scores
+
+Copied from Banff tile plot, switched to scaled CAR score
+```{r}
+
+tiles_combined <- melt.deseq.dt[(
+    variable %in% c('A.D') & (assay != 'CTV3' | t.type == 'CD4')) | 
+  (variable == 'ABCD.base' & assay == 'CTV3' & t.type == 'CD8')][,
+    combined_var := paste(variable, assay)][,
+      `:=`(rank.LFC= NULL, mean.rank.LFC= NULL)]
+
+tiles_combined[, scale.LFC := scale(LFC), by = .(t.type, assay, variable)]
+
+tiles_combined[, mean.scale.LFC := mean(scale.LFC), by = .(t.type, CAR.align)]
+tiles_combined[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+
+scale.lfc.tile.plot <- ggplot(tiles_combined) + 
+  geom_tile(aes(x = combined_var, y = reorder(car.axis, mean.scale.LFC), 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller(palette = 'Spectral') +
+  facet_wrap(~ t.type, nrow = 1, scales = 'free') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Ranked Shrunken Log Fold Change, CD19+') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+scale.lfc.tile.plot
+```
+
+Next, add cytokines and CD69, skipping IL4. Check different metrics.
+```{r}
+cytokine_ranks <- melt(
+  read.counts[batch == 'post-cytof' & assay != 'IL4'], 
+  measure.vars = c('min.max.ratio.norm','all.max.ratio.norm','CAR.score'))[
+    bin == 'A' & k.type == 'pos']
+cytokine_ranks[variable != 'CAR.score',]
+cytokine_ranks[, value.scale := scale(value), by=.(sort.group,variable,t.type)]
+cytokine_ranks[, mean.value.scale := mean(value.scale), by = .(t.type, CAR.align)]
+cytokine_ranks[, 
+  car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+cytokine_ranks[, 
+  combined.var := paste(assay,variable, sep='.'), by=.(t.type)]
+
+# cytokine measure comparison
+cytokine.rank.plot <- ggplot(cytokine_ranks) + 
+  geom_tile(aes(x = combined.var, y = reorder(car.axis, mean.value.scale), 
+                fill = value.scale), colour = "black", size = .20) + 
+  scale_fill_distiller(palette = 'Spectral') +
+  facet_wrap(~ t.type, nrow = 1, scales = 'free_y') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Ranked Shrunken Log Fold Change, CD19+') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+cytokine.rank.plot
+```
+
+Use CAR score for cytokine ranking. Combine with tile plot above:
+
+### This is in the same style as banff, ranked separately
+
+```{r fig.height=4, fig.width=2.5, units='inches'}
+library(ggforce)
+
+total_combined <- rbind(
+  tiles_combined[, -'mean.LFC', with=F],
+  cytokine_ranks[variable == 'CAR.score', c(names(tiles_combined)[1:7], 'value','combined.var','value.scale','mean.value.scale'), with=F],
+  use.names=F)
+
+# relabel x axis assays
+total_combined[, assay := factor(assay, 
+  labels=c('CTV1','CTV2','CTV3','CD69','IFNy','IL2'))]
+
+rank.lfc.tile.plot <- ggplot(total_combined) + 
+  geom_tile(aes(x = assay, y = reorder(car.axis, mean.scale.LFC), 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller('Z-score', palette = 'YlGnBu', direction = -1) +
+  facet_row(~ t.type, scales = 'free', space='free') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Receptors Ranked Across Metrics') + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+
+rank.lfc.tile.plot
+
+```
+
+### No ranking, dendrogram
+
+copied from ggheatmap on github.
+
+```{r, fig.height=8, fig.width=4}
+
+library(ggdendro)
+library(cowplot)
+
+# Make dendrogram
+car_mean_cast <- dcast(
+  total_combined, 
+  CAR.align ~ assay + t.type, 
+  value.var='scale.LFC')
+
+car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
+rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
+dendro_vars <- rev(as.dendrogram(hclust(d = dist(x = car_dendro_m))))
+
+# Create dendrogram plot
+dendro_vars_plot <- ggdendrogram(data = dendro_vars, rotate = TRUE) + 
+  theme(axis.text.y = element_text(size = 6))
+
+# row order
+var_order <- order.dendrogram(dendro_vars)
+var_names <- row.names(car_dendro_m[var_order, ])
+total_combined$CAR.align <- factor(
+    total_combined$CAR.align,
+    levels = var_names)
+
+# heatmap
+var_heatmap <- ggplot(total_combined) + 
+  geom_tile(aes(x = interaction(assay,t.type), y = CAR.align, 
+                fill = scale.LFC), colour = "black", size = .20) + 
+  scale_fill_distiller('Z-score', 
+    palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(labels= (
+      function (breaks)
+        unlist(lapply(breaks, function(str)
+          strsplit(str, '|',fixed=T)[[1]][1])))) +
+  labs(title = 'Receptors Ranked Across Metrics') + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank())
+
+
+# col dendro
+dendro_data_col <- dendro_data(dendro_vars, type = "rectangle")
+
+dendro_col <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
+  geom_segment(data = segment(dendro_data_col), 
+      aes(x = x, y = y, xend = xend, yend = yend)) +
+    coord_flip()
+plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
+  dendro_col, grid::unit(0.2, "null"), position = "right")
+ggdraw(plot_dendroheat)
+```
+
+### Patent Version
+
+
+
+```{r}
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+save(list=ls(),
+  file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
 ```
