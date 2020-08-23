@@ -22,6 +22,7 @@ library(data.table)
 library(cowplot)
 
 reload_data=F
+source(here::here('r','fig_colors.R'))
 ```
 
 ```{r load_data, eval=reload_data}
@@ -301,6 +302,24 @@ if (reload_data) saveRDS(scrna.hashed, file = here::here(
 
 ```{r fig.width=15, fig.height=8, unit="inches"}
 
+if (!('scrna.hashed' %in% ls()))
+  scrna.hashed <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+
+car_order <- c('CD28','4-1BB','BAFF-R','TACI','CD40','TNR8','Zeta','KLRG1','Untransduced')
+car_labels <- c('CD28','4-1BB','BAFF-R','TACI','CD40','CD30','Zeta','KLRG1','Untransduced')
+
+car_colors <- c(
+    '4-1BB'=blues[1], 'BAFF-R'=greens[1], 
+    'CD28'=blues[2], 'CD40'=purples[2], 
+    'KLRG1'=reds[5], 'TACI'=greens[2], 
+    'CD30'=purples[1], 'Zeta'=grey)
+
+scrna.hashed@meta.data$car <- factor(scrna.hashed@meta.data$car, levels=car_order, labels=car_labels)
+scrna.cd4 <- subset(scrna.hashed, subset= (CD4v8 == 'CD4'))
+scrna.cd8 <- subset(scrna.hashed, subset= (CD4v8 == 'CD8'))
+
 make_citeseq_dt <- function(obj_subset, assay='ADT') {
   return(data.table(cbind(t(obj_subset@assays[[assay]]@data), obj_subset@meta.data))[car != 'K_only'])
 }
@@ -310,27 +329,38 @@ make_rna_dt <- function(obj_subset) {
 }
 
 make_pct_grid <- function(
-    obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, split=c('car','k_type','CD4v8')) {
- pct_dt <- obj_subset[,
-  quadrant := factor((get(x_axis) > x_cutoff)*2 + (get(y_axis) > y_cutoff), 
-    levels=c(0:3), label=c('BL','TL','BR','TR'))][, 
-      .N, by=c('quadrant', split)][,
-        list(pct= N/sum(N), count= N, quadrant), by=split]
+    obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, split=c('car','k_type','CD4v8')) 
+{
+  pct_dt <- obj_subset[,
+    quadrant := factor((get(x_axis) > x_cutoff)*2 + (get(y_axis) > y_cutoff), 
+      levels=c(0:3), label=c('BL','TL','BR','TR'))][, 
+        .N, by=c('quadrant', split)][,
+          list(pct= N/sum(N), count= N, quadrant), by=split]
  
-pos_dt <- data.table(
-  quadrant=c('BL','TL','BR','TR'),
-  x=c(-Inf, -Inf, Inf, Inf),
-  y=c(-Inf,Inf,-Inf,Inf))
+  pos_dt <- data.table(
+    quadrant=c('BL','TL','BR','TR'),
+    x=c(-Inf, -Inf, Inf, Inf),
+    y=c(-Inf,Inf,-Inf,Inf))
  
   pct_dt <- pos_dt[pct_dt, on='quadrant']
+  
+  
+  labels <- paste0(
+    rep(gsub('(.*)\\.\\w+','\\1',x_axis),4),
+    c('-','+','-','+'),
+    '/',
+    rep(gsub('(.*)\\.\\w+','\\1',y_axis),4),
+    c('-','-','+','+'))
+  
+   pct_dt[, lbl := factor(quadrant, labels=labels)]
+
   
   return(pct_dt)
 }
 
-scrna.cd4 <- subset(scrna.hashed, subset= (CD4v8 == 'CD4'))
-scrna.cd8 <- subset(scrna.hashed, subset= (CD4v8 == 'CD8'))
-
-citeseq_density_2d <- function(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, title=paste0(x_axis,' vs ',y_axis)) {
+citeseq_density_2d <- function(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, 
+    title=paste0(x_axis,' vs ',y_axis)) 
+{
   ggplot(obj_subset, aes_string(x=x_axis, y=y_axis)) + 
       stat_density_2d(aes(fill = stat(ndensity)), geom = "raster", contour = FALSE) + 
       scale_fill_distiller(palette='PuRd', direction=1) + facet_grid(k_type~car) +  
@@ -345,29 +375,195 @@ citeseq_density_2d <- function(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, t
       theme_minimal()
 }
 
+citeseq_bar_plot <- function(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, 
+    title=paste0(x_axis,' vs ',y_axis))
+{
+  ggplot(make_pct_grid(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff)) + 
+      scale_fill_brewer(palette='Set1') +
+      geom_bar(aes(fill=lbl, x=car, y=pct), stat='identity', position='dodge') +
+      facet_wrap(~k_type, ncol=1) + theme_bw()
+}
+
+density_bar_plots <- function (obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, 
+    title=paste0(x_axis,' vs ',y_axis))
+{
+  title <- ggdraw() + draw_label(title, fontface='bold')
+  plot_grid(
+    title,
+    citeseq_density_2d(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, title=''),
+    citeseq_bar_plot(obj_subset, x_axis, x_cutoff, y_axis, y_cutoff, title=''),
+    ncol=1, 
+    rel_heights=c(0.2,1,1)
+  )
+}
+
+#### RO v 62L
+# BAFF-R has enriched 62L+/RO+ population
 plot_grid(
-  citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD4 RO v 62L'),
-  citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD8 RO v 62L'),
+  density_bar_plots(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD4 RO v 62L'),
+  density_bar_plots(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD8 RO v 62L'),
+  ncol=2
+)
+
+#### RO v CCR7
+plot_grid(
+  density_bar_plots(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CCR7.adt', y_cutoff=0.3, title='CD4 RO v CCR7'),
+  density_bar_plots(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CCR7.adt', y_cutoff=0.3, title='CD8 RO v CCR7'),
+  ncol=2
+)
+
+#### RO+, CD62L v CCR7
+plot_grid(
+  density_bar_plots(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD4, RO+, 62L v CCR7'),
+  density_bar_plots(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD8, RO+, 62L v CCR7'),
   ncol=1
 )
 
+#### RO+, CD62L v CD27
 plot_grid(
-  citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD4 RO v CD27'),
-  citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD8 RO v CD27'),
-  ncol=1
+  density_bar_plots(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD4, RO+, 62L v CD27'),
+  density_bar_plots(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
+  ncol=2
 )
 
-plot_grid(
-  citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD4, RO+, 62L v CD27'),
-  citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
-  ncol=1
-)
 
-plot_grid(
-  citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD4, RO+, 62L v CCR7'),
-  citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD8, RO+, 62L v CCR7'),
-  ncol=1
-)
+# plot_grid(
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD4 RO v 62L'),
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD8 RO v 62L'),
+#   ncol=1
+# )
+# 
+# plot_grid(
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD4 RO v CD27'),
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD8 RO v CD27'),
+#   ncol=1
+# )
+# 
+# plot_grid(
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD4, RO+, 62L v CD27'),
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
+#   ncol=1
+# )
+# 
+# plot_grid(
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD4, RO+, 62L v CCR7'),
+#   citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD8, RO+, 62L v CCR7'),
+#   ncol=1
+# )
+# 
+# ggplot(make_pct_grid(make_citeseq_dt(scrna.cd4), x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.3)[]) + geom_bar(aes(fill=lbl, x=car, y=pct), stat='identity', position='dodge') + facet_wrap(~k_type, ncol=1) + title='CD4 RO+, 62L v CDR')
+```
+
+# PCA of CARs
+```{r}
+
+plot_pca <- function(obj_subset, axes=c('car','k_type')) {
+  
+  obj_subset@meta.data[['pca_group']] <- do.call(paste, c(obj_subset@meta.data[axes], sep="_"))
+  Idents(obj_subset) <- 'pca_group'
+  obj.avg <- AverageExpression(obj_subset, assays=c('ADT','RNA'))
+  obj.avg <- t(rbind(obj.avg$ADT, obj.avg$RNA))
+  obj.avg <- obj.avg[, apply(obj.avg,2,sd) > 0]
+  combined_pca <- prcomp(scale(obj.avg))
+  
+  # calculate pca stats
+  pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+      PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+      sd = combined_pca$sdev, 
+      var = combined_pca$sdev^2, 
+      var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+      var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+  
+  melt.pca.dt <- melt(
+    pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+  
+  pca_metrics_plot <- ggplot(melt.pca.dt) +
+    geom_line(aes(x = pc, y = value, color = metric)) +
+    geom_point(aes(x = pc, y = value, color = metric)) +
+    scale_x_continuous(limits = c(1, NA)) +
+    labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+         x = "Principal Component", y = "Fraction of Variance") +
+    theme_bw()
+  
+  projected.metrics <- data.table(
+    scale(obj.avg, combined_pca$center, combined_pca$scale) %*% combined_pca$rotation)
+  
+  projected.metrics <- projected.metrics[,
+      car := rownames(obj.avg)]
+  
+  pca_plot <- ggplot(
+      projected.metrics, aes(x=PC1, y=PC2, label=car)) +
+    geom_point() + 
+    geom_text_repel()
+  
+  return(
+    list(pca_plot= pca_plot, combined_pca= combined_pca, pca_metrics_plot= pca_metrics_plot)
+  )
+}
+
+plot_pca_cars <- function(obj_subset, title, axes=c('car','k_type')) {
+  pca_data <- plot_pca(obj_subset, axes)
+  plot_grid(
+    pca_data$pca_plot + theme_minimal() + labs(title=title),
+    plot_grid(
+      tableGrob(
+        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
+          c(order(-PC1)[1:10]), list('PC1 Positive'=rn)]),
+      tableGrob(
+        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
+          c(order(PC1)[1:10]), list('PC1 Negative'=rn)]),
+    ncol=1),
+    plot_grid(
+      tableGrob(
+        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
+          c(order(-PC2)[1:10]), list('PC2 Positive'=rn)]),
+      tableGrob(
+        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
+          c(order(PC2)[1:10]), list('PC2 Negative'=rn)]),
+      ncol=1),
+    ncol=3, nrow=1,
+    rel_widths=c(5, 1, 1))
+}
+
+plot_pca_cars(subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta'))), title='CD4 CD19+ PCA (Stimulatory CARs)')
+
+plot_pca_cars(subset(scrna.cd8, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta'))), title='CD8 CD19+ PCA (Stimulatory CARs)')
+
+plot_pca_cars(subset(scrna.hashed, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta'))), title='CD19+ PCA (Stimulatory CARs)')
+
+plot_pca_cars(subset(scrna.cd8, subset=(car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta', 'KLRG1','Untransduced'))), title='All CARs', axes=c('car','k_type','CD4v8'))
+
+RidgePlot(subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta'))), features = c('TMSB4X'))
+
+
+# NUMBER OF CELLS EXPRESSING FEATURES
+
+cd4pos <- subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')))
+Idents(cd4pos) <- 'car'
+VlnPlot(cd4pos, features=c('ANKS1A','ZNF66','BCAT1'))
+
+cd8pos <- subset(scrna.cd8, 
+  subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')))
+Idents(cd8pos) <- 'car'
+
+tnf_v_28 <- FindMarkers(
+  cd8pos, assay='RNA',
+  ident.1 = c("BAFF-R","TACI","CD40"), ident.2=c("CD28"),
+  logfc.threshold = 0.2, min.pct=0.1)
+
+ggplot(tnf_v_28, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() + geom_hline(aes(yintercept=-log10(0.05))) + geom_text_repel(data=data.table(tnf_v_28, keep.rownames = T)[-log10(p_val_adj) > 38], aes(label=rn)) + labs(x='CD8 Log Fold Change \n CD28 < | > BAFF-R / TACI / CD40')
+
+cd4pos <- subset(scrna.cd4, 
+  subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')))
+Idents(cd4pos) <- 'car'
+
+tnf_v_28 <- FindMarkers(
+  cd4pos, assay='RNA',
+  ident.1 = c("BAFF-R","TACI","CD40"), ident.2=c("CD28"),
+  logfc.threshold = 0.2, min.pct=0.1)
+
+ggplot(tnf_v_28, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() + geom_hline(aes(yintercept=-log10(0.05))) + geom_text_repel(data=data.table(tnf_v_28, keep.rownames = T)[-log10(p_val_adj) > 38], aes(label=rn)) + labs(x='CD4 Log Fold Change \n CD28 < | > BAFF-R / TACI / CD40')
+
 ```
 
 # correlation plots
@@ -386,7 +582,8 @@ corr_plots <- function(subset_obj, assay='ADT') {
       data.table(cor(.SD[, c(rownames(subset_obj@assays[[assay]]@data)), with=F]), keep.rownames=T)]
   
   #remove NA rows
-  citeseq_cor <- na.omit(citeseq_cor[, which(colSums(is.na(citeseq_cor)) != (nrow(citeseq_cor) - 1)), with=F])
+  citeseq_cor <- na.omit(
+    citeseq_cor[, which(colSums(is.na(citeseq_cor)) != (nrow(citeseq_cor) - 1)), with=F])
    
   # generate heirarchical clustering
   dendro_m <- as.matrix(citeseq_cor[, -1])
@@ -421,10 +618,6 @@ corr_plots <- function(subset_obj, assay='ADT') {
 ## Make UMAP plots and objects for each subset
 
 ```{r umap_each_subset, eval=reload_data}
-if (!('scrna.hashed' %in% ls()))
-  scrna.hashed <- readRDS(here::here(
-    '..','..','scrnaseq_tcsl154',
-    'rds','scrna.hashed.rds'))
 
 umap_plot <- function(subset, plot_title_text="", assay, cluster_resolution) {
 
