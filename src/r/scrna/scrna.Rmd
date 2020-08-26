@@ -398,7 +398,7 @@ density_bar_plots <- function (obj_subset, x_axis, x_cutoff, y_axis, y_cutoff,
 }
 
 #### RO v 62L
-# BAFF-R has enriched 62L+/RO+ population
+# BAFF-R has enriched 62L+/RO+ population in CD8s only
 plot_grid(
   density_bar_plots(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD4 RO v 62L'),
   density_bar_plots(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD8 RO v 62L'),
@@ -457,13 +457,26 @@ plot_grid(
 # PCA of CARs
 ```{r}
 
-plot_pca <- function(obj_subset, axes=c('car','k_type')) {
+library(ggrepel)
+library(cowplot)
+
+plot_pca <- function(obj_subset, axes=c('car','k_type'), min_pct_exp = 10) {
   
   obj_subset@meta.data[['pca_group']] <- do.call(paste, c(obj_subset@meta.data[axes], sep="_"))
   Idents(obj_subset) <- 'pca_group'
+  
+  rna_gene_set <- rownames(obj_subset@assays$RNA@data)[
+    (tabulate(obj_subset@assays$RNA@data@i + 1) / 
+      ncol(obj_subset@assays$RNA@data) * 100) > min_pct_exp]
+  
+  adt_gene_set <- rownames(obj_subset@assays$RNA@data)[
+    (tabulate(obj_subset@assays$RNA@data@i + 1) / 
+      ncol(obj_subset@assays$ADT@data) * 100) > min_pct_exp]
+  
   obj.avg <- AverageExpression(obj_subset, assays=c('ADT','RNA'))
   obj.avg <- t(rbind(obj.avg$ADT, obj.avg$RNA))
   obj.avg <- obj.avg[, apply(obj.avg,2,sd) > 0]
+  obj.avg <- obj.avg[, colnames(obj.avg) %in% c(rna_gene_set, adt_gene_set)]
   combined_pca <- prcomp(scale(obj.avg))
   
   # calculate pca stats
@@ -501,26 +514,27 @@ plot_pca <- function(obj_subset, axes=c('car','k_type')) {
   )
 }
 
-plot_pca_cars <- function(obj_subset, title, axes=c('car','k_type')) {
-  pca_data <- plot_pca(obj_subset, axes)
+plot_gene_assoc_bar <- function(pca_data, PC_name, n_genes=10) {
+  
+  gene_data <- data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
+    c(order(get(PC_name))[1:n_genes], order(-get(PC_name))[1:n_genes]), 
+    list(association= get(PC_name), gene= rn)][, 
+      gene := factor(gene, levels=gene[order(association)])]
+
+  ggplot(gene_data) + 
+    geom_bar(aes(x=association, y=gene, fill=factor(sign(association))), 
+      stat='identity', color='black') + 
+    theme_minimal() + 
+    theme(legend.position='none') +
+    labs(x='',y='', title=PC_name)
+}
+
+plot_pca_cars <- function(obj_subset, title, axes=c('car','k_type'), min_pct_exp=10) {
+  pca_data <- plot_pca(obj_subset, axes, min_pct_exp)
   plot_grid(
     pca_data$pca_plot + theme_minimal() + labs(title=title),
-    plot_grid(
-      tableGrob(
-        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
-          c(order(-PC1)[1:10]), list('PC1 Positive'=rn)]),
-      tableGrob(
-        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
-          c(order(PC1)[1:10]), list('PC1 Negative'=rn)]),
-    ncol=1),
-    plot_grid(
-      tableGrob(
-        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
-          c(order(-PC2)[1:10]), list('PC2 Positive'=rn)]),
-      tableGrob(
-        data.table(pca_data$combined_pca$rotation, keep.rownames=TRUE)[
-          c(order(PC2)[1:10]), list('PC2 Negative'=rn)]),
-      ncol=1),
+    plot_gene_assoc_bar(pca_data, 'PC1', n_genes=10),
+    plot_gene_assoc_bar(pca_data, 'PC2', n_genes=10),
     ncol=3, nrow=1,
     rel_widths=c(5, 1, 1))
 }
@@ -535,9 +549,6 @@ plot_pca_cars(subset(scrna.cd8, subset=(car %in% c('4-1BB','BAFF-R','CD40','TACI
 
 RidgePlot(subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta'))), features = c('TMSB4X'))
 
-
-# NUMBER OF CELLS EXPRESSING FEATURES
-
 cd4pos <- subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')))
 Idents(cd4pos) <- 'car'
 VlnPlot(cd4pos, features=c('ANKS1A','ZNF66','BCAT1'))
@@ -548,7 +559,7 @@ Idents(cd8pos) <- 'car'
 
 tnf_v_28 <- FindMarkers(
   cd8pos, assay='RNA',
-  ident.1 = c("BAFF-R","TACI","CD40"), ident.2=c("CD28"),
+  ident.1 = c("BAFF-R","TACI","CD40"), ident.2=c("CD28","Zeta","4-1BB"),
   logfc.threshold = 0.2, min.pct=0.1)
 
 ggplot(tnf_v_28, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() + geom_hline(aes(yintercept=-log10(0.05))) + geom_text_repel(data=data.table(tnf_v_28, keep.rownames = T)[-log10(p_val_adj) > 38], aes(label=rn)) + labs(x='CD8 Log Fold Change \n CD28 < | > BAFF-R / TACI / CD40')
