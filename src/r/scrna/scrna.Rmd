@@ -425,33 +425,6 @@ plot_grid(
   density_bar_plots(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
   ncol=2
 )
-
-
-# plot_grid(
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD4 RO v 62L'),
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD62L.adt', y_cutoff=0.6, title='CD8 RO v 62L'),
-#   ncol=1
-# )
-# 
-# plot_grid(
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd4), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD4 RO v CD27'),
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd8), x_axis='CD45RO.adt', x_cutoff=0.25, y_axis='CD27.adt', y_cutoff=0.6, title='CD8 RO v CD27'),
-#   ncol=1
-# )
-# 
-# plot_grid(
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD4, RO+, 62L v CD27'),
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
-#   ncol=1
-# )
-# 
-# plot_grid(
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD4, RO+, 62L v CCR7'),
-#   citeseq_density_2d(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.25, title='CD8, RO+, 62L v CCR7'),
-#   ncol=1
-# )
-# 
-# ggplot(make_pct_grid(make_citeseq_dt(scrna.cd4), x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CCR7.adt', y_cutoff=0.3)[]) + geom_bar(aes(fill=lbl, x=car, y=pct), stat='identity', position='dodge') + facet_wrap(~k_type, ncol=1) + title='CD4 RO+, 62L v CDR')
 ```
 
 # PCA of CARs
@@ -553,27 +526,32 @@ cd4pos <- subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF
 Idents(cd4pos) <- 'car'
 VlnPlot(cd4pos, features=c('ANKS1A','ZNF66','BCAT1'))
 
-cd8pos <- subset(scrna.cd8, 
-  subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')))
-Idents(cd8pos) <- 'car'
+comp_car_volcano <- function(obj_subset, ident.1, ident.2, logfc.thresh=0.2, min.pct=0.1,
+    assay='RNA', lbl_pval_cutoff = 10, title='') {
+  
+  title <- paste(title,
+    paste('[',paste(ident.2,collapse=', '),'] <- vs -> [',paste(ident.1,collapse=', '),']'),
+    sep='\n')
+  
+  Idents(obj_subset) <- 'car'
+  markers <- FindMarkers(
+    obj_subset, assay=assay,
+    ident.1 = ident.1, ident.2=ident.2,
+    logfc.threshold = logfc.thresh, min.pct=min.pct)
+  
+  volcano_ggplot <- ggplot(markers, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() +
+    geom_hline(aes(yintercept=-log10(0.05))) + 
+    scale_x_continuous(limits=c(-max(abs(markers$avg_logFC)), max(abs(markers$avg_logFC)))) +
+    geom_text_repel(
+      data=data.table(markers, keep.rownames = T)[-log10(p_val_adj) > lbl_pval_cutoff],
+      aes(label=rn)) + 
+    theme_minimal() +
+    labs(x=title, y='Adjusted -log10(p)')
+  
+  return(list(markers=markers, plot=volcano_ggplot))
+}
 
-tnf_v_28 <- FindMarkers(
-  cd8pos, assay='RNA',
-  ident.1 = c("BAFF-R","TACI","CD40"), ident.2=c("CD28","Zeta","4-1BB"),
-  logfc.threshold = 0.2, min.pct=0.1)
-
-ggplot(tnf_v_28, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() + geom_hline(aes(yintercept=-log10(0.05))) + geom_text_repel(data=data.table(tnf_v_28, keep.rownames = T)[-log10(p_val_adj) > 38], aes(label=rn)) + labs(x='CD8 Log Fold Change \n CD28 < | > BAFF-R / TACI / CD40')
-
-cd4pos <- subset(scrna.cd4, 
-  subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')))
-Idents(cd4pos) <- 'car'
-
-tnf_v_28 <- FindMarkers(
-  cd4pos, assay='RNA',
-  ident.1 = c("BAFF-R","TACI","CD40"), ident.2=c("CD28"),
-  logfc.threshold = 0.2, min.pct=0.1)
-
-ggplot(tnf_v_28, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() + geom_hline(aes(yintercept=-log10(0.05))) + geom_text_repel(data=data.table(tnf_v_28, keep.rownames = T)[-log10(p_val_adj) > 38], aes(label=rn)) + labs(x='CD4 Log Fold Change \n CD28 < | > BAFF-R / TACI / CD40')
+comp_car_volcano(subset(scrna.cd4, subset=(k_type == 'cd19+')), ident.1=c('CD28'), ident.2='BAFF-R', lbl_pval_cutoff = 3, min.pct=0.25, assay='RNA')
 
 ```
 
@@ -608,10 +586,10 @@ corr_plots <- function(subset_obj, assay='ADT') {
   # melt and reorder rows
   citeseq_cor_melt$rn <- factor(
       citeseq_cor_melt$rn,
-      levels = labels(car_dendro))
+      levels = labels(dendro))
   citeseq_cor_melt$variable <- factor(
       citeseq_cor_melt$variable,
-      levels = labels(car_dendro))
+      levels = labels(dendro))
   
   # remove markers that are not strongly correlated with anything
   var_has_corr <- citeseq_cor_melt[variable != rn, max(abs(value)) > 0.075, by='variable'][V1 == T]$variable
@@ -821,6 +799,8 @@ umap_subset <- function(this_subset,
     rds_file=rds_file))
 }
 
+stimulatory_cars <- c('4-1BB','BAFF-R','CD40','TACI','CD28')
+
 if (!reload_data && !('umap_plots' %in% ls()) )
 {
   umap_plots <- readRDS(here::here(
@@ -828,14 +808,44 @@ if (!reload_data && !('umap_plots' %in% ls()) )
     'rds','scrna.umap.plots.rds')) 
 } else {
   subset_fxns= list(
+      
+      # all cars
       function(obj) obj,
-      function(obj) subset(obj, subset = (CD4v8 == 'CD4')),
-      function(obj) subset(obj, subset = (CD4v8 == 'CD8')),
-      function(obj) subset(obj, subset = (k_type == 'cd19+')),
-      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4')),
-      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8')))
-  subset_names= c('all cells','CD4','CD8','CD19','CD4 CD19','CD8 CD19')
-  umap_plots <- data.table(subset_name= subset_names, subset_fxn_num=1:6)
+      function(obj) subset(obj, subset = (CD4v8 == 'CD4' & car != 'K_only')),
+      function(obj) subset(obj, subset = (CD4v8 == 'CD8' & car != 'K_only')),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & car != 'K_only')),
+      
+      # stimulated 4s and 8s
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4' & car != 'K_only')),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car != 'K_only')),
+      
+      #unstimulated 4s and 8s
+      function(obj) subset(obj, subset = (k_type == 'baseline' & CD4v8 == 'CD4' & car != 'K_only')),
+      function(obj) subset(obj, subset = (k_type == 'baseline' & CD4v8 == 'CD8' & car != 'K_only')),
+      
+      #stimulatory cars only
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% stimulatory_cars)),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% stimulatory_cars)),
+  
+      #stimulatory cars, central memory
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% stimulatory_cars &
+        CD45RO.adt > 0.25 & CD62L.adt > 0.6)),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% stimulatory_cars &
+        CD45RO.adt > 0.25 & CD62L.adt > 0.6)),
+      #stimulatory cars, central memory
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% stimulatory_cars &
+        CD45RO.adt > 0.25 & CD62L.adt < 0.6)),
+      function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% stimulatory_cars &
+        CD45RO.adt > 0.25 & CD62L.adt < 0.6))
+    )
+
+
+  subset_names= c('CD4','CD8','CD19','CD4.CD19','CD8.CD19','baseline','CD4.baseline', 'CD8.baseline',
+                  'CD4.CD19.stimulatory','CD8.CD19.stimulatory',
+                  'CD4.CD19.stimulatory.tcm','CD8.CD19.stimulatory.tcm',
+                  'CD4.CD19.stimulatory.teff','CD8.CD19.stimulatory.teff')
+  
+  umap_plots <- data.table(subset_name= subset_names, subset_fxn_num=1:length(subset_fxns))
   
   umap_plots[, ADT := list(list(
       umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))), 
