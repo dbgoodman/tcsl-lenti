@@ -48,15 +48,6 @@ map_day_0 <- function(df) {
     df[k562!='none'], #gets all cd19+-
     #df[rep(keep_none, .N) & k562=='none' & day > 0], 
     df[k562=='none' & day == 0][, k562 := 'cd19+'], #none and day 0, assign as 19+
-    df[k562=='none' & day == 0][, k562 := 'cd19-'] #none and day 0, assign as 19-
-  ))
-}
-
-map_day_0 <- function(df) {
-  return(rbind(
-    df[k562!='none'], #gets all cd19+-
-    #df[rep(keep_none, .N) & k562=='none' & day > 0], 
-    df[k562=='none' & day == 0][, k562 := 'cd19+'], #none and day 0, assign as 19+
     df[k562=='none' & day == 0][, k562 := 'cd19-'], #none and day 0, assign as 19-
     df[car =='untrans' & day != 0][, k562 := 'cd19+'], #add back untrans
     df[car =='untrans' & day != 0][, k562 := 'cd19-']
