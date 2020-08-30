@@ -50,9 +50,12 @@ redo_umap_param_search = redo_umap_param_search && redo_umap_clustering
 # map day 0 to both plus and minus
 map_day_0 <- function(df) {
   return(rbind(
-    df[k562!='none'],
-    df[k562=='none'][, k562 := 'cd19+'],
-    df[k562=='none'][, k562 := 'cd19-']
+    df[k562!='none'], #gets all cd19+-
+    #df[rep(keep_none, .N) & k562=='none' & day > 0], 
+    df[k562=='none' & day == 0][, k562 := 'cd19+'], #none and day 0, assign as 19+
+    df[k562=='none' & day == 0][, k562 := 'cd19-'], #none and day 0, assign as 19-
+    df[car =='untrans' & day != 0][, k562 := 'cd19+'], #add back untrans
+    df[car =='untrans' & day != 0][, k562 := 'cd19-']
   ))
 }
 
@@ -121,7 +124,7 @@ umap_cd4_fcs_dt <- run_umap(exh_dt_cd4, 0.005, 15, 200, umap_vars)
 umap_cd8_fcs_dt <- run_umap(exh_dt_cd8, 0.005, 15, 200, umap_vars)
 
 fwrite(umap_cd4_fcs_dt, 
-  compress='gzip', ,
+  compress='gzip',
   file=file.path(here::here('..','data','exh.sampled.umap_cd4.csv.gz')))
 
 fwrite(umap_cd8_fcs_dt, 
