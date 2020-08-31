@@ -734,6 +734,10 @@ umap_plot_by_car <- function(subset, plot_title_text="", assay, cluster_resoluti
   return(umap_plots)
 }
 
+all_plots_for_subset <- function(subset, assay, ) {
+  
+}
+
 umap_subset <- function(this_subset, 
     plot_title_text="", assay='RNA', cluster_resolution=0.8, save=T, rerun=F) {
   
@@ -786,9 +790,11 @@ umap_subset <- function(this_subset,
       this_subset <- readRDS(rds_file)
   }
   
+  # plots
   subset_umap_plot <- umap_plot(this_subset, plot_title_text, assay, cluster_resolution)
-  
   car_umap_plot <- umap_plot_by_car(this_subset, plot_title_text, assay, cluster_resolution)
+  car_pca_plot <- plot_pca_cars(this_subset)
+  
   
   if ((rerun | (!file.exists(rds_file))) & save)
     saveRDS(this_subset, file = rds_file)
