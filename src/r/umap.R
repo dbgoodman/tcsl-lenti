@@ -4,15 +4,6 @@ map_day_0 <- function(df) {
     df[k562!='none'], #gets all cd19+-
     #df[rep(keep_none, .N) & k562=='none' & day > 0], 
     df[k562=='none' & day == 0][, k562 := 'cd19+'], #none and day 0, assign as 19+
-    df[k562=='none' & day == 0][, k562 := 'cd19-'] #none and day 0, assign as 19-
-  ))
-}
-
-map_day_0 <- function(df) {
-  return(rbind(
-    df[k562!='none'], #gets all cd19+-
-    #df[rep(keep_none, .N) & k562=='none' & day > 0], 
-    df[k562=='none' & day == 0][, k562 := 'cd19+'], #none and day 0, assign as 19+
     df[k562=='none' & day == 0][, k562 := 'cd19-'], #none and day 0, assign as 19-
     df[car =='untrans' & day != 0][, k562 := 'cd19+'], #add back untrans
     df[car =='untrans' & day != 0][, k562 := 'cd19-']
@@ -318,7 +309,7 @@ visualize_clusters_umap <- function(df) {
     ggtitle('Leiden clusters')
 }
 
-ggumap <- function(df) {
+ggumap <- function(df, df_cluster) {
   
   df[, cluster := factor(cluster)]
   
@@ -365,7 +356,7 @@ ggumap <- function(df) {
     umap_individual, nrow=2, rel_heights=c(2.6,1))
 }
 
-color_plots <- function(umap_df) {
+color_plots <- function(umap_df, umap_vars) {
   cd4_colors = brewer.pal('Greens', n=9)[c(2,4,6,8,9)]
   cd8_colors = brewer.pal('Oranges', n=9)[c(2,4,6,8,9)]
   color_time <- ggplot(umap_df[][, cd19 := (k562=='cd19+')], 
@@ -445,7 +436,7 @@ umap_contour_plots <- function(umap_df){
     ggtitle("CAR Densities by Cluster")
   
   # CLUSTERS BY DAY
-  max_cluster <- max(as.numeric(umap_fcs_dt$cluster), na.rm=T)
+  max_cluster <- max(as.numeric(umap_df$cluster), na.rm=T)
   day_cluster_total_pct_dt <- umap_df[,
     data.table(table(day,cluster, t_type, k562))][,
       list(cluster, pct=N/sum(N)), by=c('k562','day','t_type')]
@@ -479,3 +470,30 @@ umap_contour_plots <- function(umap_df){
     ncol=2)
   
 }
+
+all_by_day <- function(umap_df) {
+  umap_df %>% ggplot(., aes(x=umap_1, y=umap_2))+geom_point(size=0.1, color= "#DCDCDC") + geom_density2d(aes(colour = stat(nlevel)), contour_var = "ndensity") + facet_grid(. ~ day) + theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank(), legend.title = element_blank()) + ggtitle("All Peaks by Day")
+}
+
+visualize_clusters_umap <- function(df) {
+  label_clusters_umap <- df %>% group_by(cluster, cell_type) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+  ggplot(df, aes(x=umap_1, y=umap_2, color=as.factor(cluster)))+geom_point(size=0.1) +theme_bw()+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label_repel(aes(label=cell_type, size=10), data=label_clusters_umap)+guides(colour=FALSE)+ggtitle('Leiden clusters')
+}
+
+biomarker_corr <- function(df) {
+  biomarkers <- df[, c(9, 11:15)]
+  corr <- round(cor(biomarkers),2)
+  p.mat <- cor_pmat(biomarkers)
+  ggcorrplot(corr, method = "circle", type = "upper", outline.col = "white", p.mat = p.mat, ggtheme= ggplot2::theme_gray, colors = c("#6D9EC1", "white", "#E46726"))
+}
+
+biomarker_corr_by_day <- function(df) {
+  plot_grid(df %>% filter(day==0) %>% biomarker_corr()
+            , df %>% filter(day==6) %>% biomarker_corr(), df %>% filter(day==15) %>% biomarker_corr(), df %>% filter(day==24) %>% biomarker_corr(), df %>% filter(day==33) %>% biomarker_corr(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24', 'Day 33'), nrow=3)
+}
+
+biomarker_corr_by_car <- function(df) {
+  plot_grid(df %>% filter(car=='41BB') %>% biomarker_corr()
+            , df %>% filter(car=='untrans') %>% biomarker_corr(), df %>% filter(car=='BAFF-R') %>% biomarker_corr(), df %>% filter(car=='CD28') %>% biomarker_corr(), df %>% filter(car=='CD40') %>% biomarker_corr(), df %>% filter(car=='KLRG1') %>% biomarker_corr(), df %>% filter(car=='TACI') %>% biomarker_corr(), df %>% filter(car=='TNR8') %>% biomarker_corr(), df %>% filter(car=='zeta') %>% biomarker_corr(), labels = c('41BB', 'untrans', 'BAFF-R', 'CD28', 'CD40', 'KLRG1', 'TACI', 'TNR8', 'zeta'), nrow=3)
+}
+
