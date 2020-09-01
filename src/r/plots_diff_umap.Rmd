@@ -196,7 +196,7 @@ all_by_day(umap_cd4_fcs_dt)
 ```
 
 #### Individual CARs
-```{r fig.width=15, fig.height=30}
+```{r fig.width=22, fig.height=15}
 #CD8
 umap_contour_plots(umap_cd8_fcs_dt)
 
@@ -206,16 +206,16 @@ umap_contour_plots(umap_cd4_fcs_dt)
 
 ## Grouped Cluster Plots 
 
-```{r, fig.width=15, fig.height=30}
+```{r, fig.width=22, fig.height=30}
 #CD8
-all_plots(umap_cd8_fcs_dt, umap_cd8_cluster_dt, dendro=F)
+all_plots(umap_cd8_fcs_dt, channel_map, umap_vars, 'CD8', dendro=F)
 
 #CD4
-all_plots(umap_cd4_fcs_dt,umap_cd4_cluster_dt, dendro=F)
+all_plots(umap_cd4_fcs_dt, channel_map, umap_vars, 'CD4', dendro=F)
 ```
 
 ### Labeled Leiden Clusters Map
-```{r fig.width=15, fig.height=8}
+```{r fig.width=15, fig.height=8, eval=F}
 # manually determined 
 #CD8
 cd8_diff_by_cluster <- data.frame("cluster" = c(1:20), "cell_type" = c('1-TN', '2-TN', '3-TEM', '4-TSCM (cd95-)', '5-TCM', '6-TEM', '7-TEMRA', '8-TEFF (cd27+)', '9-TEM', '10-TEM (cd27+)', '11-TN', '12-TEM', '13-TCM', '14-TEM', '15-TEM (cd27+)', '16-TN', '17-TEM', '18-TEM', '19-TEFF', '20-TN'))
@@ -264,7 +264,7 @@ ggplot(umap_cd4_fcs_dt, aes(x=umap_1, y=umap_2, color=as.factor(donor)))+geom_po
 
 ## Correlation
 
-```{r fig.width=15, fig.height=11}
+```{r fig.width=15, fig.height=11, eval=F}
 #cd8
 biomarker_corr_by_day(umap_cd8_fcs_dt)
 biomarker_corr_by_car(umap_cd8_fcs_dt)

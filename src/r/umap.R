@@ -111,7 +111,7 @@ run_umap <- function(dt, chosen_dist, chosen_n_neighbor, sample_n, umap_vars,
   return(umap_fcs_dt)
 }
 
-all_plots <- function(umap_fcs_dt, cell_type, dendro=F) {
+all_plots <- function(umap_fcs_dt, channel_map, umap_vars, cell_type, dendro=F) {
   
   umap_fcs_dt[, cluster := factor(cluster)]
   
