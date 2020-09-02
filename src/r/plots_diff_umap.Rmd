@@ -63,16 +63,20 @@ map_day_0 <- function(df) {
 ```
 
 # Filter Data
+
+## Separate CD4 and CD8
 ```{r, eval=redo_umap_clustering}
-#filter diff_dt by cd4/8 type, cd19+ (map day 0)
+#filter diff_dt by cd4/8 type, cd19+ (map day 0), by donor if needed
 
 #cd4, cd19+, donor 
 diff_dt_cd4 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd4', k562=='cd19+')
 
 #cd8, cd19+, donor
 diff_dt_cd8 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd8', k562=='cd19+')
+```
 
-
+## Run this chunk when using both donors
+```{r, eval=redo_umap_clustering}
 ## Remove car/day combinations that aren't in both donors, by t_type
 cd4_matches <- plyr::match_df(diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day) #43 matches
 
@@ -81,26 +85,13 @@ cd8_matches <- plyr::match_df(diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', 
 #filter diff_dt by matched combinations
 diff_dt_cd4 <- plyr::match_df(diff_dt_cd4, cd4_matches)
 diff_dt_cd8 <- plyr::match_df(diff_dt_cd8, cd8_matches)
+```
 
+## Remove Day 33
+```{r, eval=redo_umap_clustering}
 # remove day 33
 diff_dt_cd4 <- diff_dt_cd4 %>% filter(!day == 33)
 diff_dt_cd8 <- diff_dt_cd8 %>% filter(!day == 33)
-
-```
-
-## Double checking car/day combinations that aren't in both donors
-```{r, eval=F}
-diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 1 CD4: 43 combinations available (33 BAFF-R and CD28 missing)
-
-diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 1 CD8: 40 combinations available (24 zeta, 33 zeta, BAFF-R, TACI, and KLRG1 missing)
-
-diff_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 2 CD4: all 45 combinations available
-
-diff_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 2 CD8: 42 combinations available (33 zeta and KLRG1 missing)
 ```
 
 # UMAP
@@ -237,7 +228,7 @@ visualize_clusters_umap(umap_cd4_fcs_dt)
 ```
 
 ## Batch Effect (Run when using both donors for UMAP)
-```{r fig.width=20, fig.height=11}
+```{r fig.width=20, fig.height=11, eval=F}
 # bar plot showing points per cluster by donor
 batch_effect_bars <- function(umap_df) {
   umap_df %>% 

@@ -1,5 +1,5 @@
 ---
-title: "Differentiation Plots for Arrayed Screens"
+title: "Exhaustion Plots for Arrayed Screens"
 output:
   html_document:
     df_print: paged
@@ -38,7 +38,8 @@ use_condaenv(condaenv = 'r-reticulate', required = TRUE)
 ```{r}
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'exh.sampled.Rdata'))
-exh_dt <- fread(file.path(data_dir, 'exh.sampled.csv.gz'))
+#file not found, but exh_dt is already an object in the .Rdata file
+#exh_dt <- fread(file.path(data_dir, 'exh.sampled.csv.gz'))
 
 censor_negative_min = -1500
 redo_umap_clustering = F
@@ -65,44 +66,40 @@ redo_umap_param_search = F
 
 ```
 
-# UMAP
-
-For now, skip straight to high dimensional plotting.
-
 # Filter Data
-```{r}
-#filter diff_dt by cd4/8 type, cd19+ (map day 0), donor == 1 or 2
+## Separate CD4 and CD8
+```{r, eval=redo_umap_clustering}
+#filter exh_dt by cd4/8 type, cd19+ (map day 0), by donor if needed
 
 #cd4, cd19+, donor 
 exh_dt_cd4 <- exh_dt %>% map_day_0() %>% filter(t_type == 'cd4', k562=='cd19+')
 
 #cd8, cd19+, donor
 exh_dt_cd8 <- exh_dt %>% map_day_0() %>% filter(t_type == 'cd8', k562=='cd19+')
+```
 
-
+## Run this chunk when using both donors
+```{r, eval=redo_umap_clustering}
 ## Remove car/day combinations that aren't in both donors, by t_type
-cd4_matches <- plyr::match_df(exh_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), exh_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day) #43 matches
+cd4_matches <- plyr::match_df(exh_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), exh_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day)
 
-cd8_matches <- plyr::match_df(exh_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), exh_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day) #40 matches
+cd8_matches <- plyr::match_df(exh_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day), exh_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day)) %>% arrange(day)
 
 #filter exh_dt by matched combinations
 exh_dt_cd4 <- plyr::match_df(exh_dt_cd4, cd4_matches)
 exh_dt_cd8 <- plyr::match_df(exh_dt_cd8, cd8_matches)
 ```
-## Double checking car/day combinations that aren't in both donors
-```{r, eval=F}
-exh_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 1 CD4: 43 combinations available (33 BAFF-R and CD28 missing)
 
-exh_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 1, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 1 CD8: 40 combinations available (24 zeta, 33 zeta, BAFF-R, TACI, and KLRG1 missing)
-
-exh_dt %>% map_day_0 %>% filter(t_type == 'cd4', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 2 CD4: all 45 combinations available
-
-exh_dt %>% map_day_0 %>% filter(t_type == 'cd8', donor == 2, k562=='cd19+') %>% filter(!is.na(event_id)) %>% distinct(car, day) %>% arrange(day)
-#Donor 2 CD8: 42 combinations available (33 zeta and KLRG1 missing)
+## Remove Day 33
+```{r, eval=redo_umap_clustering}
+# remove day 33
+exh_dt_cd4 <- exh_dt_cd4 %>% filter(!day == 33)
+exh_dt_cd8 <- exh_dt_cd8 %>% filter(!day == 33)
 ```
+
+# UMAP
+
+For now, skip straight to high dimensional plotting.
 
 ## UMAP Functions
 ```{r}
@@ -113,15 +110,15 @@ channel_map <- exh_opt_cd4$channel_map
 umap_vars <- c(paste0(names(channel_map),'_t'))
 
 # removing zombie, cd_t, myc_t, gfp_t
-umap_vars <- umap_vars[!umap_vars %in% c('cd_t', 'zombie_t', 'myc_t', 'gfp_t')]
+umap_vars <- umap_vars[!umap_vars %in% c('cd8_t', 'zombie_t', 'myc_t', 'gfp_t')]
 ```
 
 ## Run UMAP
 Scaling this to 200 events per well and checking CAR/condition separation.
 
 ```{r, eval=redo_umap_clustering}
-umap_cd4_fcs_dt <- run_umap(exh_dt_cd4, 0.005, 15, 200, umap_vars)
-umap_cd8_fcs_dt <- run_umap(exh_dt_cd8, 0.005, 15, 200, umap_vars)
+umap_cd4_fcs_dt <- run_umap(exh_dt_cd4, 0.005, 15, 1000, umap_vars)
+umap_cd8_fcs_dt <- run_umap(exh_dt_cd8, 0.005, 15, 1000, umap_vars)
 
 fwrite(umap_cd4_fcs_dt, 
   compress='gzip',
@@ -139,32 +136,62 @@ system('aws s3 sync \\
   ~/local-tcsl/data s3://roybal-tcsl/lenti_screen_compiled_data/data')
 ```
 
-Choosing neighbors == 30 and min_dist == 1e-4. 
+## Cluster Analysis
 
-## Checking UMAP Param space
+### UMAP Plots
+```{r, fig.width=15, fig.height=15}
+#read in cd8 umap data
+umap_cd8_fcs_dt <- fread(
+  file.path(
+    here::here('..','data','exh.sampled.umap_cd8.csv.gz')))
+umap_cd8_fcs_dt[, cluster := factor(cluster)]
 
-Scaling this to 200 events per well and checking CAR/condition separation.
+umap_cd8_cluster_dt <- umap_cd8_fcs_dt[, list(
+  mean_umap_1= mean(umap_1), 
+  mean_umap_2= mean(umap_2), 
+  size= .N), by=cluster]
 
-```{r, fig.width=15, fig.height=20}
+#read in cd4 umap data
+umap_cd4_fcs_dt <- fread(
+  file.path(
+    here::here('..','data','exh.sampled.umap_cd4.csv.gz')))
+umap_cd4_fcs_dt[, cluster := factor(cluster)]
+
+umap_cd4_cluster_dt <- umap_cd4_fcs_dt[, list(
+  mean_umap_1= mean(umap_1), 
+  mean_umap_2= mean(umap_2), 
+  size= .N), by=cluster]
+
+#plot umap
 #CD8
-ggumap(umap_cd8_fcs_dt)
+ggumap(umap_cd8_fcs_dt, umap_cd8_cluster_dt)
 
 #CD4
-ggumap(umap_cd4_fcs_dt)
+ggumap(umap_cd4_fcs_dt, umap_cd4_cluster_dt)
 ```
 
 ### UMAP Color Plots
 ```{r, fig.width=15, fig.height=10}
 #cd8
-color_plots(umap_cd8_fcs_dt)
+color_plots(umap_cd8_fcs_dt, umap_vars)
 
 #cd4
-color_plots(umap_cd4_fcs_dt)
+color_plots(umap_cd4_fcs_dt, umap_vars)
 ```
 
-## UMAP Contour Plots
+## Temporal UMAP Visualizations 
+### Contour Plots
 
-```{r fig.width=7.5, fig.height=20}
+#### All CARs
+```{r, fig.width=15, fig.height=3}
+#all cars by day
+all_by_day(umap_cd8_fcs_dt)
+
+all_by_day(umap_cd4_fcs_dt)
+```
+
+#### Individual CARs
+```{r fig.width=22, fig.height=15}
 #CD8
 umap_contour_plots(umap_cd8_fcs_dt)
 
@@ -174,10 +201,70 @@ umap_contour_plots(umap_cd4_fcs_dt)
 
 ## Grouped Cluster Plots 
 
-```{r, fig.width=30, fig.height=15}
+```{r, fig.width=22, fig.height=30}
 #CD8
-all_plots(umap_cd8_fcs_dt, 'CD8', dendro=F)
+all_plots(umap_cd8_fcs_dt, channel_map, umap_vars, 'CD8', dendro=F)
 
 #CD4
-all_plots(umap_cd4_fcs_dt, 'CD4', dendro=F)
+all_plots(umap_cd4_fcs_dt, channel_map, umap_vars, 'CD4', dendro=F)
+```
+
+### Labeled Leiden Clusters Map
+```{r fig.width=15, fig.height=8, eval=F}
+# manually determined 
+#CD8
+cd8_diff_by_cluster <- data.frame("cluster" = c(1:20), "cell_type" = c('1-TN', '2-TN', '3-TEM', '4-TSCM (cd95-)', '5-TCM', '6-TEM', '7-TEMRA', '8-TEFF (cd27+)', '9-TEM', '10-TEM (cd27+)', '11-TN', '12-TEM', '13-TCM', '14-TEM', '15-TEM (cd27+)', '16-TN', '17-TEM', '18-TEM', '19-TEFF', '20-TN'))
+cd8_diff_by_cluster$cluster <- as.factor(cd8_diff_by_cluster$cluster)
+umap_cd8_fcs_dt <- left_join(umap_cd8_fcs_dt, cd8_diff_by_cluster, by='cluster')
+
+#CD4
+cd4_diff_by_cluster <- data.frame("cluster" = c(1:20), "cell_type" = c('1-TN', '2-TN', '3-TEM', '4-TSCM', '5-TEM', '6-TCM', '7-TEM (cd27+)', '8-TEMRA (cd62l+, cd27+)', '9-TEMRA', '10-TEMRA (cd61l+, cd27+)', '11-TEM (cd27+)', '12-TCM', '13-TEM', '14-TEMRA', '15-TEM (cd27+)', '16-TEM (cd27+)', '17-TEM', '18-TEMRA (cd27+)', '19-TEM', '20-TEM'))
+cd4_diff_by_cluster$cluster <- as.factor(cd4_diff_by_cluster$cluster)
+umap_cd4_fcs_dt <- left_join(umap_cd4_fcs_dt, cd4_diff_by_cluster, by='cluster')
+
+#Labeled Leiden Clusters Map
+
+#cd8
+visualize_clusters_umap(umap_cd8_fcs_dt)
+
+#cd4
+visualize_clusters_umap(umap_cd4_fcs_dt)
+```
+
+## Batch Effect (Run when using both donors for UMAP)
+```{r fig.width=20, fig.height=11, eval=F}
+# bar plot showing points per cluster by donor
+batch_effect_bars <- function(umap_df) {
+  umap_df %>% 
+  group_by(cluster, car, day) %>% 
+  count(donor) %>% rename(donor_count = n) %>% 
+  group_by(cluster, donor) %>% 
+  summarise(Sum = sum(donor_count)) %>% 
+  ggplot(., aes(x=cluster, y=Sum, fill=factor(donor))) + 
+  geom_bar(stat="identity", position = position_dodge()) + 
+  theme_minimal() + 
+  scale_fill_discrete(name="Donor", breaks=c("1", "2"), labels=c("Donor 1", "Donor 2"))
+}
+
+batch_effect_bars(umap_cd8_fcs_dt)
+
+label_donor_umap <- umap_cd8_fcs_dt %>% group_by(donor) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+ggplot(umap_cd8_fcs_dt, aes(x=umap_1, y=umap_2, color=as.factor(donor)))+geom_point(size=0.1,alpha = 0.5, position=position_jitter(h=0.15,w=0.15))+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label(aes(label=donor), data=label_donor_umap, size=5)+guides(colour=FALSE)+ggtitle('UMAP by Donor') + scale_color_viridis(discrete=TRUE)+theme_minimal()
+
+batch_effect_bars(umap_cd4_fcs_dt)
+
+label_donor_umap_cd4 <- umap_cd4_fcs_dt %>% group_by(donor) %>% select(umap_1, umap_2) %>% summarize_all(mean)
+ggplot(umap_cd4_fcs_dt, aes(x=umap_1, y=umap_2, color=as.factor(donor)))+geom_point(size=0.1,alpha = 0.5, position=position_jitter(h=0.15,w=0.15))+theme(panel.grid.major = element_blank(), panel.grid.minor=element_blank())+geom_label(aes(label=donor), data=label_donor_umap_cd4, size=5)+guides(colour=FALSE)+ggtitle('UMAP by Donor') + scale_color_viridis(discrete=TRUE)+theme_minimal()
+```
+
+## Correlation
+
+```{r fig.width=15, fig.height=11, eval=F}
+#cd8
+biomarker_corr_by_day(umap_cd8_fcs_dt)
+biomarker_corr_by_car(umap_cd8_fcs_dt)
+
+#cd4
+biomarker_corr_by_day(umap_cd4_fcs_dt)
+biomarker_corr_by_car(umap_cd4_fcs_dt)
 ```
