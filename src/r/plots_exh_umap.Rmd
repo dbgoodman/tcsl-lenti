@@ -93,8 +93,8 @@ exh_dt_cd8 <- plyr::match_df(exh_dt_cd8, cd8_matches)
 ## Remove Day 33
 ```{r, eval=redo_umap_clustering}
 # remove day 33
-exh_dt_cd4 <- exh_dt_cd4 %>% filter(!day == 33)
-exh_dt_cd8 <- exh_dt_cd8 %>% filter(!day == 33)
+exh_dt_cd4 <- exh_dt_cd4 %>% filter(!day == 33) %>% filter(!car %in% c('KLRG1', 'untrans'))
+exh_dt_cd8 <- exh_dt_cd8 %>% filter(!day == 33) %>% filter(!car %in% c('KLRG1', 'untrans'))
 ```
 
 # UMAP
@@ -232,7 +232,7 @@ visualize_clusters_umap(umap_cd4_fcs_dt)
 ```
 
 ## Batch Effect (Run when using both donors for UMAP)
-```{r fig.width=20, fig.height=11, eval=F}
+```{r fig.width=20, fig.height=11}
 # bar plot showing points per cluster by donor
 batch_effect_bars <- function(umap_df) {
   umap_df %>% 
