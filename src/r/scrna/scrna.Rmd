@@ -425,6 +425,13 @@ plot_grid(
   density_bar_plots(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CD62L.adt', x_cutoff=0.6, y_axis='CD27.adt', y_cutoff=0.4, title='CD8, RO+, 62L v CD27'),
   ncol=2
 )
+
+#### RO+, CCR7 v CD49b
+plot_grid(
+  density_bar_plots(make_citeseq_dt(scrna.cd4)[CD45RO.adt > 0.25], x_axis='CCR7.adt', x_cutoff=0.25, y_axis='CD49b.adt', y_cutoff=0.6, title='CD4 CCR7 v 49b'),
+  density_bar_plots(make_citeseq_dt(scrna.cd8)[CD45RO.adt > 0.25], x_axis='CCR7.adt', x_cutoff=0.25, y_axis='CD49b.adt', y_cutoff=0.6, title='CD8 CCR7 v 49b'),
+  ncol=2
+)
 ```
 
 # PCA of CARs
@@ -433,16 +440,16 @@ plot_grid(
 library(ggrepel)
 library(cowplot)
 
-plot_pca <- function(obj_subset, axes=c('car','k_type'), min_pct_exp = 10) {
+plot_pca <- function(obj_subset, axes=c('car','k_type'), min_pct_exp = 10, assay='RNA') {
   
   obj_subset@meta.data[['pca_group']] <- do.call(paste, c(obj_subset@meta.data[axes], sep="_"))
   Idents(obj_subset) <- 'pca_group'
   
-  rna_gene_set <- rownames(obj_subset@assays$RNA@data)[
+  rna_gene_set <- rownames(obj_subset@assays[[assay]]@data)[
     (tabulate(obj_subset@assays$RNA@data@i + 1) / 
       ncol(obj_subset@assays$RNA@data) * 100) > min_pct_exp]
   
-  adt_gene_set <- rownames(obj_subset@assays$RNA@data)[
+  adt_gene_set <- rownames(obj_subset@assays[[assay]]@data)[
     (tabulate(obj_subset@assays$RNA@data@i + 1) / 
       ncol(obj_subset@assays$ADT@data) * 100) > min_pct_exp]
   
@@ -502,14 +509,14 @@ plot_gene_assoc_bar <- function(pca_data, PC_name, n_genes=10) {
     labs(x='',y='', title=PC_name)
 }
 
-plot_pca_cars <- function(obj_subset, title, axes=c('car','k_type'), min_pct_exp=10) {
-  pca_data <- plot_pca(obj_subset, axes, min_pct_exp)
-  plot_grid(
+plot_pca_cars <- function(obj_subset, title, axes=c('car','k_type'), min_pct_exp=10, assay='RNA') {
+  pca_data <- plot_pca(obj_subset, axes, min_pct_exp, assay)
+  return(plot_grid(
     pca_data$pca_plot + theme_minimal() + labs(title=title),
-    plot_gene_assoc_bar(pca_data, 'PC1', n_genes=10),
-    plot_gene_assoc_bar(pca_data, 'PC2', n_genes=10),
+    plot_gene_assoc_bar(pca_data, 'PC1', n_genes=25),
+    plot_gene_assoc_bar(pca_data, 'PC2', n_genes=25),
     ncol=3, nrow=1,
-    rel_widths=c(5, 1, 1))
+    rel_widths=c(5, 1, 1)))
 }
 
 plot_pca_cars(subset(scrna.cd4, subset=(k_type == 'cd19+' & car %in% c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta'))), title='CD4 CD19+ PCA (Stimulatory CARs)')
@@ -555,7 +562,7 @@ comp_car_volcano(subset(scrna.cd4, subset=(k_type == 'cd19+')), ident.1=c('CD28'
 
 ```
 
-# correlation plots
+## correlation plots
 
 ```{r}
 library(spatstat)
@@ -604,6 +611,108 @@ corr_plots <- function(subset_obj, assay='ADT') {
 }
 ```
 
+## Gene Set Enrichment
+
+https://learn.gencore.bio.nyu.edu/rna-seq-analysis/gene-set-enrichment-analysis/
+
+```{r}
+
+# BiocManager::install("clusterProfiler", version = "3.8")
+# BiocManager::install("pathview")
+# BiocManager::install("enrichplot")
+# BiocManager::install(organism, character.only = TRUE)
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(organism, character.only = TRUE)
+
+gene_data <- data.table(
+    comp_car_volcano(subset(scrna.cd4, subset=(k_type == 'cd19+')), 
+    ident.1=c('CD28'), ident.2='BAFF-R', lbl_pval_cutoff = 3, min.pct=0.25, 
+    assay='RNA')$markers, 
+    keep.rownames = T)
+names(gene_data)[1] <- 'gene'
+
+gene_list <- gene_data$avg_logFC
+names(gene_list) <- gene_data$gene
+gene_list = sort(gene_list, decreasing = TRUE)
+
+organism = "org.Hs.eg.db"
+gse <- gseGO(geneList=gene_list, 
+             ont ="MF", 
+             keyType = "SYMBOL", 
+             nPerm = 10000, 
+             minGSSize = 3, 
+             maxGSSize = 100, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "none")
+
+dotplot(gse, showCategory=25, split='.sign') + facet_grid(.~.sign)
+cnetplot(gse, categorySize="pvalue", foldChange=gene_list, showCategory = 50)
+
+ids<-bitr(names(gene_list), fromType = "SYMBOL", toType = "ENTREZID", OrgDb=organism)
+#some manual ones:
+ids <- data.table(
+    rbind(
+    ids,
+    c('SEPT6', 23157),
+    c('WARS', 7453),
+    c('H2AFZ', 3015),
+    c('RARRES3', 5920),
+    c('H3F3A', 3020),
+    c('FAM96B', 51647),
+    c('GARS', 2617),
+    c('H1FX', 8971),
+    c('KIAA1551',55196),
+    c('EPRS', 2058),
+    c('AES',166)))
+names(ids) <- c('gene','entrez')
+
+gene_data_kegg <- data.table(ids)[gene_data, on='gene']
+
+# Create a vector of the gene unuiverse
+kegg_gene_list <- gene_data_kegg$avg_logFC
+# Name vector with ENTREZ ids
+names(kegg_gene_list) <- gene_data_kegg$entrez
+
+# omit any NA values 
+kegg_gene_list<-na.omit(kegg_gene_list)
+
+# sort the list in decreasing order (required for clusterProfiler)
+kegg_gene_list = sort(kegg_gene_list, decreasing = TRUE)
+
+kegg_organism = "hsa"
+kk2 <- gseKEGG(geneList     = kegg_gene_list,
+               organism     = kegg_organism,
+               nPerm        = 10000,
+               minGSSize    = 3,
+               maxGSSize    = 800,
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "none",
+               keyType       = "ncbi-geneid")
+
+kk2@result$core_enrichment <- gene_data_kegg[
+    data.table(kk2@result)[, list(
+        entrez=unlist(strsplit(core_enrichment, '/'))), by='ID'], 
+            on='entrez'][, list(core_enrichment=paste(gene, collapse='/')), by='ID']$core_enrichment
+
+
+
+dotplot(kk2, showCategory = 10, title = "Enriched Pathways" , split=".sign") + facet_grid(.~.sign)
+
+kegg_gene_list <- gene_data_kegg$avg_logFC
+# Name vector with ENTREZ ids
+names(kegg_gene_list) <- gene_data_kegg$gene
+# omit any NA values 
+kegg_gene_list<-na.omit(kegg_gene_list)
+# sort the list in decreasing order (required for clusterProfiler)
+kegg_gene_list = sort(kegg_gene_list, decreasing = TRUE)
+
+cnetplot(kk2, categorySize="pvalue", foldChange=kegg_gene_list, showCategory=50)
+
+```
 ## Make UMAP plots and objects for each subset
 
 ```{r umap_each_subset, eval=reload_data}
@@ -734,78 +843,124 @@ umap_plot_by_car <- function(subset, plot_title_text="", assay, cluster_resoluti
   return(umap_plots)
 }
 
-all_plots_for_subset <- function(subset, assay, ) {
-  
-}
-
 umap_subset <- function(this_subset, 
-    plot_title_text="", assay='RNA', cluster_resolution=0.8, save=T, rerun=F) {
+    plot_title_text="", assay='RNA', cluster_resolution=0.8,
+    save=T, save_plots=T, rerun=F, return_all=F) {
   
   DefaultAssay(this_subset) <- assay
-  this_subset <- subset(this_subset, 
+  this_subset_umap <- subset(this_subset, 
     features=rownames(this_subset@assays[[assay]]))
+  
+  subset_name <- gsub(' ','.',plot_title_text)
   
   rds_file <- here::here(
     '..','..','scrnaseq_tcsl154',
     'rds',
     paste0(
         'scrna.hashed.',
-        gsub(' ','.',plot_title_text),
+        subset_name,
         '.rds'))
+  
+  plot_dir <- here::here(
+    '..','figs','scrna',
+    'subset_plots',
+    subset_name)
+  
+  if (save_plots) dir.create(plot_dir, recursive=T)
   
   if (rerun || !file.exists(rds_file)) {
     
       if (assay == 'RNA') {
-        this_subset <- NormalizeData(
-            this_subset,
+        this_subset_umap <- NormalizeData(
+            this_subset_umap,
             normalization.method = "LogNormalize", 
             scale.factor = 10000)
       } else if (assay == 'ADT') {
-          this_subset <- NormalizeData(
-            this_subset,
+          this_subset_umap <- NormalizeData(
+            this_subset_umap,
             normalization.method = "CLR")
       }
       
-      this_subset <- FindVariableFeatures(
-          this_subset, 
+      this_subset_umap <- FindVariableFeatures(
+          this_subset_umap, 
           selection.method = "vst",
           nfeatures = 2000)
       
-      this_subset <- ScaleData(
-        this_subset, assay=assay,
-        features= VariableFeatures(this_subset))
+      this_subset_umap <- ScaleData(
+        this_subset_umap, assay=assay,
+        features= VariableFeatures(this_subset_umap))
     
-      this_subset <- RunPCA(
-        this_subset, features = VariableFeatures(this_subset))
+      this_subset_umap <- RunPCA(
+        this_subset_umap, features = VariableFeatures(this_subset_umap))
     
-      this_subset <- FindNeighbors(this_subset, reduction = "pca", dims = 1:8)
-      this_subset <- FindClusters(this_subset, resolution = cluster_resolution, algorithm=1)
-      this_subset <- RunUMAP(this_subset, dims = 1:8)
+      this_subset_umap <- FindNeighbors(this_subset_umap, reduction = "pca", dims = 1:8)
+      this_subset_umap <- FindClusters(this_subset_umap, resolution = cluster_resolution, algorithm=1)
+      this_subset_umap <- RunUMAP(this_subset_umap, dims = 1:8)
     
-      this_subset@meta.data[['car.ttype.ktype']] <- paste(
-        this_subset@meta.data[['car']],
-        this_subset@meta.data[['CD4v8']],
-        this_subset@meta.data[['k_type']], sep='_')
+      this_subset_umap@meta.data[['car.ttype.ktype']] <- paste(
+        this_subset_umap@meta.data[['car']],
+        this_subset_umap@meta.data[['CD4v8']],
+        this_subset_umap@meta.data[['k_type']], sep='_')
   } else {
-      this_subset <- readRDS(rds_file)
+      this_subset_umap <- readRDS(rds_file)
   }
   
   # plots
-  subset_umap_plot <- umap_plot(this_subset, plot_title_text, assay, cluster_resolution)
-  car_umap_plot <- umap_plot_by_car(this_subset, plot_title_text, assay, cluster_resolution)
-  car_pca_plot <- plot_pca_cars(this_subset)
+  subset_umap_plot <- umap_plot(this_subset_umap, plot_title_text, assay, cluster_resolution)
+  car_umap_plot <- umap_plot_by_car(this_subset_umap, plot_title_text, assay, cluster_resolution)
+  car_pca_plot <- plot_pca_cars(this_subset, title=plot_title_text, axes=c('car','k_type','CD4v8'))
   
+  if (save_plots) {
+    fn_pref = paste0(plot_dir,'/',subset_name,'.')
+    ggsave(paste0(fn_pref,'subset_umap.pdf'), subset_umap_plot, width=15, height=9)
+    ggsave(paste0(fn_pref,'car_umap_plot.pdf'), car_umap_plot, width=15, height=9)
+    ggsave(paste0(fn_pref,'car_pca_plot.pdf'), car_pca_plot, width=10, height=10)
+  }
+  
+  # volcano plots
+  if (assay == 'RNA') {
+    Idents(this_subset) <- 'car'
+    a_sets = list(c('BAFF-R'), c('TACI'), c('CD40'), c('BAFF-R','TACI'), c('BAFF-R','TACI','CD40'))
+    b_sets = list(c('CD28'), c('CD28','Zeta'), c('CD28','4-1BB','Zeta'))
+    volcano_plots = list()
+    
+    for (ident_a in a_sets) {
+      volcano_plots[[ident_a]] = list()
+      ident_a_name <- paste(ident_a, collapse='_')
+      for (ident_b in b_sets) {
+        ident_b_name <- paste(ident_b, collapse='_' )
+        volcano_plots[[ident_a_name]][[ident_b_name]] <- comp_car_volcano(
+          this_subset, ident.1=ident_a, ident.2=ident_b, lbl_pval_cutoff = 3, min.pct=0.25, assay=assay)
+        if (save_plots) {
+          fn = paste0(plot_dir,'/',subset_name,'.',
+            ident_a_name,'_VS_',ident_b_name,'.volcano.pdf')
+          ggsave(fn, volcano_plots[[ident_a_name]][[ident_b_name]]$plot, width=8, height=8, units='in')
+        }
+      }
+    }
+  }
   
   if ((rerun | (!file.exists(rds_file))) & save)
     saveRDS(this_subset, file = rds_file)
-      
-  return(list(
-    cluster_plot=subset_umap_plot,
-    car_plot=car_umap_plot,
-    rds_file=rds_file))
+    
+  if (return_all) {
+    return(list(
+      cluster_plot=subset_umap_plot,
+      car_plot=car_umap_plot,
+      volcano_plots=volcano_plots,
+      pca_plot=car_pca_plot,
+      rds_file=rds_file))
+  } else {
+    return(list(
+        cluster_plot=subset_umap_plot,
+        car_plot=car_umap_plot,
+        volcano_plots=volcano_plots,
+        pca_plot=car_pca_plot,
+        rds_file=rds_file))
+  }
 }
 
-stimulatory_cars <- c('4-1BB','BAFF-R','CD40','TACI','CD28')
+stimulatory_cars <- c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')
 
 if (!reload_data && !('umap_plots' %in% ls()) )
 {
@@ -816,7 +971,7 @@ if (!reload_data && !('umap_plots' %in% ls()) )
   subset_fxns= list(
       
       # all cars
-      function(obj) obj,
+      function(obj) subset(obj, subset = (car != 'K_only')),
       function(obj) subset(obj, subset = (CD4v8 == 'CD4' & car != 'K_only')),
       function(obj) subset(obj, subset = (CD4v8 == 'CD8' & car != 'K_only')),
       function(obj) subset(obj, subset = (k_type == 'cd19+' & car != 'K_only')),
@@ -825,7 +980,9 @@ if (!reload_data && !('umap_plots' %in% ls()) )
       function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4' & car != 'K_only')),
       function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car != 'K_only')),
       
+      
       #unstimulated 4s and 8s
+      function(obj) subset(obj, subset = (k_type == 'baseline' & car != 'K_only')),
       function(obj) subset(obj, subset = (k_type == 'baseline' & CD4v8 == 'CD4' & car != 'K_only')),
       function(obj) subset(obj, subset = (k_type == 'baseline' & CD4v8 == 'CD8' & car != 'K_only')),
       
@@ -838,7 +995,7 @@ if (!reload_data && !('umap_plots' %in% ls()) )
         CD45RO.adt > 0.25 & CD62L.adt > 0.6)),
       function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% stimulatory_cars &
         CD45RO.adt > 0.25 & CD62L.adt > 0.6)),
-      #stimulatory cars, central memory
+      #stimulatory cars, effector memory
       function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% stimulatory_cars &
         CD45RO.adt > 0.25 & CD62L.adt < 0.6)),
       function(obj) subset(obj, subset = (k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% stimulatory_cars &
@@ -846,17 +1003,19 @@ if (!reload_data && !('umap_plots' %in% ls()) )
     )
 
 
-  subset_names= c('CD4','CD8','CD19','CD4.CD19','CD8.CD19','baseline','CD4.baseline', 'CD8.baseline',
+  subset_names= c('All','CD4','CD8','CD19',
+                  'CD4.CD19','CD8.CD19',
+                  'baseline','CD4.baseline', 'CD8.baseline',
                   'CD4.CD19.stimulatory','CD8.CD19.stimulatory',
                   'CD4.CD19.stimulatory.tcm','CD8.CD19.stimulatory.tcm',
                   'CD4.CD19.stimulatory.teff','CD8.CD19.stimulatory.teff')
   
   umap_plots <- data.table(subset_name= subset_names, subset_fxn_num=1:length(subset_fxns))
   
-  umap_plots[, ADT := list(list(
-      umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))), 
-      by='subset_name']
-  umap_plots[, RNA := list(list(
+  # umap_plots[, ADT := list(list(
+  #     umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))),
+  #     by='subset_name']
+  umap_plots[subset_fxn_num >=10, RNA := list(list(
       umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
       by='subset_name']
 

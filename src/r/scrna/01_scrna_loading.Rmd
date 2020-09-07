@@ -1,0 +1,298 @@
+
+---
+title: "TCSL154 scRNA Analysis - 01 - loaidng"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(tidyr)
+library(Seurat)
+library(patchwork)
+library(cluster)
+library(parallelDist)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+
+reload_data=T
+```
+
+```{r load_data, eval=reload_data}
+# Load the dataset
+scrna.data <- Read10X(data.dir = here::here(
+    '..','..','scrnaseq_tcsl154',
+    'cellranger','outs','raw_feature_bc_matrix'))
+
+#rename some adt features
+hto_rows <- paste('Hashtag',1:12,sep='_')
+
+adt_feature_names <- fread(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'meta','adt_names.tsv'))
+rownames(scrna.data$`Antibody Capture`) <- c(paste0(adt_feature_names$vis_name,'.adt'), hto_rows)
+
+
+#rna features
+scrna <- CreateSeuratObject(
+    counts = scrna.data$`Gene Expression`, 
+    project = "tcsl154", 
+    min.cells = 3,
+    min.features = 200)
+
+adt_rows <- setdiff(rownames(scrna.data$`Antibody Capture`), hto_rows)
+
+#adt features
+scrna[['ADT']] <- CreateAssayObject(
+    counts = scrna.data$`Antibody Capture`[adt_rows, colnames(scrna)])
+```
+
+## RNA QC metrics
+
+```{r rna_qc, fig.width=4, fig.height=4, eval=reload_data}
+
+scrna[["percent.mt"]] <- PercentageFeatureSet(scrna, pattern = "^MT-")
+
+VlnPlot(scrna, 
+  pt.size=F, 
+  features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+plot1 <- FeatureScatter(
+  scrna, feature1 = "nCount_RNA", feature2 = "percent.mt")
+
+plot2 <- FeatureScatter(
+  scrna, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+
+plot1 + plot2
+
+scrna <- subset(
+  scrna, 
+  subset = nFeature_RNA > 800 & nFeature_RNA < 7000 & percent.mt < 15)
+```
+
+## HTO QC Metrics, subsetting, clustering
+
+```{r hto, fig.width=10, fig.height=10, eval=reload_data}
+
+source(here::here('r','scrna','HTOdemux.R'))
+
+scrna[['HTO']] <- CreateAssayObject(
+  counts = scrna.data$`Antibody Capture`[hto_rows, colnames(scrna)])
+
+#all data loaded, clear raw data from memory and do garbage collect
+#rm('scrna.data')
+gc()
+
+scrna <- NormalizeData(scrna, assay = "HTO", normalization.method = "CLR")
+
+scrna <- DoubleHTODemux(scrna, positive.quantile = 0.90, ncenters=25)
+
+ggplot(
+    data.table(scrna@meta.data)[, .N, 
+      by=.(HTO_classification, HTO_clusters, hash.ID)],
+    aes(y=HTO_classification, x=hash.ID, fill=log10(N))) + 
+  geom_tile() + facet_wrap(~HTO_clusters, scales='free') +
+  labs(title='Cluster vs HTO assignment')
+
+# assign match for best cluster
+cluster.hash.ID <- data.table(scrna@meta.data)[, 
+  .N, by=.(HTO_classification, HTO_clusters, hash.ID)][, 
+    list(cluster.hash.ID= hash.ID[hash.ID != 'Triplets'][
+      which.max(N[hash.ID != 'Triplets'])]), by=.(HTO_clusters)]
+
+updated_metadata <- cluster.hash.ID[
+  data.table(scrna@meta.data), 
+    on='HTO_clusters', nomatch=NA, all=T][
+    is.na(cluster.hash.ID), cluster.hash.ID := 'Triplet']
+
+updated_metadata[, HTO_best_doublet := gsub('\\+\\d+','',HTO_classification)]
+updated_metadata[, HTO_miscluster := (
+  as.character(cluster.hash.ID) != as.character(HTO_best_doublet))]
+
+# margin to throw away clustering points if third-closest HTO's
+# signal strength relative to second is beyond this 
+HTO_margin_cutoff <- -1
+
+ggplot(updated_metadata[
+    HTO_miscluster == F & 
+    (as.character(hash.ID) != as.character(cluster.hash.ID))]) + 
+  geom_jitter(aes(x=HTO_margin, y=HTO_classification), alpha=0.2) + 
+  facet_wrap(~cluster.hash.ID, scales='free') + 
+  geom_vline(aes(xintercept=-1))
+
+# mark cells with HTO margin above cutoff as misclustered
+updated_metadata[
+  (as.character(hash.ID) != as.character(cluster.hash.ID)) & 
+  HTO_margin > HTO_margin_cutoff, 
+    HTO_miscluster := T]
+
+# assign cluster hashes if not misclustered
+updated_metadata[HTO_miscluster == F, hash.ID := cluster.hash.ID]
+
+# merge with metadata file, add to HTO scrna metadata
+HTO_sample_metadata <- fread(here::here(
+    '..','..','scrnaseq_tcsl154','meta','sample_metadata.csv'))
+names(HTO_sample_metadata)[2] <- 'hash.ID'
+updated_metadata <- HTO_sample_metadata[updated_metadata, on='hash.ID']
+
+#if hash combo is not a sample, label negative
+updated_metadata[
+  is.na(sample_num) & !(hash.ID %in% c('Triplets', 'Singlets', 'Negative')), 
+  hash.ID := 'Negative']
+
+# update metadata in object
+updated_metadata <- as.data.frame(updated_metadata)
+rownames(updated_metadata) <- colnames(scrna)
+scrna@meta.data <- updated_metadata
+
+#assign new cell identities
+Idents(object = scrna) <- scrna@meta.data$hash.ID
+
+#make a subset for tsne plot
+hto_subset <- subset(scrna, cells=sample(Cells(scrna), 10000))
+
+hto.dist.mtx <- as.matrix(parDist(t(
+  GetAssayData(object = hto_subset, assay = "HTO"))))
+
+hto_subset <- RunTSNE(hto_subset, 
+  distance.matrix = hto.dist.mtx,
+  perplexity = 100)
+```
+
+## Analyzing RNA Data for TCSL 155
+
+```{r initial_rna_analysis, fig.width=10, fig.height=10, eval=reload_data}
+scrna.hashed <- subset(scrna, idents = HTO_sample_metadata$hash.ID)
+
+DefaultAssay(scrna.hashed) <- "RNA"
+scrna.hashed <- NormalizeData(scrna.hashed, 
+    assay='RNA', 
+    normalization.method = "LogNormalize", scale.factor = 10000)
+
+scrna.hashed <- ScaleData(
+  scrna.hashed, assay='RNA',
+  features= VariableFeatures(scrna.hashed))
+ 
+scrna.hashed <- FindVariableFeatures(scrna.hashed,
+    selection.method = "vst",
+    nfeatures = 2000)
+
+saveRDS(scrna.hashed, file = here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+```
+## Separating CD4s and CD8s
+
+First, get adt tags that separate CD4s and CD8s, and add rnas as controls.
+
+```{r cd4_v_cd8, fig.width=4, fig.height=4}
+
+if (!('scrna.hashed' %in% ls()))
+  scrna.hashed <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+
+# old_idents <- Idents(scrna.hashed)
+# scrna.hashed@meta.data[['car_k_type']] <- paste(
+#   scrna.hashed@meta.data[['car']], 
+#   scrna.hashed@meta.data[['k_type']], sep='_')
+# Idents(scrna.hashed) <- 'car_k_type'
+# DimPlot(scrna.hashed, label=T)
+
+ggplot(data.table(hto_subset@meta.data)[!is.na(k_type) & !is.na(car)]) + 
+  geom_bar(aes(x=car, fill=k_type)) + 
+  facet_wrap(~k_type, scale='free_x') + 
+  theme_minimal()
+
+DefaultAssay(scrna.hashed) <- "ADT"
+scrna.hashed <- NormalizeData(scrna.hashed, assay = "ADT", normalization.method = "CLR")
+scrna.hashed <- ScaleData(scrna.hashed, assay = "ADT")
+scrna.hashed <- FindVariableFeatures(scrna.hashed)
+
+adt_features <- scrna.hashed@assays$ADT@var.features
+
+cd4v8_subset_vars <- c(adt_features, 'rna_CD8A','rna_CD8B','rna_CD4')
+
+cd4v8.dt <- data.table(FetchData(
+  object = scrna.hashed, 
+  vars = cd4v8_subset_vars))
+
+combined_pca <- prcomp(cd4v8.dt)
+
+# calculate pca stats
+pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+    PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+    sd = combined_pca$sdev, 
+    var = combined_pca$sdev^2, 
+    var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+    var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+
+melt.pca.dt <- melt(
+  pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+
+pca.stats.plot <- ggplot(melt.pca.dt) +
+  geom_line(aes(x = pc, y = value, color = metric)) +
+  geom_point(aes(x = pc, y = value, color = metric)) +
+  scale_x_continuous(limits = c(1, NA)) +
+  labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+       x = "Principal Component", y = "Fraction of Variance") +
+  theme_bw()
+
+pca.stats.plot
+```
+
+```{r cd4_v_cd8_pca, fig.width=6, fig.height=16, eval=reload_data}
+# project data onto principal components
+projected.metrics <- scale(cd4v8.dt, combined_pca$center, combined_pca$scale) %*% combined_pca$rotation
+
+#vectorized switch:
+names_4v8 <- c('4-8-', '8+4-', '4+8-', '4+8+')
+categories_4v8 <- c('CD8','intermediate','intermediate','CD4')
+
+projected.metrics <- cbind.data.frame(cd4v8.dt, projected.metrics)
+projected.metrics[, is_CD4_adt := CD4.adt > 1.2]
+projected.metrics[, is_CD8_adt := CD8A.adt > 0.5]
+projected.metrics[, adt_state := names_4v8[1+(2*is_CD4_adt + is_CD8_adt)]]
+projected.metrics[, is_CD4_rna := rna_CD4 > 0]
+projected.metrics[, is_CD8B_rna := rna_CD8B > 0]
+projected.metrics[, is_CD8A_rna := rna_CD8A > 0]
+projected.metrics[, rna_state := names_4v8[1+(2*is_CD4_rna + (is_CD8B_rna | is_CD8A_rna))]]
+
+intercepts <- c(.89, 1.95)
+slopes <- c(.77, 1.45)
+
+projected.metrics[, cd8_classify := PC2 > (slopes[1]*PC1 + intercepts[1])]
+projected.metrics[, cd4_classify := PC2 > (slopes[2]*PC1 + intercepts[2])]
+projected.metrics[, cd_category := categories_4v8[1+(2*cd4_classify + cd8_classify)]]
+
+plot_grid(
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=adt_state)) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=adt_state)) + 
+    facet_wrap(~adt_state) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=adt_state)) + 
+    facet_wrap(~rna_state) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ggplot(projected.metrics[], aes(x = PC1, y = PC2, color=cd_category)) + 
+    geom_point(alpha=0.1) + 
+    geom_abline(intercept=intercepts, slope=slopes),
+  ncol=1, 
+  labels=c('', 'Grouped by presence of CD4/CD8 ADT', 'Grouped by presence of CD4/CD8 RNA','Manual Classification'), 
+  scale=0.9)
+
+scrna.hashed@meta.data[['CD4v8']] <- projected.metrics$cd_category
+
+if (reload_data) saveRDS(scrna.hashed, file = here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+```
