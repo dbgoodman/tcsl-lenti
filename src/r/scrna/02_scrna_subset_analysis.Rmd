@@ -20,30 +20,33 @@ library(parallelDist)
 library(ggplot2)
 library(data.table)
 library(cowplot)
-
-reload_data=F
-source(here::here('r','fig_colors.R'))
-
-if (!('scrna.hashed' %in% ls()))
-  scrna.hashed <- readRDS(here::here(
-    '..','..','scrnaseq_tcsl154',
-    'rds','scrna.hashed.rds'))
-```
-
-## Get Entrezgene IDs, Pathway Enrichment Functions
-```{r}
+library(doParallel)
 
 # BiocManager::install("clusterProfiler", version = "3.8")
 # BiocManager::install("pathview")
 # BiocManager::install("enrichplot")
 # BiocManager::install(organism, character.only = TRUE)
-
 library(clusterProfiler)
 library(enrichplot)
 library(ggplot2)
 organism = "org.Hs.eg.db"
 library(organism, character.only = TRUE)
 library(ReactomePA)
+
+reload_data=F
+source(here::here('r','fig_colors.R'))
+source(here::here('r','scrna','scrna_analysis_fxns.R'))
+
+
+if (!('scrna.hashed' %in% ls()))
+  scrna.hashed <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds'))
+
+```
+
+## Get Entrezgene IDs, Pathway Enrichment Functions
+```{r}
 
 gene_symbols <- rownames(scrna.hashed@assays$RNA@data)
 gene_ids <- bitr(gene_symbols, fromType = "SYMBOL", toType = "ENTREZID", OrgDb=organism)
@@ -62,24 +65,15 @@ names(gene_ids) <- c('gene','entrez')
 # list of remaining unknown genes, avoid unnamed A* genes
 unknown_symbols <- grep('^[A[CFLP]\\d+', unknown_symbols[!(unknown_symbols %in% gene_ids$gene)], value=T, invert=T)
 
-pathway_enrichment <- function(obj_subset, set1, set2, ident='car', assay='RNA',
-    logfc.thresh=0.25, min.pct=0.2, minGSSize=3, maxGSSize=100) {
-  
-  print(paste(paste(set1, collapse=','), 'vs', paste(set2, collapse=',')))
+pathway_enrichment <- function(marker_set,
+    logfc.thresh=0.25, min.pct=0.2, minGSSize=3, maxGSSize=100, nperm=1000, ident='car') {
   
   organism = "org.Hs.eg.db"
-  
-  Idents(obj_subset) <- ident
 
-  gene_data <- data.table(
-    FindMarkers(
-      obj_subset, assay=assay,
-      ident.1 = set1, ident.2=set2,
-      logfc.threshold = logfc.thresh, min.pct=min.pct),
-    keep.rownames=T)
+  gene_data <- data.table(marker_set, keep.rownames = T)
   
   #symbol gene list
-  names(gene_data)[1] <- 'gene' 
+  names(gene_data)[1] <- 'gene'
   gene_data <- gene_ids[gene_data, on='gene']
   gene_data <- gene_data[!duplicated(gene_data$gene)]
   gene_data <- gene_data[!duplicated(gene_data$entrez)]
@@ -96,7 +90,7 @@ pathway_enrichment <- function(obj_subset, set1, set2, ident='car', assay='RNA',
   gse_bp <- gseGO(geneList=gene_list, 
     ont ="BP", 
     keyType = "SYMBOL", 
-    nPerm = 10000, 
+    nPerm = nperm, 
     minGSSize = minGSSize, 
     maxGSSize = maxGSSize, 
     pvalueCutoff = 0.05, 
@@ -107,7 +101,7 @@ pathway_enrichment <- function(obj_subset, set1, set2, ident='car', assay='RNA',
   gse_mf <- gseGO(geneList=gene_list, 
       ont ="MF", 
       keyType = "SYMBOL", 
-      nPerm = 10000, 
+      nPerm = nperm, 
       minGSSize = minGSSize, 
       maxGSSize = maxGSSize, 
       pvalueCutoff = 0.05, 
@@ -118,34 +112,46 @@ pathway_enrichment <- function(obj_subset, set1, set2, ident='car', assay='RNA',
   kegg_organism = "hsa"
   gse_kegg <- gseKEGG(geneList= entrez_gene_list,
     organism     = kegg_organism,
-    nPerm        = 10000,
+    nPerm        = nperm,
     minGSSize = minGSSize, 
     maxGSSize = maxGSSize, 
     pvalueCutoff = 0.05,
     pAdjustMethod = "none",
     keyType       = "ncbi-geneid")
   
-  gse_pa_pos <- enrichPathway(gene=names(entrez_gene_list[entrez_gene_list > 0]),
+  gse_pa <- gsePathway(geneList=entrez_gene_list,
+    nPerm        = nperm,
     minGSSize = minGSSize, 
     maxGSSize = maxGSSize, 
-    pvalueCutoff=0.05,
-    readable=T)
-  
-  gse_pa_neg <- enrichPathway(gene=names(entrez_gene_list[entrez_gene_list < 0]),
-    minGSSize = minGSSize, 
-    maxGSSize = maxGSSize, 
-    pvalueCutoff=0.05,
-    readable=T)
-  
-  results <- list(
+    pvalueCutoff=0.05)
+
+  gse_results <- list(
     gse_mf= gse_mf,
     gse_bp= gse_bp,
     gse_kegg= gse_kegg,
-    gse_pa_pos= gse_pa_pos,
-    gse_pa_neg= gse_pa_neg
-  )
+    gse_pa= gse_pa)
   
-  return(results)
+  # make table
+  pathway_table <- list()
+  for (gse in names(gse_results)) {
+    
+    this_gse_results <- gse_results[[gse]]@result
+    
+    if (gse %in% c('gse_kegg','gse_pa') && nrow(this_gse_results) > 0) {
+      this_gse_results$core_enrichment <- gene_ids[
+        data.table(this_gse_results)[, list(
+            entrez=unlist(strsplit(core_enrichment, '/'))), by='ID'], 
+                on='entrez'][, list(core_enrichment=paste(gene, collapse='/')), by='ID']$core_enrichment
+      gse_results[[gse]]@result$core_enrichment <- this_gse_results$core_enrichment
+    }
+    
+    if (nrow(this_gse_results) > 0) {
+      pathway_table <- rbind(pathway_table, 
+        data.table('gse'=gse, this_gse_results), fill=T)
+    }
+  }
+
+  return(list(gse_results=gse_results, pathway_table=pathway_table))
 }
 
 ```
@@ -300,7 +306,7 @@ this_subset_umap <- readRDS(rds_file)
 
 subset.markers <- FindAllMarkers(this_subset_umap,
   features = VariableFeatures(this_subset_umap),
-  min.pct = 0.5, logfc.threshold = 0.25)
+  min.pct = 0.5, logfc.threshold = 0.25)t
 
 gene_sets <- gene_ids[data.table(subset.markers)[, list(gene, cluster)], on='gene']
 gene_sets <- lapply(split(gene_sets, by='cluster'), function (x) {na.omit(unique(x$entrez))})
@@ -611,6 +617,10 @@ comp_car_volcano <- function(obj_subset, ident.1, ident.2, logfc.thresh=0.2, min
     ident.1 = ident.1, ident.2=ident.2,
     logfc.threshold = logfc.thresh, min.pct=min.pct)
   
+  pathways <- pathway_enrichment(markers)
+  gse_results <- pathways[[1]]
+  pathway_table <- pathways[[2]]
+  
   volcano_ggplot <- ggplot(markers, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() +
     geom_hline(aes(yintercept=-log10(0.05))) + 
     scale_x_continuous(limits=c(-max(abs(markers$avg_logFC)), max(abs(markers$avg_logFC)))) +
@@ -620,7 +630,7 @@ comp_car_volcano <- function(obj_subset, ident.1, ident.2, logfc.thresh=0.2, min
     theme_minimal() +
     labs(x=title, y='Adjusted -log10(p)')
   
-  return(list(markers=markers, plot=volcano_ggplot))
+  return(list(markers=markers, plot=volcano_ggplot, gse_results=gse_results, pathway_table=pathway_table))
 }
 
 # comp_car_volcano(subset(scrna.cd4, subset=(k_type == 'cd19+')), ident.1=c('CD28'), ident.2='BAFF-R', lbl_pval_cutoff = 3, min.pct=0.25, assay='RNA')
@@ -854,7 +864,7 @@ umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution
     gene_heatmap,
     ncol=2)
   
-  return(umap_plots)
+  return(list(umap_plots=umap_plots, marker_genes=subset.markers))
 }
 
 umap_plot_by_car <- function(this_subset, plot_title_text="", assay, cluster_resolution) {
@@ -936,13 +946,15 @@ umap_plot_by_car <- function(this_subset, plot_title_text="", assay, cluster_res
 
 umap_subset <- function(this_subset, 
     plot_title_text="", assay='RNA', cluster_resolution=0.8,
-    save=T, save_plots=T, rerun=F, return_all=F) {
+    save=T, save_plots=T, rerun=F, return_all=F, parallel=F) {
   
   DefaultAssay(this_subset) <- assay
   this_subset_umap <- subset(this_subset, 
     features=rownames(this_subset@assays[[assay]]))
   
   subset_name <- gsub(' ','.',plot_title_text)
+  
+  print(subset_name)
   
   rds_file <- here::here(
     '..','..','scrnaseq_tcsl154',
@@ -997,6 +1009,7 @@ umap_subset <- function(this_subset,
   }
   
   cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  print(names(this_subset_umap@meta.data))
   
   # prune UMAP clusters:
   cluster_stats <- data.table(
@@ -1018,25 +1031,37 @@ umap_subset <- function(this_subset,
   
   this_subset_umap@meta.data$cluster_dropped <- !(this_subset_umap@meta.data[[cluster_col_name]] %in% clusters_kept)
   
+  if ((rerun | (!file.exists(rds_file))) & save)
+    saveRDS(this_subset_umap, file = rds_file)
+  
   # plots
-  subset_umap_plot <- umap_plot(this_subset_umap, plot_title_text, assay, cluster_resolution)
+  umap_plot_output <- umap_plot(this_subset_umap, plot_title_text, assay, cluster_resolution)
+  subset_umap_plot <- umap_plot_output$umap_plots
   car_umap_plot <- umap_plot_by_car(this_subset_umap, plot_title_text, assay, cluster_resolution)
   car_pca_plot <- plot_pca_cars(this_subset, title=plot_title_text, axes=c('car','k_type','CD4v8'), color_cars=T)
   umap_pca_plot <- plot_pca_cars(this_subset_umap, title=plot_title_text, axes=c(cluster_col_name))
-  
+
+  fn_pref = paste0(plot_dir,'/',subset_name,'.')
+    
   if (save_plots) {
-    fn_pref = paste0(plot_dir,'/',subset_name,'.')
     ggsave(paste0(fn_pref,'subset_umap.pdf'), subset_umap_plot, width=15, height=9)
     ggsave(paste0(fn_pref,'car_umap_plot.pdf'), car_umap_plot, width=15, height=9)
+    ggsave(paste0(fn_pref,'umap_pca_plot.pdf'), umap_pca_plot, width=15, height=9)
     ggsave(paste0(fn_pref,'car_pca_plot.pdf'), car_pca_plot, width=10, height=10)
   }
   
+  cluster_marker_genes <- umap_plot_output$marker_genes
+  fwrite(cluster_marker_genes, paste0(fn_pref, 'cluster_genes.csv'))
+
   # volcano plots
   if (assay == 'RNA') {
     Idents(this_subset) <- 'car'
-    a_sets = list(c('BAFF-R'), c('TACI'), c('CD40'), c('BAFF-R','TACI'), c('BAFF-R','TACI','CD40','4-1BB'), c('4-1BB'), c('BAFF-R','TACI','CD40','4-1BB','CD28'), c('CD28'))
-    b_sets = list(c('CD28'), c('CD28','Zeta'), c('CD28','4-1BB','Zeta'), c('Zeta'), c('4-1BB'))
-    volcano_plots = list()
+    a_sets = list(c('BAFF-R'), c('TACI'), c('CD40'), c('BAFF-R','TACI'), c('BAFF-R','TACI','CD40'),
+      c('BAFF-R','TACI','CD40','4-1BB'), c('BAFF-R','TACI','CD40','4-1BB','CD28'), c('CD28'))
+    b_sets = list(c('CD28'), c('CD28','4-1BB','Zeta'), c('Zeta'), c('4-1BB'))
+    volcano_plots <- list()
+    pathway_enrichments <- data.table()
+    marker_table <- data.table()
     
     for (ident_a in a_sets) {
       ident_a_name <- paste(ident_a, collapse='_')
@@ -1048,19 +1073,37 @@ umap_subset <- function(this_subset,
         if (length(intersect(ident_a, ident_b)) > 0) next
 
         ident_b_name <- paste(ident_b, collapse='_' )
+        
+        print(paste("Running CAR comparison:", subset_name," - ", ident_a_name,' VS ',ident_b_name))
+        
         volcano_plots[[ident_a_name]][[ident_b_name]] <- comp_car_volcano(
           this_subset, ident.1=ident_a, ident.2=ident_b, lbl_pval_cutoff = 3, min.pct=0.25, assay=assay)
+        
+        pathway_table <- data.table(
+          ident_a = ident_a_name,
+          ident_b = ident_b_name,
+          volcano_plots[[ident_a_name]][[ident_b_name]]$pathway_table)
+        
+        marker_genes <- data.table(
+          ident_a = ident_a_name,
+          ident_b = ident_b_name,
+          volcano_plots[[ident_a_name]][[ident_b_name]]$markers, use.rownames=T)
+        
+        pathway_enrichments <- rbind(pathway_enrichments, pathway_table, fill=T)
+        
+        marker_table <- rbind(marker_table, marker_genes)
+        
         if (save_plots) {
-          fn = paste0(plot_dir,'/',subset_name,'.',
-            ident_a_name,'_VS_',ident_b_name,'.volcano.pdf')
-          ggsave(fn, volcano_plots[[ident_a_name]][[ident_b_name]]$plot, width=8, height=8, units='in')
+          fn_prefix = paste0(plot_dir,'/',subset_name,'.',
+            ident_a_name,'_VS_',ident_b_name)
+          ggsave(paste0(fn_prefix, '.volcano.pdf'), 
+            volcano_plots[[ident_a_name]][[ident_b_name]]$plot, width=8, height=8, units='in')
+          fwrite(pathway_table, paste0(fn_prefix, '.pathways.csv'))
+          fwrite(marker_genes, paste0(fn_prefix, '.genes.csv'))
         }
       }
     }
   }
-  
-  if ((rerun | (!file.exists(rds_file))) & save)
-    saveRDS(this_subset, file = rds_file)
     
   if (return_all) {
     return(list(
@@ -1082,6 +1125,8 @@ umap_subset <- function(this_subset,
 
 ## Run all groups
 ```{r}
+
+registerDoParallel(8)
 
 stimulatory_cars <- c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')
 
@@ -1138,14 +1183,15 @@ if (!reload_data && !('umap_plots' %in% ls()) )
   # umap_plots[, ADT := list(list(
   #     umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))),
   #     by='subset_name']
-  umap_plots[, RNA := list(list(
-      umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
-      by='subset_name']
-
   
-  saveRDS(umap_plots, file = here::here(
-      '..','..','scrnaseq_tcsl154',
-      'rds','scrna.umap.plots.rds'))
+  umap_plots[, RNA := list(list(
+    umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), 
+      plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
+    by='subset_name']
+
+  # saveRDS(umap_plots, file = here::here(
+  #     '..','..','scrnaseq_tcsl154',
+  #     'rds','scrna.umap.plots.rds'))
 }
 
 ```
