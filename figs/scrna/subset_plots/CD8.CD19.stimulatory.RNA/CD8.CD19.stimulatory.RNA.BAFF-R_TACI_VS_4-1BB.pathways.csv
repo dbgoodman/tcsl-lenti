@@ -1,0 +1,3 @@
+ident_a,ident_b,gse,ID,Description,setSize,enrichmentScore,NES,pvalue,p.adjust,qvalues,rank,leading_edge,core_enrichment
+BAFF-R_TACI,4-1BB,gse_bp,GO:0032879,regulation of localization,5,-0.773656248157495,-1.61416896297545,0.0182926829268293,0.0182926829268293,0.627674632958062,4,"tags=60%, list=25%, signal=65%",IL13/HILPDA/IL5
+BAFF-R_TACI,4-1BB,gse_bp,GO:0008284,positive regulation of cell proliferation,5,-0.773512309771337,-1.59353975932066,0.0356589147286822,0.0356589147286822,0.627674632958062,4,"tags=60%, list=25%, signal=65%",IL13/HILPDA/IL5

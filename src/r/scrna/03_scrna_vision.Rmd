@@ -1,0 +1,78 @@
+---
+title: "03_scrna_vision"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(VISION)
+library(data.table)
+
+SEURAT_RDS_FILE <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.hashed.rds')
+
+VISION_RDS_FILE <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.rds')
+
+```
+
+## R Markdown
+
+From VISION Getting Started Vignette:
+    https://yoseflab.github.io/VISION/articles/VISION-vignette.html
+
+```{r cars}
+# Load VISION
+load_vision_data <- function(seurat_rds_file=SEURAT_RDS_FILE) {
+  
+  scrna.hashed <- subset(readRDS(seurat_rds_file), subset=(car != 'K_only'))
+  
+  # Read in expression counts (Genes X Cells, gene names as rownames)
+  counts <- data.frame(scrna.hashed@assays[["RNA"]]@counts)
+  
+  # Read in expression counts (Genes X Cells, gene names as rownames)
+  n.umi <- colSums(counts)
+  scaled_counts <- t(t(counts) / n.umi) * median(n.umi)
+  
+  rm(n.umi)
+  rm(counts)
+  gc()
+  
+  meta <- scrna.hashed@meta.data[gsub('-','.',rownames(scrna.hashed@meta.data)) %in% colnames(scaled_counts),]
+  rownames(meta) <- gsub('-','.',rownames(meta))
+  
+  # extract useful metadata columns
+  meta_columns = c('k_type','car','CD4v8')
+  meta <- meta[, meta_columns]
+  # make a combined column with all combinations of the two
+  meta$sample <- factor(paste(meta$k_type, meta$CD4v8, meta$car, sep='_'))
+  meta$car_k <- factor(paste(meta$k_type, meta$car, sep='_'))
+  meta$t_k <- factor(paste(meta$k_type, meta$k_type, sep='_'))
+  
+  
+  # Make vision object
+  vis <- Vision(scaled_counts,
+    signatures = here::here('..','data','c7.all.v7.1.symbols.gmt'),
+    meta = meta)
+  
+  return(vis)
+}
+
+gc()
+vis <- load_vision_data()
+gc()
+options(mc.cores = 8)
+vis <- analyze(vis)
+saveRDS(VISION_RDS_FILE)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

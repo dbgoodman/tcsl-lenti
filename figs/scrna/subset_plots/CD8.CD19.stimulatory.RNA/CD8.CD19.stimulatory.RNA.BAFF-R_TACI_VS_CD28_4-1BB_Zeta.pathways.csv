@@ -1,0 +1,3 @@
+ident_a,ident_b,gse,ID,Description,setSize,enrichmentScore,NES,pvalue,p.adjust,qvalues,rank,leading_edge,core_enrichment
+BAFF-R_TACI,CD28_4-1BB_Zeta,gse_bp,GO:0016043,cellular component organization,4,-0.828401467710343,-1.63609266088561,0.0447530864197531,0.0447530864197531,0.885267401758391,4,"tags=75%, list=40%, signal=75%",MAL/HILPDA/IL5
+BAFF-R_TACI,CD28_4-1BB_Zeta,gse_bp,GO:0071840,cellular component organization or biogenesis,4,-0.828401467710343,-1.63609266088561,0.0447530864197531,0.0447530864197531,0.885267401758391,4,"tags=75%, list=40%, signal=75%",MAL/HILPDA/IL5

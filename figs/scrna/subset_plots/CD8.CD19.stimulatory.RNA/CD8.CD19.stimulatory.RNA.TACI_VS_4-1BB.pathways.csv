@@ -1,0 +1,2 @@
+ident_a,ident_b,gse,ID,Description,setSize,enrichmentScore,NES,pvalue,p.adjust,qvalues,rank,leading_edge,core_enrichment
+TACI,4-1BB,gse_bp,GO:0002699,positive regulation of immune effector process,3,-0.789733681237293,-1.47075130249619,0.0478547854785479,0.0478547854785479,0.74,4,"tags=67%, list=18%, signal=63%",IL13/IL5
