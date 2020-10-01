@@ -258,9 +258,9 @@ all_plots <- function(umap_fcs_dt, channel_map, umap_vars, cell_type, dendro=F) 
     theme_minimal() + ggtitle(paste('Percent of ',as.character(cell_type),' cells in each day by cluster'))
   # CARs BY CLUSTER/DAY
   car_cluster_day_indiv_k562_total_pct_dt <- umap_fcs_dt[,
-    data.table(table(car,cluster,k562,t_type,day))][,
-      list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day')][,
-        pct_delta := scale(pct), by=c('car','k562','t_type','day')]
+    data.table(table(car,cluster,k562,t_type,day, donor))][,
+      list(cluster, pct=N/sum(N)), by=c('car','k562','t_type','day', 'donor')][,
+        pct_delta := scale(pct), by=c('car','k562','t_type','day', 'donor')]
   
   if (dendro) {
     car_cluster_day_indiv_k562_total_pct_dt[, cluster := factor(cluster, levels = cluster_names)] 
@@ -275,7 +275,7 @@ all_plots <- function(umap_fcs_dt, channel_map, umap_vars, cell_type, dendro=F) 
   
   cars_by_cluster <- ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) + 
       geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
-      facet_grid(day~k562, scales='free') +
+      facet_grid(day~donor, scales='free') +
       scale_fill_distiller('',
         palette='BrBG', 
         direction=1,
@@ -489,11 +489,11 @@ biomarker_corr <- function(df) {
 
 biomarker_corr_by_day <- function(df) {
   plot_grid(df %>% filter(day==0) %>% biomarker_corr()
-            , df %>% filter(day==6) %>% biomarker_corr(), df %>% filter(day==15) %>% biomarker_corr(), df %>% filter(day==24) %>% biomarker_corr(), df %>% filter(day==33) %>% biomarker_corr(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24', 'Day 33'), nrow=3)
+            , df %>% filter(day==6) %>% biomarker_corr(), df %>% filter(day==15) %>% biomarker_corr(), df %>% filter(day==24) %>% biomarker_corr(), labels = c('Day 0', 'Day 6', 'Day 15', 'Day 24'), nrow=3)
 }
 
 biomarker_corr_by_car <- function(df) {
   plot_grid(df %>% filter(car=='41BB') %>% biomarker_corr()
-            , df %>% filter(car=='untrans') %>% biomarker_corr(), df %>% filter(car=='BAFF-R') %>% biomarker_corr(), df %>% filter(car=='CD28') %>% biomarker_corr(), df %>% filter(car=='CD40') %>% biomarker_corr(), df %>% filter(car=='KLRG1') %>% biomarker_corr(), df %>% filter(car=='TACI') %>% biomarker_corr(), df %>% filter(car=='TNR8') %>% biomarker_corr(), df %>% filter(car=='zeta') %>% biomarker_corr(), labels = c('41BB', 'untrans', 'BAFF-R', 'CD28', 'CD40', 'KLRG1', 'TACI', 'TNR8', 'zeta'), nrow=3)
+            , df %>% filter(car=='BAFF-R') %>% biomarker_corr(), df %>% filter(car=='CD28') %>% biomarker_corr(), df %>% filter(car=='CD40') %>% biomarker_corr(), df %>% filter(car=='TACI') %>% biomarker_corr(), df %>% filter(car=='TNR8') %>% biomarker_corr(), df %>% filter(car=='zeta') %>% biomarker_corr(), labels = c('41BB','BAFF-R', 'CD28', 'CD40', 'TACI', 'TNR8', 'zeta'), nrow=3)
 }
 

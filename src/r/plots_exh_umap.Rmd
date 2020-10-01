@@ -209,6 +209,72 @@ all_plots(umap_cd8_fcs_dt, channel_map, umap_vars, 'CD8', dendro=F)
 all_plots(umap_cd4_fcs_dt, channel_map, umap_vars, 'CD4', dendro=F)
 ```
 
+```{r fig.width=30, fig.height=20}
+# LAG3 PD1 scatter plot
+exh_fcs_dt_cd4 <- exh_dt_cd4 %>% spread(variable, value) %>% drop_na()
+exh_fcs_dt_cd8 <- exh_dt_cd8 %>% spread(variable, value) %>% drop_na()
+
+#cd4
+# 1480.128, 524.7249 (donor 1)
+# # 1488.827, 532.0457 (donor 2)
+
+normalized_exh_fcs_dt_cd4 <- exh_fcs_dt_cd4 %>% 
+  mutate(pd1_plus_lag3 = pd1_t + lag3_t) %>%
+  mutate(pd1_minus_lag3 = pd1_t - lag3_t) %>% 
+  group_by(car, day, donor) %>% 
+  mutate(mean_pd1_plus_lag3 = mean(pd1_plus_lag3), mean_pd1_minus_lag3 = mean(pd1_minus_lag3)) %>%
+  select(mean_pd1_plus_lag3, mean_pd1_minus_lag3) %>% 
+  mutate(scaled_mean_pd1_plus_lag3 = ifelse(donor == 1, scale(mean_pd1_plus_lag3, center = 1480.128, scale=F), scale(mean_pd1_plus_lag3, center = 1488.827, scale=F)),
+         scaled_mean_pd1_minus_lag3 = ifelse(donor == 1, scale(mean_pd1_minus_lag3, center = 524.7249, scale=F), scale(mean_pd1_minus_lag3, center = 532.0457, scale=F))) 
+
+
+#cd8
+# 1476.901, 432.5879 (donor 1)
+# # 1437.787, 392.5497 (donor 2)
+
+normalized_exh_fcs_dt_cd8 <- exh_fcs_dt_cd8 %>% 
+  mutate(pd1_plus_lag3 = pd1_t + lag3_t) %>%
+  mutate(pd1_minus_lag3 = pd1_t - lag3_t) %>% 
+  group_by(car, day, donor) %>% 
+  mutate(mean_pd1_plus_lag3 = mean(pd1_plus_lag3), mean_pd1_minus_lag3 = mean(pd1_minus_lag3)) %>%
+  select(mean_pd1_plus_lag3, mean_pd1_minus_lag3) %>% 
+  mutate(scaled_mean_pd1_plus_lag3 = ifelse(donor == 1, scale(mean_pd1_plus_lag3, center = 1476.901, scale=F), scale(mean_pd1_plus_lag3, center = 1437.787, scale=F)),
+         scaled_mean_pd1_minus_lag3 = ifelse(donor == 1, scale(mean_pd1_minus_lag3, center = 432.5879, scale=F), scale(mean_pd1_minus_lag3, center = 392.5497, scale=F))) 
+
+label_biomarkers_day_cd4 <- normalized_exh_fcs_dt_cd4 %>% distinct(car, day, donor, scaled_mean_pd1_minus_lag3, scaled_mean_pd1_plus_lag3)%>% filter(!day ==33)
+
+label_biomarkers_day_cd8 <- normalized_exh_fcs_dt_cd8 %>% distinct(car, day, donor, scaled_mean_pd1_minus_lag3, scaled_mean_pd1_plus_lag3) %>% filter(!day ==33)
+
+normalized_exh_fcs_dt_cd8 %>%
+  filter(!day == 33) %>%
+  arrange(car, day, donor) %>%
+  ggplot(., aes(x=scaled_mean_pd1_minus_lag3, y = scaled_mean_pd1_plus_lag3, color=car)) +
+  geom_point(size=2) + 
+  geom_path() + 
+  geom_label_repel(aes(label=day), fill='white', data=label_biomarkers_day_cd8) + 
+  theme_minimal() + 
+  facet_grid(. ~ donor) + 
+  theme(panel.spacing = unit(2, "lines")) + 
+  ggtitle('CD8 CARs - LAG3 vs. PD1 relationship')
+
+
+normalized_exh_fcs_dt_cd4 %>%
+  filter(!day == 33) %>%
+  arrange(car, day, donor) %>%
+  ggplot(., aes(x=scaled_mean_pd1_minus_lag3, y = scaled_mean_pd1_plus_lag3, color=car)) +
+  geom_point(size=2) + 
+  geom_path() + 
+  geom_label_repel(aes(label=day), fill='white', data=label_biomarkers_day_cd4) + 
+  theme_minimal() + 
+  facet_grid(. ~ donor) + 
+  theme(panel.spacing = unit(2, "lines")) + 
+  ggtitle('CD4 CARs - LAG3 vs. PD1 relationship')
+
+```
+
+
+
+
 ### Labeled Leiden Clusters Map
 ```{r fig.width=15, fig.height=8, eval=F}
 # manually determined 
