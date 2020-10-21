@@ -179,7 +179,7 @@ barplot_stacked_plot <- ggplot(subset_barplot_reads) +
     panel.border = element_rect(colour = "black"))
 
 ggsave(here::here('..','figs','pooled','fig1_stacked_bar.pdf'), 
-       barplot_stacked_plot, height=3, width=9, useDingbats=FALSE)
+       barplot_stacked_plot, height=6, width=9, useDingbats=FALSE)
 
 ```
 
@@ -1227,7 +1227,6 @@ cast_formula <- paste(cast_left, cast_right, sep= ' ~ ')
 pos_neg_assay_avg <- dcast(
   pos_neg_comparisons_melt, cast_formula, value.var='var_mean')
 
-pos_neg_assay_plot <- unique(
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
   CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),

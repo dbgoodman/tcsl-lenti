@@ -39,7 +39,6 @@ adt_feature_names <- fread(here::here(
     'meta','adt_names.tsv'))
 rownames(scrna.data$`Antibody Capture`) <- c(paste0(adt_feature_names$vis_name,'.adt'), hto_rows)
 
-
 #rna features
 scrna <- CreateSeuratObject(
     counts = scrna.data$`Gene Expression`, 

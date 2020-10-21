@@ -18,7 +18,7 @@ library(tidyverse)
 output_dir <- file.path(here::here('..','figs'))
 
 data_dir <- here::here('..','data')
-load(file.path(data_dir, 'diff.sampled.Rdata'))
+load(file.path(data_dir, 'diff.sampled.Rdata'))s
 diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
 censor_negative_min = -1500
@@ -116,3 +116,31 @@ ggsave(paste0(output_dir, '/cd27_ridge_plot.pdf'),
        cd27_ridges, width = 3, height = 10,
        units = 'in', dpi = 300)
 ```
+
+### 09.16.20 - CD27 line plot with all CARs
+
+```{r}
+ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min & t_type == 'cd8'][,
+            list(val_sd= sd(value), val_mean= mean(value)),
+        by=.(car, day, donor, variable, t_type)][
+                (donor == 2 | (donor == 1 & day < 33))], 
+    aes(x=day, y=val_mean/1000, 
+        ymin=(val_mean-val_sd)/1000, 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car, linetype=car)) + 
+    geom_point() + 
+    geom_line() + 
+    facet_grid(~ donor, scale='free_x') + 
+    scale_x_continuous(breaks=c(0,6,15,24,33)) +
+    scale_y_continuous(limits=c(1.25,2.4)) +
+    scale_color_manual(
+        values=c(car_colors,grey)) +
+    scale_linetype_manual(
+        values=c(1,1,1,1,1,1,1,3,1)) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+

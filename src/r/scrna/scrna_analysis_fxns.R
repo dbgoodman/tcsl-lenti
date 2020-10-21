@@ -1,6 +1,5 @@
 library(dplyr)
 library(tidyr)
-library(tidyr)
 library(Seurat)
 library(patchwork)
 library(cluster)
@@ -9,6 +8,11 @@ library(ggplot2)
 library(data.table)
 library(cowplot)
 library(doParallel)
+library(VISION)
+library(spatstat)
+library(dendextend)
+library(ggdendro)
+
 
 # BiocManager::install("clusterProfiler", version = "3.8")
 # BiocManager::install("pathview")
@@ -139,7 +143,7 @@ pathway_enrichment <- function(marker_set,
 ####### CITESEQ SUBSETS
 
 make_citeseq_dt <- function(obj_subset, assay='ADT') {
-  return(data.table(cbind(t(obj_subset@assays[[assay]]@data), obj_subset@meta.data))[car != 'K_only'])
+  return(data.table(cbind(t(obj_subset@assays[[assay]]@data), obj_subset@meta.data, list(cell.id=colnames(obj_subset))))[car != 'K_only'])
 }
 
 make_rna_dt <- function(obj_subset) {
@@ -323,7 +327,7 @@ plot_pca_cars <- function(obj_subset, title, axes=c('car','k_type'), min_pct_exp
 }
 
 comp_car_volcano <- function(obj_subset, ident.1, ident.2, logfc.thresh=0.2, min.pct=0.1,
-    assay='RNA', lbl_pval_cutoff = 10, title='') {
+    assay='RNA', lbl_pval_cutoff = 10, title='', do_pathway_enrichments=F) {
   
   title <- paste(title,
     paste('[',paste(ident.2,collapse=', '),'] <- vs -> [',paste(ident.1,collapse=', '),']'),
@@ -335,9 +339,15 @@ comp_car_volcano <- function(obj_subset, ident.1, ident.2, logfc.thresh=0.2, min
     ident.1 = ident.1, ident.2=ident.2,
     logfc.threshold = logfc.thresh, min.pct=min.pct)
   
-  pathways <- pathway_enrichment(markers)
-  gse_results <- pathways[[1]]
-  pathway_table <- pathways[[2]]
+  if (do_pathway_enrichments) {
+    pathways <- pathway_enrichment(markers)
+    gse_results <- pathways[[1]]
+    pathway_table <- pathways[[2]] }
+  else {
+    pathways <- NULL
+    gse_results <- NULL
+    pathway_table <- NULL
+  }
   
   volcano_ggplot <- ggplot(markers, aes(x=avg_logFC, y=-log10(p_val_adj))) + geom_point() +
     geom_hline(aes(yintercept=-log10(0.05))) + 
@@ -353,9 +363,15 @@ comp_car_volcano <- function(obj_subset, ident.1, ident.2, logfc.thresh=0.2, min
 
 ####### UMAP PLOTTING
 
-umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution) {
+umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution=NULL, cluster_name=NULL, 
+    reduction='umap', feat_logfc_thresh=0.25, feat_min_pct=0.5) {
   
-  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  stopifnot(!is.null(cluster_name) || !is.null(cluster_name))
+  
+  if (!is.null(cluster_resolution))
+    cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  if (!is.null(cluster_name))
+    cluster_col_name <- cluster_name
 
   if ('cluster_dropped' %in% names(this_subset@meta.data)) {
     this_subset <- subset(this_subset, subset=(cluster_dropped == F))
@@ -363,9 +379,9 @@ umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution
   
   subset.markers <- FindAllMarkers(this_subset,
   features = VariableFeatures(this_subset),
-  min.pct = 0.5, logfc.threshold = 0.25)
+  min.pct = feat_min_pct, logfc.threshold = feat_logfc_thresh)
   
-  top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+  top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
   
   print(names(this_subset@meta.data))
   
@@ -401,14 +417,14 @@ umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution
     )
   
   gene_heatmap <- DoHeatmap(this_subset,
-        features = unique(
-          (top.subset.markers %>% group_by(cluster) 
-            %>% top_n(n=5, wt= avg_logFC))$gene))
+      features = unique(
+        (top.subset.markers %>% group_by(cluster) 
+          %>% top_n(n=5, wt= avg_log2FC))$gene))
       
   umap_plots <- plot_grid(
     plot_grid(
       plot_title,
-      DimPlot(this_subset, reduction = "umap", label=T),
+      DimPlot(this_subset, reduction = reduction, label=T),
       cluster_pct_plot,
       rel_heights=c(0.2,1.25,1),
       ncol=1),
@@ -460,4 +476,379 @@ calculate_umap <- function(this_subset,
       this_subset_umap@meta.data[['k_type']], sep='_')
     
     return(this_subset_umap)
+}
+
+
+###### UMAP/CORR PLOTS
+
+cluster_car_pct_plot <- function(this_subset, cluster_col_name) {
+  return(ggplot(
+      data.table(this_subset@meta.data)[
+        CD4v8 != 'intermediate', .N, 
+        by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
+          list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
+          by=c('car', 'CD4v8', 'k_type')]) + 
+    geom_bar(aes_string(x='cluster', y='frac', fill='frac'), stat='identity', color='grey50') +
+    scale_fill_distiller(palette='YlGnBu', direction=1) +
+    facet_grid(k_type+t_type~car) + 
+    theme_bw() +
+    coord_flip())
+}
+
+umap_plot_by_car <- function(this_subset, plot_title_text="", assay, cluster_resolution, cluster_name=NULL) {
+
+  
+  if ('cluster_dropped' %in% names(this_subset@meta.data)) {
+    this_subset <- subset(this_subset, subset=(cluster_dropped == F))
+  }
+  Idents(this_subset) <- 'car'
+  subset.markers <- FindAllMarkers(this_subset,
+  features = VariableFeatures(this_subset),
+  min.pct = 0.5, logfc.threshold = 0.25)
+  
+  top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+  
+  top_genes_plot <- ggplot(top.subset.markers) + 
+    geom_bar(aes(y=avg_logFC, x=reorder(gene, avg_logFC)), stat='identity') + 
+    facet_wrap(~cluster, scales='free', ncol=3) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  
+  cluster_pct_plot <- ggplot(
+      data.table(this_subset@meta.data)[
+        CD4v8 != 'intermediate', .N, 
+        by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
+          list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
+          by=c('car', 'CD4v8', 'k_type')]) + 
+    geom_bar(aes_string(x='cluster', y='frac', fill='frac'), stat='identity', color='grey50') +
+    scale_fill_distiller(palette='YlGnBu', direction=1) +
+    facet_grid(k_type+t_type~car) + 
+    theme_bw() +
+    coord_flip()
+  
+  plot_title <- ggdraw() + 
+    draw_label(
+      plot_title_text,
+      fontface = 'bold',
+      x = 0,
+      hjust = 0
+    ) +
+    theme(
+      # add margin on the left of the drawing canvas,
+      # so title is aligned with left edge of first plot
+      plot.margin = margin(0, 0, 0, 7)
+    )
+  
+  gene_heatmap <- DoHeatmap(this_subset,
+        features = unique(
+          (top.subset.markers %>% group_by(cluster) 
+            %>% top_n(n=5, wt= avg_logFC))$gene))
+  
+  car_density_map <- ggplot(
+      cbind(this_subset@meta.data, Embeddings(object = this_subset[["umap"]]))) + 
+    geom_density2d(aes(x=UMAP_1, y=UMAP_2)) + facet_wrap(~car) +
+    theme_minimal()
+      
+  umap_plots <- plot_grid(
+    plot_grid(
+      plot_title,
+      car_density_map,
+      cluster_pct_plot,
+      rel_heights=c(0.2,1.25,1),
+      ncol=1),
+        plot_grid(
+      gene_heatmap,
+      top_genes_plot,
+      ncol=1,
+      rel_heights=c(3,2)),
+    ncol=2)
+  
+  return(umap_plots)
+}
+
+corr_plots <- function(subset_obj, assay='ADT') {
+  
+  DefaultAssay(subset_obj) <- assay
+  
+  citeseq_cor <- make_citeseq_dt(subset_obj, assay=assay)[, 
+      data.table(cor(.SD[, c(rownames(subset_obj@assays[[assay]]@data)), with=F]), keep.rownames=T)]
+  
+  #remove NA rows
+  citeseq_cor <- na.omit(
+    citeseq_cor[, which(colSums(is.na(citeseq_cor)) != (nrow(citeseq_cor) - 1)), with=F])
+   
+  # generate heirarchical clustering
+  dendro_m <- as.matrix(citeseq_cor[, -1])
+  rownames(dendro_m) <- unlist(citeseq_cor[,1])
+  dendro <- as.dendrogram(hclust(d = dist(x = dendro_m)))
+  dendro <- rotate(dendro, names(sort(rowMeans(dendro_m))))
+  
+  # row order from clustering
+  citeseq_cor_melt <- melt(citeseq_cor, id.vars='rn')
+  
+  # melt and reorder rows
+  citeseq_cor_melt$rn <- factor(
+      citeseq_cor_melt$rn,
+      levels = labels(dendro))
+  citeseq_cor_melt$variable <- factor(
+      citeseq_cor_melt$variable,
+      levels = labels(dendro))
+  
+  # remove markers that are not strongly correlated with anything
+  var_has_corr <- citeseq_cor_melt[variable != rn, max(abs(value)) > 0.075, by='variable'][V1 == T]$variable
+  citeseq_cor_melt_subset <- citeseq_cor_melt[variable %in% var_has_corr & rn %in% var_has_corr]
+  
+  average_corr <- ggplot(copy(citeseq_cor_melt_subset)[value > 0.5, value := 0.5]) + 
+    geom_tile(aes(x=rn, y=variable, fill=value)) + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+    scale_fill_distiller(palette='PRGn', limits=c(-0.5, 0.5))
+  
+  return(average_corr)
+}
+
+####### RUN UMAP ON SCRNA SUBSET
+
+umap_subset <- function(this_subset, 
+    plot_title_text="", assay='RNA', cluster_resolution=0.8,
+    save=T, save_plots=T, rerun=F, return_all=F, parallel=F, vision=F) {
+  
+  DefaultAssay(this_subset) <- assay
+  
+  subset_name <- gsub(' ','.',plot_title_text)
+  
+  print(subset_name)
+  
+  rds_file <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds',
+    paste0(
+        'scrna.hashed.',
+        subset_name,
+        '.rds'))
+
+  vis_rds_file <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds',
+    paste0(
+        'vision.',
+        subset_name,
+        '.rds'))
+  
+  plot_dir <- here::here(
+    '..','figs','scrna',
+    'subset_plots',
+    subset_name)
+  
+  if (save_plots) dir.create(plot_dir, recursive=T)
+  
+  ##### RUN UMAP
+  
+  if (rerun || !file.exists(rds_file)) {
+    
+    this_subset_umap <- calculate_umap(this_subset, 
+      plot_title_text="", assay='RNA', cluster_resolution=0.8,
+      save=T, save_plots=save_plots, rerun=F, return_all=F, parallel=F)
+  } else {
+    this_subset_umap <- readRDS(rds_file)
+  }
+  
+  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+  print(names(this_subset_umap@meta.data))
+  
+  ##### CLUSTER PRUNING
+  
+  # prune UMAP clusters:
+  cluster_stats <- data.table(
+    this_subset_umap@meta.data)[, list(get(cluster_col_name), n_clust_car=.N), 
+      by=c(cluster_col_name, 'car', 'CD4v8', 'k_type')][, 
+        list(cluster=get(cluster_col_name), n_clust_car, total=sum(n_clust_car), pct=n_clust_car/sum(n_clust_car)), 
+          by=c( 'car', 'CD4v8', 'k_type')]
+  
+  #criteria to drop clusters, all must be true to keep:
+  # at least 100 cells
+  cluster_stats[, min_cells := sum(n_clust_car) > 100, by='cluster']
+  
+  # at least 10% of the populaton for one CAR OR at least 5% of total population
+  cluster_stats[, max_car_pct := max(pct) > 0.05, by='cluster']
+  cluster_stats[, max_tot_pct := sum(n_clust_car)/cluster_stats[, sum(n_clust_car)] > .1, by='cluster']
+  
+  clusters_kept <- as.numeric(cluster_stats[, 
+    all(min_cells, max_car_pct & (max_car_pct | max_tot_pct)), by='cluster'][V1 == T, cluster])
+  
+  this_subset_umap@meta.data$cluster_dropped <- !(this_subset_umap@meta.data[[cluster_col_name]] %in% clusters_kept)
+  
+  ##### SAVE UMAP RDS
+  
+  if ((rerun | (!file.exists(rds_file))) & save)
+    saveRDS(this_subset_umap, file = rds_file)
+  
+  ##### DO VISION ANALYSIS
+  if (vision & (rerun || !file.exists(vis_rds_file))) {
+    load_vision_data(
+      seurat_rds_file=NULL,
+      subset_fxn=NULL,
+      seurat_obj=this_subset_umap,
+      vision_rds_file=vis_rds_file, 
+      cluster_name=cluster_col_name,
+      cores=8)
+  }
+  
+  ##### MAKE PLOTS
+  
+  fn_pref = paste0(plot_dir,'/',subset_name,'.')
+
+  # plots
+  umap_plot_output <- umap_plot(this_subset_umap, plot_title_text, assay, cluster_resolution)
+  subset_umap_plot <- umap_plot_output$umap_plots
+  car_umap_plot <- umap_plot_by_car(this_subset_umap, plot_title_text, assay, cluster_resolution)
+  car_pca_plot <- plot_pca_cars(this_subset, title=plot_title_text, axes=c('car','k_type','CD4v8'), color_cars=T)
+  umap_pca_plot <- plot_pca_cars(this_subset_umap, title=plot_title_text, axes=c(cluster_col_name))
+
+
+  if (save_plots) {
+    ggsave(paste0(fn_pref,'subset_umap.pdf'), subset_umap_plot, width=15, height=9)
+    ggsave(paste0(fn_pref,'car_umap_plot.pdf'), car_umap_plot, width=15, height=9)
+    ggsave(paste0(fn_pref,'umap_pca_plot.pdf'), umap_pca_plot, width=15, height=9)
+    ggsave(paste0(fn_pref,'car_pca_plot.pdf'), car_pca_plot, width=10, height=10)
+  }
+  
+  if (save) {
+    cluster_marker_genes <- umap_plot_output$marker_genes
+    fwrite(cluster_marker_genes, paste0(fn_pref, 'cluster_genes.csv'))
+  }
+
+  # volcano plots
+  if (assay == 'RNA') {
+    
+    Idents(this_subset) <- 'car'
+    
+    a_sets = list(c('BAFF-R'), c('TACI'), c('CD40'), c('BAFF-R','TACI'), c('BAFF-R','TACI','CD40'),
+      c('BAFF-R','TACI','CD40','4-1BB'), c('BAFF-R','TACI','CD40','4-1BB','CD28'), c('CD28'))
+    
+    b_sets = list(c('CD28'), c('CD28','4-1BB','Zeta'), c('Zeta'), c('4-1BB'))
+    
+    volcano_plots <- list()
+    pathway_enrichments <- data.table()
+    marker_table <- data.table()
+    
+    for (ident_a in a_sets) {
+      ident_a_name <- paste(ident_a, collapse='_')
+      volcano_plots[[ident_a_name]] = list()
+      
+      for (ident_b in b_sets) {
+        
+        #skip if sets overlap
+        if (length(intersect(ident_a, ident_b)) > 0) next
+
+        ident_b_name <- paste(ident_b, collapse='_' )
+        
+        print(paste("Running CAR comparison:", subset_name," - ", ident_a_name,' VS ',ident_b_name))
+        
+        volcano_plots[[ident_a_name]][[ident_b_name]] <- comp_car_volcano(
+          this_subset, ident.1=ident_a, ident.2=ident_b, lbl_pval_cutoff = 3, min.pct=0.25, assay=assay,
+          do_pathway_enrichments=F)
+        
+        # pathway_table <- data.table(
+        #   ident_a = ident_a_name,
+        #   ident_b = ident_b_name,
+        #   volcano_plots[[ident_a_name]][[ident_b_name]]$pathway_table)
+
+        marker_genes <- data.table(
+          ident_a = ident_a_name,
+          ident_b = ident_b_name,
+          volcano_plots[[ident_a_name]][[ident_b_name]]$markers, use.rownames=T)
+
+        # pathway_enrichments <- rbind(pathway_enrichments, pathway_table, fill=T)
+        
+        marker_table <- rbind(marker_table, marker_genes)
+        
+        if (save_plots) {
+          fn_prefix = paste0(plot_dir,'/',subset_name,'.',
+            ident_a_name,'_VS_',ident_b_name)
+          ggsave(paste0(fn_prefix, '.volcano.pdf'), 
+            volcano_plots[[ident_a_name]][[ident_b_name]]$plot, width=8, height=8, units='in')
+          # fwrite(pathway_table, paste0(fn_prefix, '.pathways.csv'))
+          fwrite(marker_genes, paste0(fn_prefix, '.genes.csv'))
+        }
+      }
+    }
+  }
+    
+  if (return_all) {
+    return(list(
+      cluster_plot=subset_umap_plot,
+      car_plot=car_umap_plot,
+      volcano_plots=volcano_plots,
+      pca_plot=car_pca_plot,
+      rds_file=rds_file))
+  } else {
+    return(list(
+        cluster_plot=subset_umap_plot,
+        car_plot=car_umap_plot,
+        volcano_plots=volcano_plots,
+        pca_plot=car_pca_plot,
+        rds_file=rds_file))
+  }
+}
+
+####### VISION
+
+# Load VISION
+load_vision_data <- function(
+    seurat_rds_file=SEURAT_RDS_FILE,
+    subset_fxn=function (obj) return(obj),
+    seurat_obj=NULL,
+    vision_rds_file=VISION_RDS_FILE, 
+    cluster_name=NULL,
+    cores=8) {
+  
+  if (is.null(seurat_obj)) {
+    scrna.hashed <- subset_fxn(readRDS(seurat_rds_file))
+  } else {
+    scrna.hashed <- seurat_obj
+  }
+  
+  # Read in expression counts (Genes X Cells, gene names as rownames)
+  counts <- data.frame(scrna.hashed@assays[["RNA"]]@counts)
+  
+  # Read in expression counts (Genes X Cells, gene names as rownames)
+  n.umi <- colSums(counts)
+  scaled_counts <- t(t(counts) / n.umi) * median(n.umi)
+  
+  rm(n.umi)
+  rm(counts)
+  gc()
+  
+  ### Adjust metadata to get signature associations
+  
+  meta <- scrna.hashed@meta.data[gsub('-','.',rownames(scrna.hashed@meta.data)) %in% colnames(scaled_counts),]
+  rownames(meta) <- gsub('-','.',rownames(meta))
+  
+  # extract useful metadata columns
+  meta_columns = c('k_type','car','CD4v8')
+  if (!(is.null(cluster_name))) {
+    meta_columns <- c(meta_columns, cluster_name)
+  }
+  
+  meta <- meta[, meta_columns]
+  # make a combined column with all combinations of the two
+  meta$sample <- factor(paste(meta$k_type, meta$CD4v8, meta$car, sep='_'))
+  meta$car_k <- factor(paste(meta$k_type, meta$car, sep='_'))
+  meta$t_k <- factor(paste(meta$k_type, meta$k_type, sep='_'))
+  meta$tnfr_new <- meta$car
+  meta$tnfr <- meta$car
+  meta$tnfr_new[meta$car %in% c('CD40','TACI','BAFF-R')] <- 'TNFR_new'
+  meta$tnfr[meta$car %in% c('CD40','TACI','BAFF-R','4-1BB')] <- 'TNFR'
+  
+  # Make vision object
+  vis <- Vision(scaled_counts,
+    signatures = here::here('..','data',paste0(c('h','c2'),'.all.v7.1.symbols.gmt')),
+    meta = meta)
+  
+  gc()
+  options(mc.cores = cores)
+  vis <- analyze(vis)
+  saveRDS(vis, vision_rds_file)
+  return(vis)
 }

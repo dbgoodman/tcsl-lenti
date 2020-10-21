@@ -29,6 +29,7 @@ library(doParallel)
 library(clusterProfiler)
 library(enrichplot)
 library(ggplot2)
+
 organism = "org.Hs.eg.db"
 library(organism, character.only = TRUE)
 library(ReactomePA)
@@ -86,300 +87,18 @@ plot_grid(
 )
 ```
 
-# PCA of CARs
-```{r}
-
-library(ggrepel)
-library(cowplot)
-
-
-
-# comp_car_volcano(subset(scrna.cd4, subset=(k_type == 'cd19+')), ident.1=c('CD28'), ident.2='BAFF-R', lbl_pval_cutoff = 3, min.pct=0.25, assay='RNA')
-
-```
-
-## correlation plots
-
-```{r}
-library(spatstat)
-library(dendextend)
-library(ggdendro)
-
-
-corr_plots <- function(subset_obj, assay='ADT') {
-  
-  DefaultAssay(subset_obj) <- assay
-  
-  citeseq_cor <- make_citeseq_dt(subset_obj, assay=assay)[, 
-      data.table(cor(.SD[, c(rownames(subset_obj@assays[[assay]]@data)), with=F]), keep.rownames=T)]
-  
-  #remove NA rows
-  citeseq_cor <- na.omit(
-    citeseq_cor[, which(colSums(is.na(citeseq_cor)) != (nrow(citeseq_cor) - 1)), with=F])
-   
-  # generate heirarchical clustering
-  dendro_m <- as.matrix(citeseq_cor[, -1])
-  rownames(dendro_m) <- unlist(citeseq_cor[,1])
-  dendro <- as.dendrogram(hclust(d = dist(x = dendro_m)))
-  dendro <- rotate(dendro, names(sort(rowMeans(dendro_m))))
-  
-  # row order from clustering
-  citeseq_cor_melt <- melt(citeseq_cor, id.vars='rn')
-  
-  # melt and reorder rows
-  citeseq_cor_melt$rn <- factor(
-      citeseq_cor_melt$rn,
-      levels = labels(dendro))
-  citeseq_cor_melt$variable <- factor(
-      citeseq_cor_melt$variable,
-      levels = labels(dendro))
-  
-  # remove markers that are not strongly correlated with anything
-  var_has_corr <- citeseq_cor_melt[variable != rn, max(abs(value)) > 0.075, by='variable'][V1 == T]$variable
-  citeseq_cor_melt_subset <- citeseq_cor_melt[variable %in% var_has_corr & rn %in% var_has_corr]
-  
-  average_corr <- ggplot(copy(citeseq_cor_melt_subset)[value > 0.5, value := 0.5]) + 
-    geom_tile(aes(x=rn, y=variable, fill=value)) + 
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
-    scale_fill_distiller(palette='PRGn', limits=c(-0.5, 0.5))
-  
-  return(average_corr)
-}
-```
-
 # UMAP plots and objects for each subset
 
 ```{r umap_each_subset, eval=reload_data}
-
-umap_plot_by_car <- function(this_subset, plot_title_text="", assay, cluster_resolution) {
-
-  
-  if ('cluster_dropped' %in% names(this_subset@meta.data)) {
-    this_subset <- subset(this_subset, subset=(cluster_dropped == F))
-  }
-  Idents(this_subset) <- 'car'
-  subset.markers <- FindAllMarkers(this_subset,
-  features = VariableFeatures(this_subset),
-  min.pct = 0.5, logfc.threshold = 0.25)
-  
-  top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
-  
-  top_genes_plot <- ggplot(top.subset.markers) + 
-    geom_bar(aes(y=avg_logFC, x=reorder(gene, avg_logFC)), stat='identity') + 
-    facet_wrap(~cluster, scales='free', ncol=3) +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-  
-  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
-  
-  cluster_pct_plot <- ggplot(
-      data.table(this_subset@meta.data)[
-        CD4v8 != 'intermediate', .N, 
-        by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
-          list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
-          by=c('car', 'CD4v8', 'k_type')]) + 
-    geom_bar(aes_string(x='cluster', y='frac', fill='frac'), stat='identity', color='grey50') +
-    scale_fill_distiller(palette='YlGnBu', direction=1) +
-    facet_grid(k_type+t_type~car) + 
-    theme_bw() +
-    coord_flip()
-  
-  plot_title <- ggdraw() + 
-    draw_label(
-      plot_title_text,
-      fontface = 'bold',
-      x = 0,
-      hjust = 0
-    ) +
-    theme(
-      # add margin on the left of the drawing canvas,
-      # so title is aligned with left edge of first plot
-      plot.margin = margin(0, 0, 0, 7)
-    )
-  
-  gene_heatmap <- DoHeatmap(this_subset,
-        features = unique(
-          (top.subset.markers %>% group_by(cluster) 
-            %>% top_n(n=5, wt= avg_logFC))$gene))
-  
-  car_density_map <- ggplot(
-      cbind(this_subset@meta.data, Embeddings(object = this_subset[["umap"]]))) + 
-    geom_density2d(aes(x=UMAP_1, y=UMAP_2)) + facet_wrap(~car) +
-    theme_minimal()
-      
-  umap_plots <- plot_grid(
-    plot_grid(
-      plot_title,
-      car_density_map,
-      cluster_pct_plot,
-      rel_heights=c(0.2,1.25,1),
-      ncol=1),
-        plot_grid(
-      gene_heatmap,
-      top_genes_plot,
-      ncol=1,
-      rel_heights=c(3,2)),
-    ncol=2)
-  
-  return(umap_plots)
-}
 
 
 # this_subset <- subset_fxns[[11]](scrna.hashed)
 # plot_title_text <- "CD8.CD19.stimulatory RNA"
 # assay='RNA'; cluster_resolution=0.8; save=T; save_plots=T; rerun=F; return_all=F;
-
-umap_subset <- function(this_subset, 
-    plot_title_text="", assay='RNA', cluster_resolution=0.8,
-    save=T, save_plots=T, rerun=F, return_all=F, parallel=F) {
-  
-  DefaultAssay(this_subset) <- assay
-  
-  subset_name <- gsub(' ','.',plot_title_text)
-  
-  print(subset_name)
-  
-  rds_file <- here::here(
-    '..','..','scrnaseq_tcsl154',
-    'rds',
-    paste0(
-        'scrna.hashed.',
-        subset_name,
-        '.rds'))
-  
-  plot_dir <- here::here(
-    '..','figs','scrna',
-    'subset_plots',
-    subset_name)
-  
-  if (save_plots) dir.create(plot_dir, recursive=T)
-  
-  if (rerun || !file.exists(rds_file)) {
-    
-    this_subset_umap <- calculate_umap(this_subset, 
-    plot_title_text="", assay='RNA', cluster_resolution=0.8,
-    save=T, save_plots=T, rerun=F, return_all=F, parallel=F
-  }
-  
-  cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
-  print(names(this_subset_umap@meta.data))
-  
-  # prune UMAP clusters:
-  cluster_stats <- data.table(
-    this_subset_umap@meta.data)[, list(get(cluster_col_name), n_clust_car=.N), 
-      by=c(cluster_col_name, 'car', 'CD4v8', 'k_type')][, 
-        list(cluster=get(cluster_col_name), n_clust_car, total=sum(n_clust_car), pct=n_clust_car/sum(n_clust_car)), 
-          by=c( 'car', 'CD4v8', 'k_type')]
-  
-  #criteria to drop clusters, all must be true to keep:
-  # at least 100 cells
-  cluster_stats[, min_cells := sum(n_clust_car) > 100, by='cluster']
-  
-  # at least 10% of the populaton for one CAR OR at least 5% of total population
-  cluster_stats[, max_car_pct := max(pct) > 0.05, by='cluster']
-  cluster_stats[, max_tot_pct := sum(n_clust_car)/cluster_stats[, sum(n_clust_car)] > .1, by='cluster']
-  
-  clusters_kept <- as.numeric(cluster_stats[, 
-    all(min_cells, max_car_pct & (max_car_pct | max_tot_pct)), by='cluster'][V1 == T, cluster])
-  
-  this_subset_umap@meta.data$cluster_dropped <- !(this_subset_umap@meta.data[[cluster_col_name]] %in% clusters_kept)
-  
-  if ((rerun | (!file.exists(rds_file))) & save)
-    saveRDS(this_subset_umap, file = rds_file)
-  
-  # plots
-  umap_plot_output <- umap_plot(this_subset_umap, plot_title_text, assay, cluster_resolution)
-  subset_umap_plot <- umap_plot_output$umap_plots
-  car_umap_plot <- umap_plot_by_car(this_subset_umap, plot_title_text, assay, cluster_resolution)
-  car_pca_plot <- plot_pca_cars(this_subset, title=plot_title_text, axes=c('car','k_type','CD4v8'), color_cars=T)
-  umap_pca_plot <- plot_pca_cars(this_subset_umap, title=plot_title_text, axes=c(cluster_col_name))
-
-  fn_pref = paste0(plot_dir,'/',subset_name,'.')
-    
-  if (save_plots) {
-    ggsave(paste0(fn_pref,'subset_umap.pdf'), subset_umap_plot, width=15, height=9)
-    ggsave(paste0(fn_pref,'car_umap_plot.pdf'), car_umap_plot, width=15, height=9)
-    ggsave(paste0(fn_pref,'umap_pca_plot.pdf'), umap_pca_plot, width=15, height=9)
-    ggsave(paste0(fn_pref,'car_pca_plot.pdf'), car_pca_plot, width=10, height=10)
-  }
-  
-  cluster_marker_genes <- umap_plot_output$marker_genes
-  fwrite(cluster_marker_genes, paste0(fn_pref, 'cluster_genes.csv'))
-
-  # volcano plots
-  if (assay == 'RNA') {
-    Idents(this_subset) <- 'car'
-    a_sets = list(c('BAFF-R'), c('TACI'), c('CD40'), c('BAFF-R','TACI'), c('BAFF-R','TACI','CD40'),
-      c('BAFF-R','TACI','CD40','4-1BB'), c('BAFF-R','TACI','CD40','4-1BB','CD28'), c('CD28'))
-    b_sets = list(c('CD28'), c('CD28','4-1BB','Zeta'), c('Zeta'), c('4-1BB'))
-    volcano_plots <- list()
-    pathway_enrichments <- data.table()
-    marker_table <- data.table()
-    
-    for (ident_a in a_sets) {
-      ident_a_name <- paste(ident_a, collapse='_')
-      volcano_plots[[ident_a_name]] = list()
-      
-      for (ident_b in b_sets) {
-        
-        #skip if sets overlap
-        if (length(intersect(ident_a, ident_b)) > 0) next
-
-        ident_b_name <- paste(ident_b, collapse='_' )
-        
-        print(paste("Running CAR comparison:", subset_name," - ", ident_a_name,' VS ',ident_b_name))
-        
-        volcano_plots[[ident_a_name]][[ident_b_name]] <- comp_car_volcano(
-          this_subset, ident.1=ident_a, ident.2=ident_b, lbl_pval_cutoff = 3, min.pct=0.25, assay=assay)
-        
-        pathway_table <- data.table(
-          ident_a = ident_a_name,
-          ident_b = ident_b_name,
-          volcano_plots[[ident_a_name]][[ident_b_name]]$pathway_table)
-        
-        marker_genes <- data.table(
-          ident_a = ident_a_name,
-          ident_b = ident_b_name,
-          volcano_plots[[ident_a_name]][[ident_b_name]]$markers, use.rownames=T)
-        
-        pathway_enrichments <- rbind(pathway_enrichments, pathway_table, fill=T)
-        
-        marker_table <- rbind(marker_table, marker_genes)
-        
-        if (save_plots) {
-          fn_prefix = paste0(plot_dir,'/',subset_name,'.',
-            ident_a_name,'_VS_',ident_b_name)
-          ggsave(paste0(fn_prefix, '.volcano.pdf'), 
-            volcano_plots[[ident_a_name]][[ident_b_name]]$plot, width=8, height=8, units='in')
-          fwrite(pathway_table, paste0(fn_prefix, '.pathways.csv'))
-          fwrite(marker_genes, paste0(fn_prefix, '.genes.csv'))
-        }
-      }
-    }
-  }
-    
-  if (return_all) {
-    return(list(
-      cluster_plot=subset_umap_plot,
-      car_plot=car_umap_plot,
-      volcano_plots=volcano_plots,
-      pca_plot=car_pca_plot,
-      rds_file=rds_file))
-  } else {
-    return(list(
-        cluster_plot=subset_umap_plot,
-        car_plot=car_umap_plot,
-        volcano_plots=volcano_plots,
-        pca_plot=car_pca_plot,
-        rds_file=rds_file))
-  }
-}
 ```
 
 ## Run all groups
 ```{r}
-
-registerDoParallel(8)
-
 stimulatory_cars <- c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')
 
 if (!reload_data && !('umap_plots' %in% ls()) )
@@ -436,7 +155,12 @@ if (!reload_data && !('umap_plots' %in% ls()) )
   #     umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), plot_title_text=paste0(.BY[1],' ADT'), assay='ADT'))),
   #     by='subset_name']
   
-  umap_plots[, RNA := list(list(
+  # umap_plots[, RNA := list(list(
+  #   umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), 
+  #     plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
+  #   by='subset_name']
+  
+  umap_plots[c(1,2,3,4,5,6,7,8,9,10,11), RNA := list(list(
     umap_subset(subset_fxns[[subset_fxn_num]](scrna.hashed), 
       plot_title_text=paste0(.BY[1],' RNA'), assay='RNA'))), 
     by='subset_name']

@@ -6,6 +6,8 @@ output: html_document
 ```{r setup, include=FALSE}
 library(VISION)
 library(data.table)
+library(cowplot)
+library(Seurat)
 
 SEURAT_RDS_FILE <- here::here(
     '..','..','scrnaseq_tcsl154',
@@ -15,64 +17,331 @@ VISION_RDS_FILE <- here::here(
     '..','..','scrnaseq_tcsl154',
     'rds','scrna.vision.rds')
 
+STIMULATORY_CARS <- c('4-1BB','BAFF-R','CD40','TACI','CD28','Zeta')
+
+source(here::here('r','scrna','scrna_analysis_fxns.R'))
+source(here::here('r','fig_colors.R'))
 ```
 
-## R Markdown
+## Vision Function
 
 From VISION Getting Started Vignette:
     https://yoseflab.github.io/VISION/articles/VISION-vignette.html
 
 ```{r cars}
-# Load VISION
-load_vision_data <- function(seurat_rds_file=SEURAT_RDS_FILE) {
-  
-  scrna.hashed <- subset(readRDS(seurat_rds_file), subset=(car != 'K_only'))
-  
-  # Read in expression counts (Genes X Cells, gene names as rownames)
-  counts <- data.frame(scrna.hashed@assays[["RNA"]]@counts)
-  
-  # Read in expression counts (Genes X Cells, gene names as rownames)
-  n.umi <- colSums(counts)
-  scaled_counts <- t(t(counts) / n.umi) * median(n.umi)
-  
-  rm(n.umi)
-  rm(counts)
-  gc()
-  
-  meta <- scrna.hashed@meta.data[gsub('-','.',rownames(scrna.hashed@meta.data)) %in% colnames(scaled_counts),]
-  rownames(meta) <- gsub('-','.',rownames(meta))
-  
-  # extract useful metadata columns
-  meta_columns = c('k_type','car','CD4v8')
-  meta <- meta[, meta_columns]
-  # make a combined column with all combinations of the two
-  meta$sample <- factor(paste(meta$k_type, meta$CD4v8, meta$car, sep='_'))
-  meta$car_k <- factor(paste(meta$k_type, meta$car, sep='_'))
-  meta$t_k <- factor(paste(meta$k_type, meta$k_type, sep='_'))
-  
-  
-  # Make vision object
-  vis <- Vision(scaled_counts,
-    signatures = here::here('..','data','c7.all.v7.1.symbols.gmt'),
-    meta = meta)
-  
-  return(vis)
-}
 
-gc()
-vis <- load_vision_data()
-gc()
-options(mc.cores = 8)
-vis <- analyze(vis)
-saveRDS(VISION_RDS_FILE)
 ```
 
-## Including Plots
+## Run Vision on Subsets
+
+```{r}
+
+load_vision_data(
+  vision_rds_file= here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.cd4.stim.act.rds'),
+  subset_fxn= function(obj) subset(obj, subset=(k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% STIMULATORY_CARS)))
+
+load_vision_data(
+  vision_rds_file= here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.cd8.stim.act.rds'),
+  subset_fxn= function(obj) subset(obj, subset=(k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% STIMULATORY_CARS)))
+
+# List of interesting CD8 Stimulatory CAR Signatures
+  #GSE21670 untreated vs il6 treated CD4
+  #KAECH_DAY8_EFF_VS_MEMORY_CD8_TCELL
+  #
+
+# Zeta signatures:
+# GSE15930 STIM VS STIM_AND_IL12_48H_CD8_T_CELL
+#  zeta (+taci) +, CD28 (+BAFFR, CD40) -
+#  (score 0.41)
+# GSE19825 CD24LOW VS IL2RA_HIGH_DAY3_EFF_CD8_TCELL
+#  zeta +, CD28 (+TACI/41BB) -
+# (score 0.74)
+# GSE15930 NAIVE_VS_48H IN VITRO STIM (+IL12, IFNAB)
+  # baffr intermediate, CD28-, zeta +
+# GSE30962_ACUTE_VS_CHRONIC_LCMV
+  #(zeta and BAFFR acute, rest chronic (esp28))
+# 
+
+load_vision_data(
+  vision_rds_file= here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.stim.act.rds'),
+  subset_fxn= function(obj) subset(obj, subset=(k_type == 'cd19+' & car %in% STIMULATORY_CARS)))
+
+# GSE33425 - Alpha alpha vs alpha beta cd161 high - baffr and cd28 + together?
+
+#hallmark genes
+load_vision_data(
+  vision_rds_file= here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.cd8.stim.act.rds'),
+  subset_fxn= function(obj) subset(obj, subset=(k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% STIMULATORY_CARS)))
+
+load_vision_data(
+  vision_rds_file= here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.cd4.stim.act.rds'),
+  subset_fxn= function(obj) subset(obj, subset=(k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% STIMULATORY_CARS)))
+
+load_vision_data(
+  vision_rds_file= here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.vision.stim.act.rds'),
+  subset_fxn= function(obj) subset(obj, subset=(k_type == 'cd19+' & car %in% STIMULATORY_CARS)))
+
+```
+
+## Signature Plots
 
 You can also embed plots, for example:
 
 ```{r pressure, echo=FALSE}
-plot(pressure)
+
+# subset_fxn <- function(obj) subset(obj, subset=(k_type == 'cd19+' & car %in% STIMULATORY_CARS))
+# scrna.data <- subset_fxn(readRDS(SEURAT_RDS_FILE))
+# vis <- readRDS(here::here(
+#     '..','..','scrnaseq_tcsl154',
+#     'rds','scrna.vision.stim.act.rds'))
+  
+plot_sig_by_car <- function(seurat_obj, vis, signature, x_lab, assay='RNA') {
+
+  DefaultAssay(seurat_obj) <- assay
+  sig_scores <- getSignatureScores(vis)
+
+  sig.data <- data.table(
+    cbind(seurat_obj@meta.data, sig_scores))[, 
+      car := factor(
+        car,
+        levels=c('CD28','4-1BB','BAFF-R','TACI','CD40','TNR8','KLRG1','Zeta','Untransduced'),
+        labels=c(car_order,'Untransduced'))]
+  
+  plot <- ggplot(sig.data) +
+    geom_boxplot(aes_string(x=signature, y='car', fill='car', color='car'), alpha=0.7, outlier.shape=NA) + 
+    scale_fill_manual(values=c(car_colors, Untransduced='grey80')) +
+    scale_color_manual(values=c(car_colors, Untransduced='grey80')) +
+    theme_bw() + theme(panel.grid=element_blank(), text=element_text(family="Arial Unicode MS")) + labs(x=x_lab)
+  
+  return(plot)
+}
+
+plot_sig_by_cluster <- function(seurat_obj, vis, signature, x_lab, cluster_col='VISION_Clusters') {
+
+  DefaultAssay(seurat_obj) <- 'RNA'
+  sig_scores <- getSignatureScores(vis)
+
+  sig.data <- data.table(
+    cbind(seurat_obj@meta.data, sig_scores))
+  
+  plot <- ggplot(sig.data) +
+  geom_boxplot(aes_string(x=signature, y=cluster_col, fill=cluster_col, color=cluster_col), alpha=0.7, outlier.shape=NA) + 
+  theme_bw() + theme(panel.grid=element_blank(), text=element_text(family="Arial Unicode MS")) + labs(x=x_lab)
+  
+  return(plot)
+}
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+
+seurat_obj <- subset(readRDS(here::here('..','..','scrnaseq_tcsl154','rds','scrna.hashed.rds')),
+  subset=(k_type == 'cd19+' & CD4v8 == 'CD8' & car %in% STIMULATORY_CARS))
+
+cluster_name <- 'RNA_snn_res.0.8'
+
+vis_obj <- load_vision_data(
+  vision_rds_file= here::here('..','..','scrnaseq_tcsl154','rds','scrna.vision.cd8.stim.act.rds'),
+  seurat_obj=seurat_obj, cluster_name=NULL)
+
+seurat_obj@meta.data$VISION_Clusters <- vis_obj@metaData$VISION_Clusters
+
+```
+
+```{r}
+scrna_cd4_stim <- subset(
+  readRDS(SEURAT_RDS_FILE), 
+  subset=(k_type == 'cd19+' & CD4v8 == 'CD4' & car %in% STIMULATORY_CARS))
+cd4_stim_vis <- readRDS(here::here('..','..','scrnaseq_tcsl154','rds','scrna.vision.cd4.stim.act.rds'))
+
+load_vision_data(
+    seurat_rds_file=NULL,
+    subset_fxn=NULL,
+    seurat_obj=scrna_cd4_stim,
+    vision_rds_file=cd4_stim_vis, 
+    cluster_name=cluster_col_name,
+    cores=8)
+
+scrna_cd4_stim@meta.data$VISION_Clusters <- cd4_stim_vis@metaData$VISION_Clusters
+
+plot_sig_by_car(
+  scrna_cd4_stim,
+  cd4_stim_vis,
+  signature='GSE3982_MEMORY_CD4_TCELL_VS_TH1', x_lab='TH1 < > CD4 Memory\n(GSE3982_MEMORY_CD4_TCELL_VS_TH1)')
+plot_sig_by_car(
+  scrna_cd4_stim,
+  cd4_stim_vis,
+  signature='GSE43863_TH1_VS_TFH_MEMORY_CD4_TCELL', x_lab='TH1 < > CD4 TFH Memory\n(GSE43863_TH1_VS_TFH_MEMORY_CD4_TCELL)')
+
+
+this_signature <- 'GSE24574_BCL6_HIGH_VS_LOW_TFH_CD4_TCELL'
+this_sig_geneset <- cd4_stim_vis@SigGeneImportance[[this_signature]]
+ordered_filtered_sig_geneset <- sort(
+  this_sig_geneset[intersect(VariableFeatures(scrna_cd4_stim, assay='RNA'), names(this_sig_geneset))],
+  decreasing=T)
+
+gene_score <- ggplot(data.table(gene=names(ordered_filtered_sig_geneset), score=(ordered_filtered_sig_geneset))) + 
+  geom_tile(aes(x='score', y=reorder(gene, score), fill=score)) + 
+  scale_fill_distiller(
+    palette='RdBu', 
+    limits=c(-max(abs(ordered_filtered_sig_geneset)), max(abs(ordered_filtered_sig_geneset)))) + 
+  labs(x='',y='') + theme_minimal() + 
+  theme(panel.grid=element_blank()) + 
+  scale_x_discrete(expand=c(0,0))
+
+
+plot_grid(
+  DoHeatmap(scrna_cd4_stim,
+  features=names(ordered_filtered_sig_geneset), 
+  assay='RNA', group.by = 'VISION_Clusters'),
+  gene_score,
+  ncol=2,
+  align = 'h', axis = 'tb')
+
+plot_grid(
+    DoHeatmap(scrna_cd4_stim, features=names(ordered_filtered_sig_geneset)[ordered_filtered_sig_geneset > 0], assay='RNA', group.by = 'VISION_Clusters'),
+    cluster_car_pct_plot(scrna_cd4_stim, 'VISION_Clusters'), ncol=1)
+##########
+
+signature_plot <- function(seurat_obj, vis_obj, this_signature) {
+
+  this_sig_geneset <- vis_obj@SigGeneImportance[[this_signature]]
+  ordered_filtered_sig_geneset <- sort(
+    this_sig_geneset[intersect(VariableFeatures(seurat_obj, assay='RNA'), names(this_sig_geneset))],
+    decreasing=T)
+  
+  gene_score <- ggplot(data.table(gene=names(ordered_filtered_sig_geneset), score=(ordered_filtered_sig_geneset))) + 
+    geom_tile(aes(x='score', y=reorder(gene, score), fill=score)) + 
+    scale_fill_distiller(
+      palette='RdBu', 
+      limits=c(-max(abs(ordered_filtered_sig_geneset)), max(abs(ordered_filtered_sig_geneset)))) + 
+    labs(x='',y='') + theme_minimal() + 
+    theme(panel.grid=element_blank()) + 
+    scale_x_discrete(expand=c(0,0))
+  
+  plot_grid(
+    DoHeatmap(seurat_obj,
+    features=names(ordered_filtered_sig_geneset), 
+    assay='RNA', group.by = 'VISION_Clusters'),
+    plot_grid(
+        cluster_car_pct_plot(seurat_obj, 'VISION_Clusters'),
+        plot_sig_by_car(seurat_obj, vis_obj, this_signature, x_lab=this_signature), 
+        plot_sig_by_cluster(seurat_obj, vis_obj, this_signature, x_lab=this_signature), ncol=1),
+    ncol=2,
+    align = 'h', axis = 'tb')
+}
+
+###########
+
+sig_corr <- getSignatureAutocorrelation(vis_obj)
+sig_corr <- data.table(sig_corr, keep.rownames=T)[C > 0.7]
+names(sig_corr)[1] <- 'signature'
+
+sig_diffs_clust <- getSignatureDifferential(vis_obj)$VISION_Clusters
+
+for(cluster in names(sig_diffs_clust)) {
+  sig_diffs_clust[[cluster]]['cluster'] <- as.numeric(gsub('Cluster (\\d+)$','\\1', cluster))
+  sig_diffs_clust[[cluster]]['signature'] <- rownames(sig_diffs_clust[[cluster]])
+}
+
+sig_diffs_clust <- data.table(rbindlist(sig_diffs_clust), keep.rownames=T)[signature %in% sig_corr$signature]
+
+cast_clust_scores <- dcast(sig_diffs_clust, signature ~ cluster, value.var='stat')
+clust_sig_cor <- cor(t(cast_clust_scores[, -1]))
+clust_cor <- cor(cast_clust_scores[, -1])
+
+dendro_m_sig <- as.matrix(clust_sig_cor)
+rownames(dendro_m_sig) <- cast_clust_scores$signature
+dendro_sig <- as.dendrogram(hclust(d = dist(x = dendro_m_sig)))
+dendro_sig <- rotate(dendro_sig, names(sort(rowMeans(dendro_m_sig))))
+
+# melt and reorder rows
+sig_diffs_clust$signature <- factor(
+    sig_diffs_clust$signature,
+    levels = labels(dendro_sig))
+
+dendro_m_clust <- as.matrix(clust_cor)
+dendro_clust <- as.dendrogram(hclust(d = dist(x = dendro_m_clust)))
+dendro_clust <- rotate(dendro_clust, names(sort(rowMeans(dendro_m_clust))))
+
+# melt and reorder rows
+sig_diffs_clust$cluster <- factor(
+    sig_diffs_clust$cluster,
+    levels = labels(dendro_clust))
+
+seurat_obj@meta.data$VISION_Clusters <- factor(
+  as.numeric(gsub('Cluster (\\d+)$','\\1', 
+    vis_obj@metaData$VISION_Clusters)), levels=labels(dendro_clust))
+
+ggplot(sig_diffs_clust) + 
+  geom_tile(aes(x=signature, y=factor(cluster), fill=stat)) + 
+  scale_fill_distiller(palette='RdYlBu') + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5)) + 
+  coord_flip()
+
+###########
+
+
+car_feature_dotplot <- function(seurat_obj, features, assay='RNA') {
+
+  #Missing features?
+  #print(setdiff(features, intersect(features, rownames(seurat_obj@assays$RNA@scale.data))))
+  
+  DefaultAssay(seurat_obj) <- assay
+  
+  feature_dt <- melt(
+    data.table(cbind(t(seurat_obj@assays[[assay]]@scale.data[features,]), seurat_obj@meta.data))[
+      !(car %in% c('K_only','KLRG1','Untransduced'))], 
+    measure.vars=features, variable.name='gene')[,
+      `:=`(pct_exp_global=sum(value > 0)/.N, mean_exp_global=mean(value[value > 0])), by=c('CD4v8','gene')][,
+        list(pct_exp=(sum(value > 0)/.N), mean_exp_fldch=mean(value[value > 0])/mean_exp_global), 
+        by=c('car','CD4v8','gene')]
+  
+  return(ggplot(feature_dt[CD4v8 != 'intermediate']) + 
+    geom_point(
+      aes(x=factor(car, levels=c(car_order,'4-1BB', 'Zeta')), 
+          y=factor(gene, levels=features), 
+          color=mean_exp_fldch, 
+          size=pct_exp)) + 
+    facet_grid(~CD4v8) + 
+    scale_color_distiller('Relative Expression Change\nfrom Mean',direction=1, palette='PiYG') + 
+    theme_minimal() + 
+    theme(panel.grid=element_blank()) + 
+    scale_size_continuous('% Cells Expressing',range=c(2,8)) +
+    labs(x='CAR',y='Gene'))
+
+}
+
+car_feature_dotplot(seurat_obj, c('STAT1','TIFA','S100A4','BIRC3','RARRES3','IGFBP2','TMSB4X','IL7R','LTB','CCL5'))
+
+car_feature_dotplot(seurat_obj, c('HLA-DPA1','HLA-DPB1','HLA-DQB1','CD74','HLA-DRB1','HLA-DRA'))
+
+car_feature_dotplot(subset(seurat_obj, subset=(car != 'zeta')), grep('TRAF',rownames(seurat_obj@assays$RNA@counts), value=T))
+
+car_feature_dotplot(subset(seurat_obj, subset=(car != 'zeta')), grep('ITG',rownames(seurat_obj@assays$RNA@counts), value=T))
+
+
+# best sigs for clust 9
+# sig_diffs_clust[, list(stat[cluster == 9]/mean(stat)), by='signature'][order(-V1)][1:10]
+
+#sigs that separate clust 8 and clust 1
+# sig_diffs_clust[cluster == 8, list(stat_8=stat, signature)][sig_diffs_clust[cluster == 1, list(stat_1 = stat, signature)], on='signature'][, list(signature, stat_8-stat_1)][order(-V2)]
+```
+#Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+#CD4 categories:
+#GSE24574_BCL6_HIGH_VS_LOW_TFH_CD4_TCELL
+#GSE43863_TH1_VS_TFH_MEMORY_CD4_TCELL
+

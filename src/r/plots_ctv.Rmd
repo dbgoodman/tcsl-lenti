@@ -230,6 +230,12 @@ ggsave(paste0(output_dir, '/ctv_ridge_d2_plot.pdf'),
        ctv_ridge_d2, width = 7, height = 4,
        units = 'in', dpi = 300)
 
+# klrg1 subset
+
+make_ridge_plot_panel(
+  ctv_fig_subset_dt[k562=='cd19+' & donor == 1 & car %in% c('CD28','KLRG1','zeta') & day == 3 & t_type == 'cd8'], 'ctv2_t') +
+    labs(x='CTV (AU)', y= 'CAR', title=paste0('Proliferation (Donor 1)'))
+
 ```
 
 ### corresponding colored line plot
@@ -369,22 +375,28 @@ ctv_gated_means_donormerge_dt <- ctv_gated_means_dt[, `:=`(
 
 ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable=='ctv1_t' & car != 'KLRG1' & k562 == 'cd19+']
 
-ggplot(ctv_gated_means_donormerge_subset,
-    aes(fill=0-value_rel_day_mean, y=factor(
-      car, levels=rev(levels(factor(car)))), x=day)) + 
-  geom_tile() + 
-  facet_grid(k562 ~ t_type) + 
-  scale_fill_viridis_c(
-    'Mean proliferation, relative to mean',
-    limits = c(-1,1)*max(abs(
-      ctv_gated_means_donormerge_subset$value_rel_day_mean)),
-    na.value = 'darkgrey') + 
-  theme_minimal() + 
-  theme(
-    panel.background=element_rect(fill="darkgrey", colour="darkgrey"),
-    panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
-  scale_y_discrete(expand=c(0,0)) + 
-  scale_x_discrete(expand=c(0,0)) 
+cd27_lines_all <- ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min & t_type == 'cd8'][,
+            list(val_sd= sd(value), val_mean= mean(value)),
+        by=.(car, day, donor, variable, t_type)][
+                (donor == 2 | (donor == 1 & day < 33))], 
+    aes(x=day, y=val_mean/1000, 
+        ymin=(val_mean-val_sd)/1000, 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car)) + 
+    geom_point() + 
+    geom_line() + 
+    facet_grid(~ donor, scale='free_x') + 
+    scale_x_continuous(breaks=c(0,6,15,24,33)) +
+    scale_y_continuous(limits=c(1.25,2.4)) +
+    scale_color_manual(
+        values=c(car_colors,grey)) +
+    scale_linetype_manual(
+        values=c(1,1,1,1,1,1,1,1,3)) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='CD27 log MFI (AU)', x='Days in culture')
 ```
 
 
