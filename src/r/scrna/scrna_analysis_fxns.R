@@ -379,7 +379,9 @@ get_cluster_pct_plot <- function(this_subset, cluster_col_name) {
   return(cluster_pct_plot)
 }
 
-get_cluster_enrich_plot <- function(this_subset, cluster_col_name, max_log2_enrich=2, hide=c('KLRG1','Untransduced')) {
+get_cluster_enrich_plot <- function(
+  this_subset, cluster_col_name, max_log2_enrich=2, hide=c('KLRG1','Untransduced'),
+  bar_cutoff=0.03) {
 
   enrich_data <- data.table(this_subset@meta.data)[
     CD4v8 != 'intermediate' & !(car %in% hide) , .N, 
@@ -388,15 +390,17 @@ get_cluster_enrich_plot <- function(this_subset, cluster_col_name, max_log2_enri
       by=c('car', 'CD4v8', 'k_type')][,
         rel_frac := log2(frac/mean(frac)), by=c('CD4v8','k_type','cluster')]
   
+  enrich_data[, mean_frac := mean(frac), by=c('CD4v8','k_type','cluster')]
+  
   enrich_data[, rel_frac_disp := ifelse(abs(rel_frac) > max_log2_enrich, 
     sign(rel_frac)*max_log2_enrich,
     rel_frac)]
   
-  ggplot(enrich_data) + 
-    geom_bar(aes_string(x='cluster', y='frac', fill='rel_frac_disp'), stat='identity', color='grey50') +
+  ggplot(enrich_data[mean_frac > bar_cutoff]) + 
+    geom_bar(aes(x=reorder(cluster, mean_frac), y=frac, fill=rel_frac_disp), stat='identity', color='grey50') +
     scale_fill_distiller('Log2 Enrichment\nvs mean CAR', palette='PuOr', direction=1,
       limits=c(-max_log2_enrich, max_log2_enrich)) +
-    facet_grid(k_type+t_type~car) + labs(x='Log2 enrichment vs mean car') +
+    facet_grid(k_type+t_type~car, space='free', scales='free_y') + labs(x='Log2 enrichment vs mean car') +
     theme_bw() +
     coord_flip()
 }
@@ -407,7 +411,7 @@ umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution
   stopifnot(!is.null(cluster_name) || !is.null(cluster_name))
   
   if (!is.null(cluster_resolution))
-    cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
+    cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluandster_resolution))
   if (!is.null(cluster_name))
     cluster_col_name <- cluster_name
 
@@ -977,10 +981,7 @@ signature_plot <- function(seurat_obj, vis_obj, this_signature) {
 
 ### NEW SCT/CLUSTERING Functions
 
-# SCTransform and UMAP of a subset of cells
-sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, title="") {
-  
-  plots = list()
+run_sct <- function(seurat_obj, pct.mt.cutoff=13) {
   
   # remove high MT-RNA cells (dying/dead?)
   DefaultAssay(seurat_obj) <- 'RNA'
@@ -1013,6 +1014,18 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, title="") {
     seurat_obj, features = rownames(seurat_obj[["SCT_ADT"]]), 
     nfeatures.print = 10, reduction.name='adt_pca')
   
+  return(seurat_obj)
+}
+
+# SCTransform and UMAP of a subset of cells
+sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, title="") {
+  
+  plots = list()
+  
+  # perform sctransform on 
+  if (redo_sct | !('SCT' %in% names(seurat_obj@assays) | !('SCT_ADT') %in% names(seurat_obj@assays))) 
+    seurat_obj <- run_sct(seurat_obj, pct.mt.cutoff)
+  
   #WNN graph for both PCAs
   seurat_obj <- FindMultiModalNeighbors(
     seurat_obj, reduction.list = list("rna_pca", "adt_pca"), 
@@ -1023,7 +1036,9 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, title="") {
   cluster_name <- paste0('wsnn_res.',as.character(cluster_resolution))
   
   seurat_obj <- RunUMAP(seurat_obj, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
-  seurat_obj <- FindClusters(seurat_obj, graph.name = "wsnn", algorithm = 3, resolution = cluster_resolution, verbose = FALSE)
+  seurat_obj <- FindClusters(seurat_obj, 
+    graph.name = "wsnn", algorithm = 3, 
+    resolution = cluster_resolution, verbose = FALSE)
   
   pl_clusters <- DimPlot(seurat_obj, reduction = 'wnn.umap', label = TRUE,
     repel = TRUE, label.size = 2.5) + NoLegend()
@@ -1047,7 +1062,10 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, title="") {
   plots$adt_umap_plots <- adt_umap_plots$umap_plots
   plots$rna_umap_plots <- rna_umap_plots$umap_plots
   
-  return(list(obj=seurat_obj, plots=plots, adt_markers= adt_umap_plots$marker_genes, rna_markers= rna_umap_plots$marker_genes))
+  return(list(
+    obj=seurat_obj, plots=plots, 
+    adt_markers= adt_umap_plots$marker_genes,
+    rna_markers= rna_umap_plots$marker_genes))
 }
 
 # Map clusters from one object to another
@@ -1081,12 +1099,208 @@ map_clust_act <- function(seurat_obj) {
     geom_point(aes(x=seurat_clusters, y=car, fill=cd19_clust_car_l2fc, size=pct_clust_car_max), shape=21) + 
     scale_fill_distiller(palette='PRGn', direction=1) + scale_size_area(max_size=12) + theme_minimal() + 
     facet_grid(~is_act_avg, scales='free_x')
-
+  
   activation_colors <- ggplot_build(
     ggplot(unique(car_clust_data[, list(cd19_clust_act_l2fc, seurat_clusters)])) + 
     geom_tile(aes(x=seurat_clusters, y='1', fill=cd19_clust_act_l2fc)) + 
     scale_fill_distiller(palette='PRGn', direction=1))$data[1][[1]][c('fill','x')]
   
-  return(list(car_clust_data=car_clust_data, act_plot=act_plot, activation_colors=activation_colors))
+  act_umap_plot <- DimPlot(
+    seurat_obj, 
+    cols=activation_colors$fill[order(activation_colors$x)], label=T)
+  
+  return(list(
+    car_clust_data=car_clust_data,
+    act_plot=act_plot,
+    act_umap_plot= act_umap_plot,
+    activation_colors=activation_colors))
 }
 
+# Map two cluster types and make plots
+compare_clusters <- function(seurat_obj, clust_a, clust_b) {
+  
+  clust_co_counts <- data.table(seurat_obj@meta.data)[, 
+    list(n_clust_car=.N), by=c(clust_a, clust_b)]
+  
+  clust_co_counts <- clust_co_counts[, c(clust_a, 'pct_a_in_b','best_a_in_b') := list(
+      get(clust_a), n_clust_car/sum(n_clust_car), get(clust_a)[which.max(n_clust_car/sum(n_clust_car))]), 
+    by=c(clust_b)]
+
+  clust_co_counts <- clust_co_counts[, c(clust_b, 'pct_b_in_a', 'best_b_in_a') := list(
+      get(clust_b), n_clust_car/sum(n_clust_car), get(clust_b)[which.max(n_clust_car/sum(n_clust_car))]), 
+    by=c(clust_a)]
+  
+  a_v_b <- clust_co_counts[,
+    list(get(clust_a), pct_clust=n_clust_car/sum(n_clust_car)), by=c(clust_b)]
+  b_v_a <- clust_co_counts[,
+    list(get(clust_b), pct_clust=n_clust_car/sum(n_clust_car)), by=c(clust_a)]
+  
+  names(a_v_b)[c(1,2)] <- c(clust_a, clust_b)
+  names(b_v_a)[c(1,2)] <- c(clust_b, clust_a)
+
+  plot_a_in_b <- ggplot(a_v_b) + 
+    geom_tile(aes_string(x=clust_a, y=clust_b, fill='pct_clust')) +
+    scale_fill_distiller(palette='Greens', direction=1) +
+    theme_bw()
+  plot_b_in_a <- ggplot(b_v_a) + 
+    geom_tile(aes_string(x=clust_b, y=clust_a, fill='pct_clust')) +
+    scale_fill_distiller(palette='Purples', direction=1) +
+    theme_bw()
+  
+  return(list(clust_co_counts=clust_co_counts, plot_a_in_b=plot_a_in_b, plot_b_in_a=plot_b_in_a))
+}
+
+# cd4/cd8 clustering
+reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
+  
+  t_type_adt <- data.table(t(scrna@assays$SCT_ADT@scale.data[c('CD8A.adt','CD4.adt'),]))
+  fit <- Mclust(t_type_adt[, c('CD8A.adt','CD4.adt')], G=n_clust)
+  t_type_adt$clust <- fit$classification
+  doublet_clust <- which.min(table(t_type_adt$clust))
+  cd4_clust <- which(fit$parameters$mean[1,] < fit$parameters$mean[2,] & 1:n_clust != doublet_clust)
+  cd8_clust <- which((1:n_clust != doublet_clust) & !(1:n_clust %in% cd4_clust))
+  
+  t_type_adt$doublet_score <- -log(fit$z[,doublet_clust])
+  t_type_adt[, t_type := ifelse(clust %in% cd8_clust, 'CD8', 'CD4')]
+  t_type_adt[clust == doublet_clust, t_type := 'DP']
+  t_type_adt[, t_type_old := scrna@meta.data$CD4v8]
+  
+  plot_obj$t_type_mmodel <- plot_grid(
+    ggplot(t_type_adt) + 
+      geom_point(aes(x=CD8A.adt, y=CD4.adt, shape=factor(clust), color=doublet_score)) + 
+      scale_color_distiller(palette='Spectral') +
+      theme_bw(),
+    ggplot(t_type_adt) + 
+      geom_point(aes(x=CD8A.adt, y=CD4.adt, color=factor(clust))) +
+      theme_bw(),
+    ggplot(t_type_adt) + 
+      geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type)) +
+      theme_bw(),
+    ggplot(t_type_adt) + 
+      geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type_old)) +
+      theme_bw())
+  
+  # pick cluster with fewest cells, assign them as double positives
+  scrna@meta.data$t_type_dp <- t_type_adt[, clust == doublet_clust]
+  scrna@meta.data$t_type <- t_type_adt$t_type
+  
+  plot_obj$t_type_reassign_table <- gt(as.data.frame.matrix(
+    table(scrna@meta.data$t_type, scrna@meta.data$CD4v8)))
+  
+  scrna@meta.data$t_type_old <- scrna@meta.data$CD4v8
+  scrna@meta.data$CD4v8 <- scrna@meta.data$t_type
+  
+  return(list(seurat_obj=scrna, plot_obj=plot_obj))
+}
+
+get_ident_avg <- function(seurat_obj, ident='seurat_clusters', assays=c('SCT_ADT','SCT')) {
+  Idents(seurat_obj) <- ident
+  av.exp <- AverageExpression(seurat_obj, assays=assays, use.scale=T)
+  return(rbindlist(av.exp))
+}
+
+
+make_dendroheatmap <- function(
+  avg_a, avg_b=NULL, title='', clust_y=T, clust_x=T,
+  dendro_units=grid::unit(0.2, "null"), 
+  legend_theme=theme(legend.position = "none"))
+{
+
+  #TO DO - SWITCH THIS TO heatmap() and extract col/row orders and dendros
+  
+  cor.exp <- as.data.frame(cor(avg_a, avg_b))
+  cor.exp.dt <- data.table(cor.exp, keep.rownames=T)
+  cor.df <- melt(cor.exp.dt, id.vars='rn', variable.name='y')
+  names(cor.df)[1] <- 'x'
+  
+  cor_dendro_y <- as.dendrogram(hclust(d = dist(cor.exp)))
+
+  cor_dendro_x <- as.dendrogram(hclust(d = dist(t(cor.exp))))
+
+  # Create dendrogram plot
+  dendro_vars_plot_y <- ggdendrogram(data = cor_dendro_y, rotate = TRUE) + 
+    theme(axis.text.y = element_text(size = 6))
+  dendro_vars_plot_x <- ggdendrogram(data = cor_dendro_x, rotate = F) + 
+    theme(axis.text.x = element_text(size = 6))
+
+  
+  # row order
+  cor.df[, x := factor(x, levels=labels(cor_dendro_x))]
+  cor.df[, y := factor(y, levels=labels(cor_dendro_y))]
+
+  # heatmap
+  var_heatmap <- ggplot(cor.df) + 
+    geom_tile(aes(x = x, y = y, fill = value),
+      colour = "black", size = .20) + 
+    scale_fill_distiller('Correlation', 
+      palette='PiYG', limits=c(-1,1), oob=scales::squish, direction=1) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.title.x = element_blank(),
+        panel.background = element_rect(fill='white'),
+        axis.title.y = element_blank())
+  
+  # col dendro
+  dendro_data_col_x <- dendro_data(cor_dendro_x, type = "rectangle")
+  dendro_data_col_y <- dendro_data(cor_dendro_y, type = "rectangle")
+  
+  plot_dendro_y <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
+    geom_segment(data = segment(dendro_data_col_y), 
+        aes(x = x, y = y, xend = xend, yend = yend)) +
+      coord_flip()
+  
+  plot_dendro_x <- axis_canvas(var_heatmap, axis = "x", coord_flip=F) + 
+    geom_segment(data = segment(dendro_data_col_x), 
+        aes(x = x, y = y, xend = xend, yend = yend))
+
+  
+  if (clust_x) {
+    var_heatmap <- insert_xaxis_grob(var_heatmap, 
+      plot_dendro_x, dendro_units, position = "top")
+  }
+  if (clust_y) {
+    var_heatmap <- insert_yaxis_grob(var_heatmap, 
+      plot_dendro_y, dendro_units, position = "right")
+  }
+  return(ggdraw(var_heatmap))
+}
+
+plot_clust_by_act <- function(seurat_obj, cluster_name='seurat_clusters') {
+
+    car_clust_data <- data.table(
+      seurat_obj@meta.data)[, list(n_clust_car= .N), 
+      by=c(cluster_name, "car", "k_type")][, 
+        pct_clust_car := n_clust_car/sum(n_clust_car), 
+        by=.(car, k_type)][,
+          cd19_clust_car_l2fc := log2(
+              pct_clust_car[k_type == 'cd19+']/pct_clust_car[k_type == 'baseline']), 
+          by=.(get(cluster_name), car)][, 
+            cd19_clust_act_l2fc := mean(
+                cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced'))], na.rm=T), 
+            by=get(cluster_name)]
+    
+    car_clust_data[, pct_clust_car_max := max(pct_clust_car), by=.(get(cluster_name), car)]
+    car_clust_data[, is_act := max(pct_clust_car) > pct_clust_car[k_type == 'baseline'], 
+        by=.(get(cluster_name), car)]
+    car_clust_data[is.na(is_act), is_act := T]
+    car_clust_data[, is_act_avg := sum(is_act) > length(unique(car)), by=.(get(cluster_name))]
+    
+    clust_pt_plot <- ggplot(car_clust_data) + 
+        geom_point(
+            aes(x=get(cluster_name), y=car, fill=cd19_clust_car_l2fc, size=pct_clust_car_max), shape=21) + 
+        scale_fill_distiller(palette='PRGn', direction=1) + scale_size_area(max_size=12) + 
+        theme_minimal() + 
+        facet_grid(~is_act_avg, scales='free')
+    
+    activation_colors <- ggplot_build(
+      ggplot(unique(car_clust_data[, list(cd19_clust_act_l2fc, seurat_clusters)])) + 
+      geom_tile(aes(x=get(cluster_name), y='1', fill=cd19_clust_act_l2fc)) + 
+      scale_fill_distiller(palette='PRGn', direction=1))$data[1][[1]][c('fill','x')]
+    
+    act_dimplot <- DimPlot(seurat_obj,
+        cols=activation_colors$fill[order(activation_colors$x)], label=T)
+    
+    return(list(
+        clust_pt_plot=clust_pt_plot,
+        activation_colors=activation_colors,
+        act_dimplot=act_dimplot))
+}

@@ -4,125 +4,163 @@ output: html_notebook
 ---
 
 ```{r}
+library(SeuratDisk)
+
 
 SEURAT_RDS_FILE <- here::here(
     '..','..','scrnaseq_tcsl154',
     'rds','scrna.hashed.rds')
 
-# scrna <- subset(
-#   readRDS(SEURAT_RDS_FILE),
-#   subset=(car != 'K_only'))
-
 source(here::here('r','scrna','scrna_analysis_fxns.R'))
 source(here::here('r','fig_colors.R'))
+source(here::here('r','scrna','HTOdemux.R'))
 ```
 
-## Cell Cycle Regression, SCTransform, WNN
+## Load processed RNAseq, perform second round of doublet removal
 
 ```{r}
-#score on cell cycle
+plots <- list()
 
-#RNA
-s.genes <- cc.genes$s.genes
-g2m.genes <- cc.genes$g2m.genes
-DefaultAssay(scrna) <- 'RNA'
-scrna <- CellCycleScoring(scrna, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+scrna <- subset(
+  readRDS(SEURAT_RDS_FILE),
+  subset=(car != 'K_only'))
 
-scrna <- SCTransform(scrna, assay='RNA', 
-  vars.to.regress = c("S.Score", "G2M.Score"))
-scrna <- RunPCA(scrna, assay='SCT', features = VariableFeatures(scrna), nfeatures.print = 10, 
-    reduction.name='sct_rna_pca')
+scrna@meta.data$sample <- paste(
+  scrna@meta.data$car,
+  ifelse(scrna@meta.data$k_type=='baseline', 'unstim','stim'),
+  sep='.')
 
-#ADT
-DefaultAssay(scrna) <- 'ADT'
-scrna <- SCTransform(scrna, assay='ADT', new.assay.name = 'SCT_ADT', 
-  vars.to.regress = c("S.Score", "G2M.Score"))
-scrna <- RunPCA(scrna, assay='SCT_ADT', features = rownames(scrna[["SCT_ADT"]]), nfeatures.print = 10, 
-    reduction.name='sct_adt_pca')
-
-scrna <- FindMultiModalNeighbors(
-  scrna, reduction.list = list("sct_rna_pca", "adt_pca"), 
-  dims.list = list(1:30, 1:18), modality.weight.name = "RNA.weight"
-)
-
-# Perform Clustering
-cluster_resolution <- 1.3
-cluster_name <- paste0('wsnn_res.',as.character(cluster_resolution))
-scrna <- RunUMAP(scrna, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
-scrna <- FindClusters(scrna, graph.name = "wsnn", algorithm = 3, resolution = cluster_resolution, verbose = FALSE)
+#second pass doublet removal
+Idents(scrna) <- 'sample'
+scrna <- janky_doublet_removal(scrna)
+plots$hto_doublet_umap <- DimPlot(scrna, reduction='umap.hto', group.by='HTO_is_doublet', label=T)
+scrna <- subset(scrna, subset = (HTO_keep == T))
 ```
 
+## Recalculate CD4 v CD8s
+
+``` {r}
+scrna <- run_sct(scrna)
+t_out <- reassign_t_type(scrna, n_clust=6, plots)
+plots <- t_out$plots
+scrna <- t_out$seurat_obj
+
+plots$hto_doublet_t_typefix <- DimPlot(scrna, reduction='umap.hto', group.by='CD4v8', label=T, 
+  cols=c('grey30','grey50','red'))
+scrna <- subset(scrna, CD4v8 != 'DP')
+```
+
+## Run WNN Clustering on all cells
 ```{r}
-p1 <- DimPlot(scrna, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) + NoLegend()
-p2 <- DimPlot(scrna, reduction = 'wnn.umap', group.by = 'car', label = TRUE, repel = TRUE, label.size = 2.5,
-  cols=c(car_colors, '4-1BB'=car_colors[['41BB']], 'Untransduced'='grey60'))
-p3 <- DimPlot(scrna, reduction = 'wnn.umap', group.by = 'k_type', label = TRUE, repel = TRUE, label.size = 2.5) + NoLegend()
-p4 <- DimPlot(scrna, reduction = 'wnn.umap', group.by = 'Phase', label = TRUE, repel = TRUE, label.size = 2.5) + NoLegend()
-p1 + p3 + p4 + p2
+scrna_output <- sct_umap(scrna, title='All cells')
+scrna <- scrna_output$obj
+plots <- c(plots, scrna_output$plots)
 
-p1 <- DimPlot(scrna, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) + NoLegend()
-p2 <- DimPlot(scrna, reduction = 'wnn.umap', group.by = 'car', label = TRUE, repel = TRUE, label.size = 2.5)
-p3 <- DimPlot(scrna, reduction = 'wnn.umap', group.by = 'k_type', label = TRUE, repel = TRUE, label.size = 2.5) + NoLegend()
-p4 <- DimPlot(scrna, reduction = 'wnn.umap', group.by = 'Phase', label = TRUE, repel = TRUE, label.size = 2.5) + NoLegend()
-p1 + p3 + p4 + p2
+plots$combined_umap_2 <- (
+  DimPlot(scrna, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna, reduction = 'wnn.umap', group.by = 'CD4v8', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna, reduction = 'wnn.umap', group.by = 'k_type', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna, reduction = 'wnn.umap', group.by = 'Phase', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend())
+```
+
+## Filter mixed CD4/CD8 clusters
+
+```{r}
+clust_cutoff_pct = 0.15
+pct_cd8_clust <- data.table(scrna@meta.data)[, list(pct_cd8= sum(CD4v8 == 'CD8')/.N), by='seurat_clusters']
+
+# cells in these clusters have mixed 4s and 8s
+mixed_clusters <- pct_cd8_clust[pct_cd8 > clust_cutoff_pct & pct_cd8 < 1-clust_cutoff_pct]
+scrna@meta.data$t_type_mixed <- scrna@meta.data$seurat_clusters %in% mixed_clusters$seurat_clusters
+
+# these cells are 4s in 8-dominated clusters, and vice versa
+scrna@meta.data$t_type_opposing <- scrna@meta.data$seurat_clusters %in% c(29,32,26,24)
+
+# cells in these clusters have mixed 4s and 8s
+mixed_clusters <- pct_cd8_clust[pct_cd8 > clust_cutoff_pct & pct_cd8 < 1-clust_cutoff_pct]
+scrna@meta.data$t_type_mixed <- scrna@meta.data$seurat_clusters %in% mixed_clusters
+
+# these cells are 4s in 8-dominated clusters, and vice versa
+
+scrna@meta.data$t_type_opposing <- `|`(
+  scrna@meta.data$seurat_clusters %in% pct_cd8_clust[pct_cd8 > 1-clust_cutoff_pct, seurat_clusters] & 
+    scrna@meta.data$CD4v8 == 'CD4',
+  scrna@meta.data$seurat_clusters %in% pct_cd8_clust[pct_cd8 < clust_cutoff_pct, seurat_clusters] & 
+    scrna@meta.data$CD4v8 == 'CD8')
+
+scrna <- subset(scrna, t_type_opposing == F)
+
+SEURAT_HDF5_FILE <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.all.clean.h5Seurat')
+SaveH5Seurat(scrna, filename = SEURAT_HDF5_FILE, overwrite=T)
+
+saveRDS(plots,
+  here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds',
+    paste0('scrna.wnn.all.clean.data.rds')))
+```
+
+## Cluster Correlations
+```{r}
+plots$scrna_dendro <- make_dendroheatmap(get_ident_avg(scrna))
+```
+
+## Run CD4/CD8 job subsets
+
+Ran 06_run_subset_job.R with `t_type=CD4` and `t_type=CD8`, generating h5Seurat files in `/home/ec2-user/scrnaseq_tcsl154/rds`.
+
+```{r}
+rds_dir <- here::here('..','..','scrnaseq_tcsl154','rds')
+scrna_cd4_all <- LoadH5Seurat(paste0(rds_dir, '/scrna.wnn.CD4.clean.h5Seurat'))
+scrna_cd4 <- LoadH5Seurat(paste0(rds_dir, '/scrna.wnn.CD4.stim.clean.h5Seurat'))
+scrna_cd8_all <- LoadH5Seurat(paste0(rds_dir, '/scrna.wnn.CD8.clean.h5Seurat'))
+scrna_cd8 <- LoadH5Seurat(paste0(rds_dir, '/scrna.wnn.CD8.stim.clean.h5Seurat'))
+
+#CD8
+#map STIM to UNSTIM
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'seurat_clusters', 'act_clusters')
+
+cd8_act_avg <- get_ident_avg(scrna_cd8_all, ident='act_clusters')
+cd8_mixed_avg <- get_ident_avg(scrna_cd8_all, ident='seurat_clusters')
+#heatmap(cor(cd8_act_avg, cd8_mixed_avg))
+
+#map old to new for both
+scrna_cd8 <- map_clusters(
+  readRDS(here::here('..','..','scrnaseq_tcsl154', 'rds','scrna.wnn.cd8.rds')),
+  scrna_cd8, 'seurat_clusters', 'old_clusters')
+scrna_cd8_all <- map_clusters(
+  readRDS(here::here('..','..','scrnaseq_tcsl154', 'rds','scrna.wnn.cd8.rds')),
+  scrna_cd8, 'seurat_clusters', 'old_clusters')
+
+DimPlot(scrna_cd8, reduction='wnn.umap',group.by='old_clusters', label=T) + 
+  DimPlot(scrna_cd8, reduction='wnn.umap',group.by='seurat_clusters', label=T)
+
+cd8_act_clust_data <- plot_clust_by_act(scrna_cd8_all)
 
 
-DefaultAssay(scrna) <- 'SCT_ADT'
-adt_markers <- FindAllMarkers(scrna, features = VariableFeatures(scrna), min.pct = 0.25, logfc.threshold = 0.25)
+#CD4
+#map STIM to UNSTIM
+scrna_cd4_all <- map_clusters(scrna_cd4, scrna_cd4_all, 'seurat_clusters', 'act_clusters')
 
+#map old to new for both
+scrna_cd4 <- map_clusters(
+  readRDS(here::here('..','..','scrnaseq_tcsl154', 'rds','scrna.wnn.cd4.rds')),
+  scrna_cd4, 'seurat_clusters', 'old_clusters')
 
+scrna_cd4_all <- map_clusters(
+  readRDS(here::here('..','..','scrnaseq_tcsl154', 'rds','scrna.wnn.cd4.all.rds')),
+  scrna_cd4_all, 'seurat_clusters', 'old_clusters')
 
-scrna_umap_plot_adt <- umap_plot(scrna, plot_title_text="CD8, CD19+ ADT WNN", assay='SCT_ADT', cluster_name=cluster_name, reduction= 'wnn.umap')
-scrna_umap_plot_adt$umap_plots
-FeaturePlot(scrna, features=paste(c('CD62L','CD45RO','CD30','CD137','HLA-ABC','CD49b','CD80','CD7','LAG3','Tim3','CD32','CTLA4'),'adt',sep='.'), label=T)
-
-DefaultAssay(scrna) <- 'SCT'
-scrna_umap_plot <- umap_plot(scrna, plot_title_text="CD8, CD19+ RNA WNN", assay='SCT', cluster_name=cluster_name, reduction= 'wnn.umap')
-scrna_umap_plot$umap_plots
-FeaturePlot(scrna, features=c('CD62L','CD45RO','CD30','CD137','HLA-ABC','CD49b','CD80','CD7','LAG3','Tim3','CD32','CTLA4'), label=T)
 ```
 
 
 ```{r}
 
-plot_clust_by_act <- function(seurat_obj, cluster_name='seurat_clusters') {
 
-    car_clust_data <- data.table(
-      seurat_obj@meta.data)[, list(n_clust_car= .N), 
-      by=c(cluster_name, "car", "k_type")][, 
-        pct_clust_car := n_clust_car/sum(n_clust_car), 
-        by=.(car, k_type)][,
-          cd19_clust_car_l2fc := log2(
-              pct_clust_car[k_type == 'cd19+']/pct_clust_car[k_type == 'baseline']), 
-          by=.(get(cluster_name), car)][, 
-            cd19_clust_act_l2fc := mean(
-                cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced'))], na.rm=T), 
-            by=get(cluster_name)]
-    
-    car_clust_data[, pct_clust_car_max := max(pct_clust_car), by=.(get(cluster_name), car)]
-    car_clust_data[, is_act := max(pct_clust_car) > pct_clust_car[k_type == 'baseline'], 
-        by=.(get(cluster_name), car)]
-    car_clust_data[is.na(is_act), is_act := T]
-    car_clust_data[, is_act_avg := sum(is_act) > length(unique(car)), by=.(get(cluster_name))]
-    
-    clust_pt_plot <- ggplot(car_clust_data) + 
-        geom_point(
-            aes(x=get(cluster_name), y=car, fill=cd19_clust_car_l2fc, size=pct_clust_car_max), shape=21) + 
-        scale_fill_distiller(palette='PRGn', direction=1) + scale_size_area(max_size=12) + 
-        theme_minimal() + 
-        facet_grid(~is_act_avg, scales='free')
-    
-    activation_colors <- ggplot_build(
-      ggplot(unique(car_clust_data[, list(cd19_clust_act_l2fc, seurat_clusters)])) + 
-      geom_tile(aes(x=get(cluster_name), y='1', fill=cd19_clust_act_l2fc)) + 
-      scale_fill_distiller(palette='PRGn', direction=1))$data[1][[1]][c('fill','x')]
-    
-    act_dimplot <- DimPlot(seurat_obj,
-        cols=activation_colors$fill[order(activation_colors$x)], label=T)
-    
-    return(list(
-        clust_pt_plot=clust_pt_plot,
-        activation_colors=activation_colors,
-        act_dimplot=act_dimplot))
-}
 ```

@@ -1,6 +1,6 @@
 
 ---
-title: "TCSL154 scRNA Analysis - 01 - loaidng"
+title: "TCSL154 scRNA Analysis - 01 - loading"
 output:
   html_document:
     df_print: paged
@@ -37,7 +37,6 @@ adt_feature_names <- fread(here::here(
     '..','..','scrnaseq_tcsl154',
     'meta','adt_names.tsv'))
 rownames(scrna.data$`Antibody Capture`) <- c(paste0(adt_feature_names$vis_name,'.adt'), hto_rows)
-
 
 #rna features
 scrna <- CreateSeuratObject(
