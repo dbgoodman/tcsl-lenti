@@ -381,7 +381,7 @@ get_cluster_pct_plot <- function(this_subset, cluster_col_name) {
 
 get_cluster_enrich_plot <- function(
   this_subset, cluster_col_name, max_log2_enrich=2, hide=c('KLRG1','Untransduced'),
-  bar_cutoff=0.03) {
+  bar_cutoff=0.03, reorder=T, na.rm=T) {
 
   enrich_data <- data.table(this_subset@meta.data)[
     CD4v8 != 'intermediate' & !(car %in% hide) , .N, 
@@ -390,19 +390,28 @@ get_cluster_enrich_plot <- function(
       by=c('car', 'CD4v8', 'k_type')][,
         rel_frac := log2(frac/mean(frac)), by=c('CD4v8','k_type','cluster')]
   
+  if (na.rm==T) {
+    enrich_data <- enrich_data[!is.na(cluster)]
+  }
+  
   enrich_data[, mean_frac := mean(frac), by=c('CD4v8','k_type','cluster')]
   
   enrich_data[, rel_frac_disp := ifelse(abs(rel_frac) > max_log2_enrich, 
     sign(rel_frac)*max_log2_enrich,
     rel_frac)]
   
-  ggplot(enrich_data[mean_frac > bar_cutoff]) + 
-    geom_bar(aes(x=reorder(cluster, mean_frac), y=frac, fill=rel_frac_disp), stat='identity', color='grey50') +
+  if (reorder)
+    enrich_data[, cluster := reorder(cluster, mean_frac)]
+  
+  plot <- ggplot(enrich_data[mean_frac > bar_cutoff]) + 
+    geom_bar(aes(x=cluster, y=frac, fill=rel_frac_disp), stat='identity', color='grey50') +
     scale_fill_distiller('Log2 Enrichment\nvs mean CAR', palette='PuOr', direction=1,
       limits=c(-max_log2_enrich, max_log2_enrich)) +
     facet_grid(k_type+t_type~car, space='free', scales='free_y') + labs(x='Log2 enrichment vs mean car') +
     theme_bw() +
     coord_flip()
+  
+  return(list(plot=plot, data=enrich_data))
 }
   
 umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution=NULL, cluster_name=NULL, 
@@ -1199,41 +1208,44 @@ get_ident_avg <- function(seurat_obj, ident='seurat_clusters', assays=c('SCT_ADT
   return(rbindlist(av.exp))
 }
 
-
 make_dendroheatmap <- function(
-  avg_a, avg_b=NULL, title='', clust_y=T, clust_x=T,
-  dendro_units=grid::unit(0.2, "null"), 
+  cor, row_labs=NULL, col_labs=NULL, title='', clust_y=T, clust_x=T,
+  dendro_units=grid::unit(0.2, "null"),
+  limits=c(0,1), palette='YlOrBr',
   legend_theme=theme(legend.position = "none"))
 {
 
-  #TO DO - SWITCH THIS TO heatmap() and extract col/row orders and dendros
+  if (is.null(row_labs)) {
+    row_labs <- rownames(cor)
+  }
+  if (is.null(col_labs)) {
+    col_labs <- colnames(cor)
+  }
   
-  cor.exp <- as.data.frame(cor(avg_a, avg_b))
+  cor.exp <- as.data.frame(cor)
+  names(cor.exp) <- col_labs
+  rownames(cor.exp) <- row_labs
   cor.exp.dt <- data.table(cor.exp, keep.rownames=T)
-  cor.df <- melt(cor.exp.dt, id.vars='rn', variable.name='y')
-  names(cor.df)[1] <- 'x'
+  cor.df <- melt(cor.exp.dt, id.vars='rn', variable.name='x')
+  names(cor.df)[1] <- 'y'
   
-  cor_dendro_y <- as.dendrogram(hclust(d = dist(cor.exp)))
-
-  cor_dendro_x <- as.dendrogram(hclust(d = dist(t(cor.exp))))
-
-  # Create dendrogram plot
-  dendro_vars_plot_y <- ggdendrogram(data = cor_dendro_y, rotate = TRUE) + 
-    theme(axis.text.y = element_text(size = 6))
-  dendro_vars_plot_x <- ggdendrogram(data = cor_dendro_x, rotate = F) + 
-    theme(axis.text.x = element_text(size = 6))
-
+  png("/dev/null");
+  hmap_data <- heatmap(cor, keep.dendro=T)
+  dev.off()
   
+  cor_dendro_y <- hmap_data$Rowv
+  cor_dendro_x <- hmap_data$Colv
+
   # row order
-  cor.df[, x := factor(x, levels=labels(cor_dendro_x))]
-  cor.df[, y := factor(y, levels=labels(cor_dendro_y))]
+  cor.df[, y := factor(y, levels=rownames(cor.exp)[hmap_data$rowInd])]
+  cor.df[, x := factor(x, levels=names(cor.exp)[hmap_data$colInd])]
 
   # heatmap
   var_heatmap <- ggplot(cor.df) + 
     geom_tile(aes(x = x, y = y, fill = value),
       colour = "black", size = .20) + 
     scale_fill_distiller('Correlation', 
-      palette='PiYG', limits=c(-1,1), oob=scales::squish, direction=1) +
+      palette=palette, limits=limits, oob=scales::squish, direction=1) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
         axis.title.x = element_blank(),
         panel.background = element_rect(fill='white'),
@@ -1243,14 +1255,13 @@ make_dendroheatmap <- function(
   dendro_data_col_x <- dendro_data(cor_dendro_x, type = "rectangle")
   dendro_data_col_y <- dendro_data(cor_dendro_y, type = "rectangle")
   
-  plot_dendro_y <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
-    geom_segment(data = segment(dendro_data_col_y), 
-        aes(x = x, y = y, xend = xend, yend = yend)) +
-      coord_flip()
-  
   plot_dendro_x <- axis_canvas(var_heatmap, axis = "x", coord_flip=F) + 
     geom_segment(data = segment(dendro_data_col_x), 
         aes(x = x, y = y, xend = xend, yend = yend))
+  
+  plot_dendro_y <- axis_canvas(var_heatmap, axis = "y", coord_flip=T) + 
+    geom_segment(data = segment(dendro_data_col_y),
+        aes(x = x, y = y, xend = xend, yend = yend)) + coord_flip()
 
   
   if (clust_x) {
@@ -1300,7 +1311,49 @@ plot_clust_by_act <- function(seurat_obj, cluster_name='seurat_clusters') {
         cols=activation_colors$fill[order(activation_colors$x)], label=T)
     
     return(list(
+      car_clust_data=car_clust_data,
         clust_pt_plot=clust_pt_plot,
         activation_colors=activation_colors,
         act_dimplot=act_dimplot))
+}
+
+#dendrogram heatmap of genes to clusters/cars
+heatmap_clust_v_genes <- function(seurat_obj, split_name, assay, features, use_pct=F, lfc_trunc=1.5, use_slot='scale.data') {
+  
+  feature_dt <- unique(melt(
+    data.table(cbind(t(slot(seurat_obj@assays[[assay]], use_slot)[features,]), seurat_obj@meta.data)), 
+    measure.vars=features, variable.name='gene')[,
+      `:=`(pct_exp_global=sum(value > 0)/.N, mean_exp_global=mean(value[value > 0])), by=c('CD4v8','gene')][,
+        list(pct_exp=(sum(value > 0)/.N), mean_exp_fldch=log2(mean(value[value > 0])/mean_exp_global)), 
+        by=c(split_name,'gene')])
+  names(feature_dt)[1] <- 'clusters'
+  
+  feature_dt[, log2_fc_trunc := ifelse(
+    test= abs(mean_exp_fldch) > lfc_trunc, 
+    yes= lfc_trunc * sign(mean_exp_fldch), 
+    no= mean_exp_fldch)]
+  
+  feature_dt[, gene := factor(gene, levels=features)]
+  
+  if (use_pct) {
+    limits=c(0,1)
+    palette='YlOrBr'
+    feat.dt <- dcast(feature_dt[!is.na(clusters)][, list(clusters, gene, pct_exp)], gene ~ clusters)
+  } else {
+    limits=c(-lfc_trunc,lfc_trunc)
+    palette='PiYG'
+    feat.dt <- dcast(feature_dt[!is.na(clusters)][, list(clusters, gene, log2_fc_trunc)], gene ~ clusters)
+  }
+  
+  feat.mat <- as.matrix(feat.dt[, -'gene'])
+  rownames(feat.mat) <- feat.dt[, gene]
+  
+  dendro_hm_plot <- make_dendroheatmap(
+    feat.mat, row_labs=rownames(feat.mat), col_labs=colnames(feat.mat),
+    limits=limits, palette=palette)
+  
+  return(list(
+    plot=dendro_hm_plot,
+    data=feature_dt
+  ))
 }
