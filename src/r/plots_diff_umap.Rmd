@@ -69,10 +69,10 @@ map_day_0 <- function(df) {
 #filter diff_dt by cd4/8 type, cd19+ (map day 0), by donor if needed
 
 #cd4, cd19+, donor 
-diff_dt_cd4 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd4', k562=='cd19+')
+diff_dt_cd4 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd4', k562=='cd19+', donor ==1)
 
 #cd8, cd19+, donor
-diff_dt_cd8 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd8', k562=='cd19+')
+diff_dt_cd8 <- diff_dt %>% map_day_0() %>% filter(t_type == 'cd8', k562=='cd19+', donor==1)
 ```
 
 ## Run this chunk when using both donors
@@ -87,11 +87,11 @@ diff_dt_cd4 <- plyr::match_df(diff_dt_cd4, cd4_matches)
 diff_dt_cd8 <- plyr::match_df(diff_dt_cd8, cd8_matches)
 ```
 
-## Remove Day 33, KLRG1, untrans
+## Remove Day 33, keep KLRG1, untrans
 ```{r, eval=redo_umap_clustering}
-diff_dt_cd4 <- diff_dt_cd4 %>% filter(!day == 33) %>% filter(!car %in% c('KLRG1', 'untrans'))
+diff_dt_cd4 <- diff_dt_cd4 %>% filter(!day == 33)
 
-diff_dt_cd8 <- diff_dt_cd8 %>% filter(!day == 33) %>% filter(!car %in% c('KLRG1', 'untrans'))
+diff_dt_cd8 <- diff_dt_cd8 %>% filter(!day == 33)
 ```
 
 # UMAP
@@ -197,7 +197,7 @@ umap_contour_plots(umap_cd4_fcs_dt)
 
 ## Grouped Cluster Plots 
 
-```{r, fig.width=22, fig.height=30}
+```{r, fig.width=40, fig.height=30}
 #CD8
 all_plots(umap_cd8_fcs_dt, channel_map, umap_vars, 'CD8', dendro=F)
 

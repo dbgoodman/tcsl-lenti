@@ -275,7 +275,7 @@ all_plots <- function(umap_fcs_dt, channel_map, umap_vars, cell_type, dendro=F) 
   
   cars_by_cluster <- ggplot(car_cluster_day_indiv_k562_total_pct_dt[k562=='cd19+']) + 
       geom_tile(aes(x=cluster, y=car, fill=pct_delta), color='black') +
-      facet_grid(day~donor, scales='free') +
+      facet_grid(day~., scales='free') +
       scale_fill_distiller('',
         palette='BrBG', 
         direction=1,
