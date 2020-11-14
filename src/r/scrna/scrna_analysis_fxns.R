@@ -1144,8 +1144,8 @@ compare_clusters <- function(seurat_obj, clust_a, clust_b) {
   b_v_a <- clust_co_counts[,
     list(get(clust_b), pct_clust=n_clust_car/sum(n_clust_car)), by=c(clust_a)]
   
-  names(a_v_b)[c(1,2)] <- c(clust_a, clust_b)
-  names(b_v_a)[c(1,2)] <- c(clust_b, clust_a)
+  names(b_v_a)[c(1,2)] <- c(clust_a, clust_b)
+  names(a_v_b)[c(1,2)] <- c(clust_b, clust_a)
 
   plot_a_in_b <- ggplot(a_v_b) + 
     geom_tile(aes_string(x=clust_a, y=clust_b, fill='pct_clust')) +
@@ -1320,8 +1320,14 @@ plot_clust_by_act <- function(seurat_obj, cluster_name='seurat_clusters') {
 #dendrogram heatmap of genes to clusters/cars
 heatmap_clust_v_genes <- function(seurat_obj, split_name, assay, features, use_pct=F, lfc_trunc=1.5, use_slot='scale.data') {
   
+  slot_data <- slot(seurat_obj@assays[[assay]], use_slot)
+  
+  missing_features <- features[which(!(features %in% rownames(slot_data)))]
+  kept_features <- features[!(features %in% missing_features)]
+  message(paste('These features are missing:', paste(missing_features, collapse=', ')))
+  
   feature_dt <- unique(melt(
-    data.table(cbind(t(slot(seurat_obj@assays[[assay]], use_slot)[features,]), seurat_obj@meta.data)), 
+    data.table(cbind(t(slot_data[kept_features,]), seurat_obj@meta.data)), 
     measure.vars=features, variable.name='gene')[,
       `:=`(pct_exp_global=sum(value > 0)/.N, mean_exp_global=mean(value[value > 0])), by=c('CD4v8','gene')][,
         list(pct_exp=(sum(value > 0)/.N), mean_exp_fldch=log2(mean(value[value > 0])/mean_exp_global)), 
@@ -1333,7 +1339,7 @@ heatmap_clust_v_genes <- function(seurat_obj, split_name, assay, features, use_p
     yes= lfc_trunc * sign(mean_exp_fldch), 
     no= mean_exp_fldch)]
   
-  feature_dt[, gene := factor(gene, levels=features)]
+  feature_dt[, gene := factor(gene, levels=kept_features)]
   
   if (use_pct) {
     limits=c(0,1)
@@ -1356,4 +1362,40 @@ heatmap_clust_v_genes <- function(seurat_obj, split_name, assay, features, use_p
     plot=dendro_hm_plot,
     data=feature_dt
   ))
+}
+
+# compare cars/clusts
+diff_genes_in_clusts <- function(
+  seurat_obj, ident_a, ident_b, cluster='seurat_clusters', assay='SCT', logfc.threshold=0.25, min.pct=0.25,
+  method='MAST', label_top_n=20) {
+  
+  old_ident <- Idents(seurat_obj)
+  Idents(seurat_obj) <- cluster 
+  
+  diff_genes <- FindMarkers(
+    seurat_obj, assay=assay,
+    ident.1 = ident_a, ident.2=ident_b, method=method,
+    logfc.threshold = logfc.threshold, min.pct=0.25)
+  
+  diff_genes <- data.table(diff_genes, keep.rownames=T)[, diff_dir := sign(avg_log2FC)]
+  diff_genes[, display := order(log(p_val_adj)) %in% 1:label_top_n, by=diff_dir]
+  diff_genes[display==T, label := rn, by=diff_dir]
+  
+  #mean_x_neg <- diff_genes[diff_dir == -1, mean(avg_log2FC)]
+  #mean_x_pos <- diff_genes[diff_dir == 1, mean(avg_log2FC)]
+  mean_y_max <- diff_genes[, max(-log(p_val_adj))]
+  
+  
+  plot_volcano <- ggplot(diff_genes, aes(x=avg_log2FC, y=-log(p_val_adj), label=label)) + 
+    geom_point() + 
+    geom_text_repel() +
+    annotate(geom='label', x=-0.5, y=mean_y_max+2, label=paste(as.character(ident_b), collapse=', ')) +
+    annotate(geom='label', x=0.5, y=mean_y_max+2, label=paste(as.character(ident_a), collapse=', ')) +
+    geom_hline(yintercept=-log(0.05), linetype=2) +
+    geom_vline(xintercept=0, linetype=2) +
+    theme_minimal()
+  
+  Idents(seurat_obj) <- old_ident
+  
+    return(list(diff_genes=diff_genes, plot_volcano=plot_volcano))
 }
