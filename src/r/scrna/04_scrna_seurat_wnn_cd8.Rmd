@@ -822,6 +822,7 @@ car_clust_data <- data.table(
       by=.(seurat_clusters, car)][, 
         cd19_clust_act_l2fc := mean(cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced'))], na.rm=T), 
         by=seurat_clusters]
+
 car_clust_data[, pct_clust_car_max := max(pct_clust_car), by=.(seurat_clusters, car)]
 car_clust_data[, is_act := max(pct_clust_car) > pct_clust_car[k_type == 'baseline'], by=.(seurat_clusters, car)]
 car_clust_data[is.na(is_act), is_act := T]

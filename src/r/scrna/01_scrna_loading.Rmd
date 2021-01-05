@@ -137,8 +137,8 @@ updated_metadata[HTO_miscluster == F, hash.ID := cluster.hash.ID]
 # merge with metadata file, add to HTO scrna metadata
 HTO_sample_metadata <- fread(here::here(
     '..','..','scrnaseq_tcsl154','meta','sample_metadata.csv'))
-names(HTO_sample_metadata)[2] <- 'hash.ID'
-updated_metadata <- HTO_sample_metadata[updated_metadata, on='hash.ID']
+names(HTO_sample_metadata)[3] <- 'hash.ID'
+updated_metadata <- HTO_sample_metadata[donor == 'TCSL154'][updated_metadata, on='hash.ID']
 
 #if hash combo is not a sample, label negative
 updated_metadata[
@@ -157,7 +157,7 @@ Idents(object = scrna) <- scrna@meta.data$hash.ID
 hto_subset <- subset(scrna, cells=sample(Cells(scrna), 10000))
 
 hto.dist.mtx <- as.matrix(parDist(t(
-  GetAssayData(object = hto_subset, assay = "HTO"))))
+  GetAssayData(object = scrna, assay = "HTO"))))
 
 hto_subset <- RunTSNE(hto_subset, 
   distance.matrix = hto.dist.mtx,

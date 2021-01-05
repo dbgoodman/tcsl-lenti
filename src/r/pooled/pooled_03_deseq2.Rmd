@@ -1972,6 +1972,66 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA))
 
+deseq2_abund_data <- all.deseq.results.dt[comparison=='ABCD.baseline' & k.type == 'pos']
+
+label_data_deseq2 <- unique(deseq2_abund_data[assay=='CTV3', 
+  list(t.type, CAR.align, lfc.disp, assay, CAR.type)])[, 
+    car_order := rank(lfc.disp), by='t.type'][
+      car_order %in% c(1:(1+top_num),(40-top_num):40) | 
+        CAR.align %in% c('CD28','41BB')]
+
+#color labels pink vs green
+label_data_deseq2[, CAR.topbot := CAR.type]
+label_data_deseq2[car_order %in% 1:(1+top_num) & CAR.type == 'other', 
+  CAR.topbot :='top']
+label_data_deseq2[car_order %in% (40-top_num):40 & CAR.type == 'other',
+  CAR.topbot :='bot']
+label_data_deseq2[, CAR.topbot := factor(CAR.topbot)]
+
+
+fig2_abundance_over_time_deseq2 <- ggplot(deseq2_abund_data, aes(
+    y=lfc.disp, x=assay,
+    color=CAR.type,
+    group=CAR.align,
+    label=CAR.align)) + 
+  # line
+  geom_line(aes(size=CAR.type)) +
+  scale_size_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c(0.5,1.5,1.5), guide=F) +
+  scale_color_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c('grey30', receptor_cols),
+    guide=F) +
+  #points
+  new_scale('size') +
+  geom_point(aes(size=CAR.type, color=CAR.type, group=CAR.align)) +
+  scale_size_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c(1,2,2), guide=F) +  
+  # text
+  new_scale('color') +
+  geom_text_repel(data=label_data_deseq2,
+    aes(color=CAR.topbot),
+    nudge_x = 1.2,
+    direction = "y",
+    hjust = 1,
+    size = 3,
+    segment.size = 0.3,
+    segment.color='grey') +
+  scale_color_manual('',
+    labels=c('4-1BB', 'CD28','Top','Bottom'),
+    values=c(receptor_cols, outlier_cols),
+    guide=F) +
+  facet_grid(. ~ t.type) +
+  scale_x_discrete(
+    'Days of continuous CD19 stimulation', 
+    expand = c(0, 0.4, 0, 1.4), 
+    labels=c('Baseline', 'Day 3-4', 'Day 14-16', 'Day 24')) +
+  scale_y_continuous('Relative Proliferation,\n log2 FC') +
+  theme_minimal() +
+  theme(panel.border=element_rect(fill=NA))
+
 
 ggsave(here::here('..','figs','pooled','abund_over_time.pdf'), fig2_abundance_over_time,
        height=3, width=8, useDingbats=FALSE)

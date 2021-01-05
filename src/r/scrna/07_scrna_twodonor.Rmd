@@ -1,0 +1,341 @@
+---
+title: "Two Donor scRNAseq"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(tidyr)
+library(Seurat)
+library(patchwork)
+library(cluster)
+library(parallelDist)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+library(future)
+
+
+reload_data=F
+source(here::here('r','fig_colors.R'))
+source(here::here('r','scrna','HTOdemux.R'))
+
+options(future.globals.maxSize = 14000 * 1024^2)
+plan("sequential")
+plan()
+```
+
+## Load all four wells individually
+
+```{r}
+
+#rename some adt features
+hto_rows <- paste('Hashtag',1:12,sep='_')
+
+adt_feature_names <- fread(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'meta','adt_names.tsv'))
+
+make_sample_seurat_obj <- function(expt_num, well) {
+
+  scrna.data <- Read10X(data.dir = here::here(
+    '..', '..', paste0('scrnaseq_tcsl',expt_num),
+    'cellranger', paste('TCSL', expt_num, well, sep='_'), 'outs','raw_feature_bc_matrix'))
+
+  rownames(scrna.data$`Antibody Capture`) <- c(paste0(adt_feature_names$vis_name,'.adt'), hto_rows)
+  
+  #rna features
+  scrna <- CreateSeuratObject(
+      counts = scrna.data$`Gene Expression`, 
+      project = "tcsl154", 
+      min.cells = 3,
+      min.features = 200)
+  
+  adt_rows <- setdiff(rownames(scrna.data$`Antibody Capture`), hto_rows)
+  
+  #adt features
+  scrna[['ADT']] <- CreateAssayObject(
+      counts = scrna.data$`Antibody Capture`[adt_rows, colnames(scrna)])
+  
+  #hto features
+  scrna[['HTO']] <- CreateAssayObject(
+    counts = scrna.data$`Antibody Capture`[hto_rows, colnames(scrna)])
+  
+  scrna@meta.data$sample <- paste(expt_num, well, sep='_')
+  scrna@meta.data$donor <- expt_num
+  scrna@meta.data$well <- well
+  
+  return(scrna)
+}
+
+scrna.list <- list(
+  make_sample_seurat_obj(154,1),
+  make_sample_seurat_obj(154,2),
+  make_sample_seurat_obj(170,1),
+  make_sample_seurat_obj(170,2)
+)
+```
+
+
+
+## Remove MT-high cells and individually perform SCTransform on all 3 assay types.
+
+```{r}
+mt_rna_pct_cutoff <- 25
+read_cutoff <- 1e3
+
+run_sct <- function(seurat_obj, mt_rna_pct_cutoff, read_cutoff) {
+  
+  # remove high MT-RNA cells (dying/dead?)
+  DefaultAssay(seurat_obj) <- 'RNA'
+  seurat_obj <- PercentageFeatureSet(seurat_obj, pattern = "^MT-", col.name = "percent.mt")
+  seurat_obj <- subset(seurat_obj, subset=(percent.mt < mt_rna_pct_cutoff & nCount_RNA > read_cutoff))
+  
+  # get cell cycle scores
+  DefaultAssay(seurat_obj) <- 'RNA'
+  s.genes <- cc.genes$s.genes
+  g2m.genes <- cc.genes$g2m.genes
+  #https://satijalab.org/seurat/v3.1/cell_cycle_vignette.html
+  seurat_obj <- CellCycleScoring(seurat_obj, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+  #seurat_obj <- RunPCA(seurat_obj, features = c(s.genes, g2m.genes), reduction.name = 'cc_pca')
+  message('  Cell Cycle Scoring Complete.')
+  
+  #SCTransform for RNA
+  DefaultAssay(seurat_obj) <- 'RNA'
+  seurat_obj <- SCTransform(seurat_obj, 
+    vars.to.regress = c("S.Score", "G2M.Score"), verbose = FALSE)
+  seurat_obj <- RunPCA(seurat_obj, reduction.name = 'rna_pca')
+  message('  SCTransform RNA complete.')
+  
+  #SCTransform for ADT
+  DefaultAssay(seurat_obj) <- 'ADT'
+  seurat_obj <- SCTransform(
+    seurat_obj, assay='ADT', new.assay.name = 'SCT_ADT', 
+    vars.to.regress = c("S.Score", "G2M.Score"), verbose = FALSE)
+  seurat_obj <- RunPCA(
+    seurat_obj, features = rownames(seurat_obj[["SCT_ADT"]]), 
+    nfeatures.print = 10, reduction.name='adt_pca')
+  message('  SCTransform ADT complete.')
+  
+  #SCTransform for HTO
+  DefaultAssay(seurat_obj) <- 'HTO'
+  seurat_obj <- SCTransform(seurat_obj, assay='HTO', new.assay.name = 'SCT_HTO')
+  message('  SCTransform HTO complete.')
+  
+  return(seurat_obj)
+}
+
+for (i in 1:4) {
+  message(paste('Starting Sample',i))
+  scrna.list[[i]] <- run_sct(scrna.list[[i]], mt_rna_pct_cutoff, read_cutoff)
+   message('  Sample completed.')
+}
+
+initial.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('combined.initial.data.rds'))
+
+#if (!file.exists(initial.rds.file)) {
+saveRDS(scrna.list,initial.rds.file)
+
+```
+
+```{r}
+
+
+combined_metadata <- rbindlist(lapply(1:4, function(i) data.table(scrna.list[[i]]@meta.data)))
+mt_summary <- combined_metadata[,
+  mt_thresh := percent.mt < mt_rna_pct_cutoff & nCount_RNA > read_cutoff][,
+  list(
+    neg= .N-sum(mt_thresh),
+    pos=sum(mt_thresh),
+    pct_pos=round(sum(mt_thresh)/.N, 2)), by=c('donor')]
+
+ggplot(combined_metadata) + 
+  aes(x=nCount_RNA, y=percent.mt) + 
+  scale_x_log10() + 
+  stat_density2d(geom="tile", aes(fill=..density.., alpha=1), contour=FALSE) + 
+  geom_point(size=0.5, color=blues9[9], alpha=0.25) +
+  stat_density2d(geom="tile", aes(fill=..density..,     alpha=ifelse(..density..<0.01,0,1)), contour=FALSE) + 
+  scale_fill_gradientn(colours = colorRampPalette(c("white", blues9))(256)) +
+  facet_grid(~donor) +
+  geom_hline(aes(yintercept=mt_rna_pct_cutoff)) +
+  geom_vline(aes(xintercept=read_cutoff)) +
+  geom_text(data=mt_summary, aes(x=10^4,y=100, label=paste(pct_pos,":",pos,'kept,',neg,'removed'))) +
+  theme_bw()
+```
+
+Percent MT-RNA is higher for 170, and more cells are lost. May want to consider a higher % cutoff for that sample, but
+this is already quite permissive according to some literature (10% is considered optimal by Osorio et al. 2020).
+
+### HTO calling for each individual well
+
+Getting unclear error messages with HTO SCT integration, so calling cells separately for each well, then combining
+via metadata.
+
+```{r}
+
+HTO_sample_metadata <- fread(here::here(
+    '..','..','scrnaseq_tcsl154','meta','sample_metadata.csv'))
+
+for (i in 1:4) {
+  DefaultAssay(scrna.list[[i]]) <- 'SCT_HTO'
+  
+  if (!('hto.tsne' %in% names(scrna.list[[i]]@reductions))) {
+    scrna.list[[i]] <- RunTSNE(
+      scrna.list[[i]],
+      perplexity=100, dims=NULL,
+      features=paste0('Hashtag-',1:12),
+      reduction.name='hto.tsne', tsne.method='FIt-SNE', nthreads=12)
+  }
+  
+  donor_i <- ifelse(i < 3, 'TCSL154','TCSL170')
+  sample_metadata <- HTO_sample_metadata[donor == donor_i]
+  sample_metadata[,  sample := paste(car, ifelse(k_type=='baseline', 'unstim','stim'), sep='.')]
+  sample_metadata[k_type=='bead_stim',  sample := paste(car, k_type, sep='.')]
+  
+  scrna.list[[i]]@meta.data$well <- scrna.list[[i]]@meta.data$sample
+  scrna.list[[i]]@meta.data$sample <- NULL
+  
+  scrna.list[[i]] <- assign_HTO_sample(
+    scrna.list[[i]], metadata=sample_metadata,
+    assay='SCT_HTO', slot='data', save_plots=T)
+
+}
+
+plots <- list()
+
+plots$well_tsne_maps <- plot_grid(
+  plotlist=unlist(
+    lapply(1:4, function (i) list(
+      DimPlot(scrna.list[[i]], group.by='sample', reduction='hto.tsne'),
+      DimPlot(scrna.list[[i]], group.by='HTO_status', reduction='hto.tsne'))), 
+    recursive=F), ncol=2)
+
+plots$well_tsne_maps_pruned <- plot_grid(
+  plotlist=unlist(
+    lapply(1:4, function (i) {
+      scrna_subset <- subset(scrna.list[[i]], subset = (HTO_status %in% c('HighQual','MidQual')))
+      list(
+      DimPlot(scrna_subset, group.by='sample', reduction='hto.tsne'),
+      DimPlot(scrna_subset, group.by='HTO_status', reduction='hto.tsne'))
+    }), 
+    recursive=F), 
+  ncol=2)
+
+```
+
+### Integrate SCT RNA
+
+```{r}
+
+integrate_feature <- function(scrna.list, assay_name, initial_assay, assay_only=F, remove_other_assays=F, use_ref=F) {
+  
+  integrated_assay_name <- paste0(assay_name, "_INT")
+  
+  # only one assay
+  if (remove_other_assays) {
+    scrna.assay.list <- lapply(
+      1:length(scrna.list),
+      function(i) {
+        obj <- CreateSeuratObject(
+          scrna.list[[i]][[assay_name]],
+          assay=assay_name,
+          meta.data=scrna.list[[i]]@meta.data)
+        obj[[initial_assay]] <- scrna.list[[i]][[initial_assay]]
+        return(obj)
+      }
+    )
+  } else {
+    scrna.assay.list <- scrna.list
+  }
+  
+  for (i in 1:length(scrna.assay.list)) {
+    DefaultAssay(scrna.assay.list[[i]]) <- assay_name
+  }
+  
+  integrate.features <- SelectIntegrationFeatures(
+    object.list = scrna.assay.list, 
+    nfeatures = 3000,
+    assay=rep(assay_name, length(scrna.assay.list)))
+  gc()
+  
+  scrna.assay.list <- PrepSCTIntegration(
+    assay=assay_name, object.list = scrna.assay.list, 
+    anchor.features = integrate.features, 
+    verbose = TRUE)
+  gc()
+  
+  if (use_ref) {
+    scrna.anchors <- FindIntegrationAnchors(
+      object.list = scrna.assay.list,
+      normalization.method = "SCT",
+      anchor.features = integrate.features,
+      reference = use_ref)
+  } else {
+    scrna.anchors <- FindIntegrationAnchors(
+      object.list = scrna.assay.list,
+      normalization.method = "SCT", 
+      anchor.features = integrate.features,
+      verbose = TRUE)
+  }
+  gc()
+  
+  scrna.integrated <- IntegrateData(
+    anchorset = scrna.anchors,
+    normalization.method = "SCT", 
+    verbose = TRUE,
+    new.assay.name = integrated_assay_name)
+  gc()
+    
+  if (assay_only) {
+    return(scrna.integrated[[integrated_assay_name]])
+  } else {
+    return(scrna.integrated)
+  }
+}
+
+scrna.integrated <- integrate_feature(
+  scrna.list, 
+  assay_name='SCT',
+  initial_assay='RNA',
+  assay_only=F,
+  remove_other_assays=F)
+scrna.integrated[['SCT_ADT_INT']] <- integrate_feature(
+  scrna.list,
+  assay_name='SCT_ADT',
+  initial_assay='ADT',
+  assay_only=T,
+  remove_other_assays=T)
+
+integrated.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('combined.integrated.data.rds'))
+
+saveRDS(scrna.integrated,integrated.rds.file)
+```
+
+### Prune HTO Doublets, run UMAP
+
+```{r}
+
+scrna.integrated <- subset(scrna.integrated, subset = (HTO_status %in% c('HighQual','MidQual')))
+
+hto_subset <- subset(scrna.integrated, cells=sample(Cells(scrna.integrated), 8000))
+
+t_out <- reassign_t_type(hto_subset, n_clust=6, plots)
+plots <- t_out$plots
+scrna.integrated <- t_out$scrna.integrated
+
+plots$hto_doublet_t_typefix <- DimPlot(scrna, reduction='umap.hto', group.by='CD4v8', label=T, 
+  cols=c('grey30','grey50','red'))
+
+```

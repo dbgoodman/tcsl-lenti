@@ -92,7 +92,6 @@ DoubleHTODemux <- function (object, assay = "HTO", positive.quantile = 0.99,
     hash.third <- hash.maxValues[3,]
     hash.fourth <- hash.maxValues[4,]
 
-    
     hash.margin <- hash.second - hash.third
     hash.mean.margin <- mean(c(hash.max, hash.second)) - hash.third
     hash.mean.dblmgn <- mean(c(hash.max, hash.second)) - mean(c(hash.third, hash.fourth))
@@ -144,7 +143,11 @@ DoubleHTODemux <- function (object, assay = "HTO", positive.quantile = 0.99,
     return(object)
 }
 
-assign_HTO_sample <- function(seurat_obj, assay='HTO', slot='counts', min_cells=200) {
+assign_HTO_sample <- function(seurat_obj, metadata=FALSE, assay='HTO', slot='counts',
+    min_cells=200, doublet_cutoff=6, save_plots=F) {
+  
+  plots <- list()
+  
   counts <- melt(
     data.table(
       t(as.matrix(GetAssayData(seurat_obj, assay = assay, slot = slot))),
@@ -155,9 +158,7 @@ assign_HTO_sample <- function(seurat_obj, assay='HTO', slot='counts', min_cells=
   counts[, hto := factor(gsub('Hashtag-(\\d+)$','\\1', hto))]
   counts[, pct := count/sum(count), by='cell']
   
-  #ggplot(counts) + geom_density(aes(x=count)) + facet_grid(~hto)
-  
-  fit_hto_count <- function(x, measure='pct') {
+  fit_hto_count <- function(x, measure='count') {
     fit <- Mclust(
       data=counts[hto == x & !is.na(get(measure))][[measure]],
       G=2,
@@ -166,6 +167,12 @@ assign_HTO_sample <- function(seurat_obj, assay='HTO', slot='counts', min_cells=
   }
   lapply(1:12, fit_hto_count)
   counts[abs(score) == Inf, score := sign(score) * counts[abs(score) < Inf, max(abs(score))]]
+  
+  plots$hto_countdist <- ggplot(counts) + 
+    geom_density(aes(x=count)) + facet_grid(~hto)
+
+  plots$hto_countdist_clust <- ggplot(counts) + 
+    geom_density(aes(x=count, color=score > 0, group=(score > 0))) + facet_grid(~hto)
   
   best_counts <- counts[, list(
     rank=1:4,
@@ -177,12 +184,11 @@ assign_HTO_sample <- function(seurat_obj, assay='HTO', slot='counts', min_cells=
   cell_summary <- best_counts[, 
     list(
       HTO_call=paste(sort(as.numeric(as.character((hto[1:2])))),collapse='_'),
-      HTO_score_margin_ABvC= mean(score[1], score[2]) - score[3],
+      HTO_ab=paste(sort(as.numeric(as.character((hto[c(1,2)])))),collapse='_'),
+      HTO_ac=paste(sort(as.numeric(as.character((hto[c(1,3)])))),collapse='_'),
+      HTO_bc=paste(sort(as.numeric(as.character((hto[c(2,3)])))),collapse='_'),
       HTO_score_margin_BvC= score[2] - score[3],
-      HTO_score_margin_ABvC= mean(score[1], score[2]) - mean(score[3], score[4]),
-      HTO_pct_margin_ABvC= mean(pct[1], pct[2]) / pct[3],
       HTO_pct_margin_BvC= pct[2] / pct[3],
-      HTO_pct_margin_ABvCD= mean(pct[1], pct[2]) / mean(pct[3], pct[4]),
       HTO_a.score= score[1], HTO_b.score= score[2], HTO_c.score= score[3], HTO_d.score= score[4],
       HTO_a= hto[1], HTO_b= hto[2], HTO_c= hto[3], HTO_d= hto[4],
       HTO_a.pct= pct[1], HTO_b.pct= pct[2], HTO_c.pct= pct[3], HTO_d.pct= pct[4]),
@@ -193,25 +199,57 @@ assign_HTO_sample <- function(seurat_obj, assay='HTO', slot='counts', min_cells=
   rownames(metadata.rows) <- rownames(seurat_obj@meta.data)
   seurat_obj <- AddMetaData(seurat_obj, metadata=metadata.rows)
   
+  # plot doublets by ratio of C score to B-C
+  plots$doublet_ratio <- ggplot(cell_summary) +
+      geom_density_2d_filled(aes(x= HTO_score_margin_BvC, y=HTO_c.score), n=100, contour_var = "ndensity") +
+      theme_bw() + scale_color_brewer(palette='Spectral') +
+      geom_abline(slope=1, intercept=-doublet_cutoff) +
+      facet_wrap(~HTO_call)
   
-  # find doublets based on log ratio of second two hashtags to total read counts
-  ncount_v_bad_tags <- data.table(seurat_obj@meta.data)[, `:=`(
-    HTO_logfc_nCount= log10(nCount_HTO)-mean(log10(nCount_HTO)),
-    HTO_logfc_pct_cd= log10(HTO_cd_pct)-mean(log10(HTO_cd_pct))),
-    by='HTO_call']
+  # margin way with SCT:
+  cell_summary[, HTO_is_doublet := HTO_score_margin_BvC - doublet_cutoff < HTO_c.score]
+  cell_summary[, HTO_doublet_score := HTO_score_margin_BvC - HTO_c.score]
+  cell_summary[, HTO_c_best := factor(ifelse(HTO_is_doublet, as.character(HTO_c), '0'))]
+  cell_summary[, HTO_assign := 'ab']
+  cell_summary[, HTO_rescue := F]
+  cell_summary[, HTO_runnerup := HTO_c]
   
-  ncount_v_bad_tags[, HTO_is_doublet := -HTO_logfc_nCount + 0.5 < HTO_logfc_pct_cd]
+  #for tag combos that do not exist in the metadata, see if we can recover
+  # ambiguous means multiple of ab, ac, bc, are incorrect.
+  cell_summary[,
+    HTO_ambiguous := (HTO_is_doublet | !(HTO_ab %in% metadata$HTO)) & (
+      (HTO_ab %in% metadata$HTO) + (HTO_ac %in% metadata$HTO) + (HTO_bc %in% metadata$HTO) > 1)]
   
-  # ggplot(ncount_v_bad_tags) +
-  #   geom_point(aes(y=logfc_HTO_pct_cd, x=logfc_nCount, color=HTO_call), alpha=0.2) +
-  #   theme_bw() +
-  #   geom_abline(slope=-1, intercept=0.5) +
-  #   facet_wrap(~HTO_call)
+  plots$cell_type_count <- ggplot(cell_summary) +
+      geom_bar(aes(x=as.character(HTO_c_best), fill=HTO_ambiguous)) +
+      facet_wrap(~HTO_call, scales='free_x')
   
-  metadata.rows <- data.frame(ncount_v_bad_tags)
+  cell_summary[!HTO_ambiguous & !(HTO_call %in% metadata$HTO) & (HTO_ac %in% metadata$HTO),
+    `:=`(HTO_assign= 'ac', HTO_call= HTO_ac, HTO_runnerup= HTO_b, HTO_rescue= T)]
+  cell_summary[!HTO_ambiguous & !(HTO_call %in% metadata$HTO) & (HTO_bc %in% metadata$HTO),
+    `:=`(HTO_assign= 'bc', HTO_call= HTO_ac, HTO_runnerup= HTO_b, HTO_rescue= T)]
+  cell_summary[HTO_is_doublet & !HTO_ambiguous,
+    `:=`(HTO_rescue= T, HTO_is_doublet= F, HTO_runnerup= HTO_c)]
+  
+  cell_summary <- metadata[cell_summary, on=c(HTO='HTO_call'), nomatch=NA]
+  names(cell_summary)[which(names(cell_summary) == 'HTO')] <- 'HTO_call'
+  
+  cell_summary[, HTO_status := '']
+  cell_summary[HTO_rescue==T, HTO_status := 'Rescue']
+  cell_summary[!HTO_is_doublet & HTO_doublet_score > doublet_cutoff, HTO_status := 'MidQual']
+  cell_summary[!HTO_is_doublet & HTO_doublet_score < 0, HTO_status := 'LowQual']
+  cell_summary[!HTO_is_doublet & HTO_doublet_score > doublet_cutoff+2, HTO_status := 'HighQual']
+  cell_summary[!(HTO_call %in% metadata$HTO), HTO_status := 'NoMatch']
+  cell_summary[HTO_is_doublet==T, HTO_status := 'Doublet']
+  
+  
+  metadata.rows <- data.frame(cell_summary)
   rownames(metadata.rows) <- rownames(seurat_obj@meta.data)
   seurat_obj <- AddMetaData(seurat_obj, metadata=metadata.rows)
   
+  if (save_plots) {
+    seurat_obj@misc[['HTO_plots']] <- plots
+  }
   return(seurat_obj)
 }
 

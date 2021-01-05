@@ -1006,7 +1006,7 @@ run_sct <- function(seurat_obj, pct.mt.cutoff=13) {
   g2m.genes <- cc.genes$g2m.genes
   #https://satijalab.org/seurat/v3.1/cell_cycle_vignette.html
   seurat_obj <- CellCycleScoring(seurat_obj, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
-  seurat_obj <- RunPCA(seurat_obj, reduction.name = 'cc_pca')
+  seurat_obj <- RunPCA(seurat_obj, features = c(s.genes, g2m.genes), reduction.name = 'cc_pca')
   
   #SCTransform for RNA
   DefaultAssay(seurat_obj) <- 'RNA'
@@ -1088,34 +1088,38 @@ map_clusters <- function(from_obj, to_obj, from_cluster_name, to_cluster_name) {
 }
 
 # Map activation % to each cluster (CD19+ vs baseline), of CAR clusters, (not KLRG1/Untransduced)
-map_clust_act <- function(seurat_obj) {
+map_clust_act <- function(seurat_obj, cluster_name) {
+  
   car_clust_data <- data.table(
   seurat_obj@meta.data)[, list(n_clust_car= .N), 
-  by=.(seurat_clusters, car, k_type)][, 
+  by=c(cluster_name, 'car', 'k_type')][, 
     pct_clust_car := n_clust_car/sum(n_clust_car), 
-    by=.(car, k_type)][,
+    by=c('car', 'k_type')][,
       cd19_clust_car_l2fc := log2(pct_clust_car[k_type == 'cd19+']/pct_clust_car[k_type == 'baseline']), 
-      by=.(seurat_clusters, car)][, 
+      by=c(cluster_name, 'car')][, 
         cd19_clust_act_l2fc := mean(cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced'))], na.rm=T), 
-        by=seurat_clusters]
+        by=cluster_name]
   
-  car_clust_data[, pct_clust_car_max := max(pct_clust_car), by=.(seurat_clusters, car)]
-  car_clust_data[, is_act := max(pct_clust_car) > pct_clust_car[k_type == 'baseline'], by=.(seurat_clusters, car)]
+  #if NaN, assume only CD19+, make Inf.
+  car_clust_data[is.nan(cd19_clust_act_l2fc), cd19_clust_act_l2fc := Inf]
+  
+  car_clust_data[, pct_clust_car_max := max(pct_clust_car), by=c(cluster_name, 'car')]
+  car_clust_data[, is_act := max(pct_clust_car) > pct_clust_car[k_type == 'baseline'], by=c(cluster_name, 'car')]
   car_clust_data[is.na(is_act), is_act := T]
-  car_clust_data[, is_act_avg := sum(is_act) > length(unique(car)), by=.(seurat_clusters)]
+  car_clust_data[, is_act_avg := sum(is_act) > length(unique(car)), by=cluster_name]
 
   act_plot <- ggplot(car_clust_data) + 
-    geom_point(aes(x=seurat_clusters, y=car, fill=cd19_clust_car_l2fc, size=pct_clust_car_max), shape=21) + 
+    geom_point(aes_string(x=cluster_name, y='car', fill='cd19_clust_car_l2fc', size='pct_clust_car_max'), shape=21) + 
     scale_fill_distiller(palette='PRGn', direction=1) + scale_size_area(max_size=12) + theme_minimal() + 
     facet_grid(~is_act_avg, scales='free_x')
   
   activation_colors <- ggplot_build(
-    ggplot(unique(car_clust_data[, list(cd19_clust_act_l2fc, seurat_clusters)])) + 
-    geom_tile(aes(x=seurat_clusters, y='1', fill=cd19_clust_act_l2fc)) + 
+    ggplot(unique(car_clust_data[, list(cd19_clust_act_l2fc, get(cluster_name))])) + 
+    geom_tile(aes_string(x='cluster_name', y=1, fill='cd19_clust_act_l2fc')) + 
     scale_fill_distiller(palette='PRGn', direction=1))$data[1][[1]][c('fill','x')]
   
   act_umap_plot <- DimPlot(
-    seurat_obj, 
+    seurat_obj, group.by=cluster_name,
     cols=activation_colors$fill[order(activation_colors$x)], label=T)
   
   return(list(
@@ -1172,7 +1176,7 @@ reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
   t_type_adt$doublet_score <- -log(fit$z[,doublet_clust])
   t_type_adt[, t_type := ifelse(clust %in% cd8_clust, 'CD8', 'CD4')]
   t_type_adt[clust == doublet_clust, t_type := 'DP']
-  t_type_adt[, t_type_old := scrna@meta.data$CD4v8]
+  #t_type_adt[, t_type_old := scrna@meta.data$CD4v8]
   
   plot_obj$t_type_mmodel <- plot_grid(
     ggplot(t_type_adt) + 
@@ -1185,9 +1189,9 @@ reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
     ggplot(t_type_adt) + 
       geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type)) +
       theme_bw(),
-    ggplot(t_type_adt) + 
-      geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type_old)) +
-      theme_bw())
+    # ggplot(t_type_adt) + 
+    #   geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type_old)) +
+    #   theme_bw())
   
   # pick cluster with fewest cells, assign them as double positives
   scrna@meta.data$t_type_dp <- t_type_adt[, clust == doublet_clust]
@@ -1196,7 +1200,7 @@ reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
   plot_obj$t_type_reassign_table <- gt(as.data.frame.matrix(
     table(scrna@meta.data$t_type, scrna@meta.data$CD4v8)))
   
-  scrna@meta.data$t_type_old <- scrna@meta.data$CD4v8
+  #scrna@meta.data$t_type_old <- scrna@meta.data$CD4v8
   scrna@meta.data$CD4v8 <- scrna@meta.data$t_type
   
   return(list(seurat_obj=scrna, plot_obj=plot_obj))
@@ -1318,7 +1322,8 @@ plot_clust_by_act <- function(seurat_obj, cluster_name='seurat_clusters') {
 }
 
 #dendrogram heatmap of genes to clusters/cars
-heatmap_clust_v_genes <- function(seurat_obj, split_name, assay, features, use_pct=F, lfc_trunc=1.5, use_slot='scale.data') {
+heatmap_clust_v_genes <- function(
+  seurat_obj, split_name, assay, features, use_pct=F, lfc_trunc=1.5, use_slot='scale.data') {
   
   slot_data <- slot(seurat_obj@assays[[assay]], use_slot)
   
@@ -1366,19 +1371,28 @@ heatmap_clust_v_genes <- function(seurat_obj, split_name, assay, features, use_p
 
 # compare cars/clusts
 diff_genes_in_clusts <- function(
-  seurat_obj, ident_a, ident_b, cluster='seurat_clusters', assay='SCT', logfc.threshold=0.25, min.pct=0.25,
-  method='MAST', label_top_n=20) {
+  seurat_obj, ident_a, ident_b, cluster='seurat_clusters', logfc.threshold=0.25, min.pct=0.25,
+  method='MAST', label_top_n=20, label_top_rna=5) {
   
   old_ident <- Idents(seurat_obj)
   Idents(seurat_obj) <- cluster 
   
-  diff_genes <- FindMarkers(
-    seurat_obj, assay=assay,
+  diff_genes_rna <- FindMarkers(
+    seurat_obj, assay='SCT',
     ident.1 = ident_a, ident.2=ident_b, method=method,
     logfc.threshold = logfc.threshold, min.pct=0.25)
   
-  diff_genes <- data.table(diff_genes, keep.rownames=T)[, diff_dir := sign(avg_log2FC)]
-  diff_genes[, display := order(log(p_val_adj)) %in% 1:label_top_n, by=diff_dir]
+  diff_genes_adt <- FindMarkers(
+    seurat_obj, assay='SCT_ADT',
+    ident.1 = ident_a, ident.2=ident_b, method=method,
+    logfc.threshold = logfc.threshold, min.pct=0.25)
+  
+  diff_genes <- rbind(data.table(diff_genes_rna, keep.rownames=T)[, assay := 'RNA'],
+        data.table(diff_genes_adt, keep.rownames=T)[, assay := 'ADT'])
+  
+  diff_genes[, diff_dir := sign(avg_log2FC)]
+  diff_genes[assay=='RNA', display := order(log(p_val_adj)) %in% 1:label_top_n, by=diff_dir]
+  diff_genes[assay=='ADT', display := order(log(p_val_adj)) %in% 1:label_top_rna, by=diff_dir]
   diff_genes[display==T, label := rn, by=diff_dir]
   
   #mean_x_neg <- diff_genes[diff_dir == -1, mean(avg_log2FC)]
@@ -1386,9 +1400,10 @@ diff_genes_in_clusts <- function(
   mean_y_max <- diff_genes[, max(-log(p_val_adj))]
   
   
-  plot_volcano <- ggplot(diff_genes, aes(x=avg_log2FC, y=-log(p_val_adj), label=label)) + 
+  plot_volcano <- ggplot(diff_genes, aes(x=avg_log2FC, y=-log(p_val_adj), label=label, color=assay)) + 
     geom_point() + 
     geom_text_repel() +
+    scale_color_manual(values=c('red','black')) +
     annotate(geom='label', x=-0.5, y=mean_y_max+2, label=paste(as.character(ident_b), collapse=', ')) +
     annotate(geom='label', x=0.5, y=mean_y_max+2, label=paste(as.character(ident_a), collapse=', ')) +
     geom_hline(yintercept=-log(0.05), linetype=2) +
@@ -1399,3 +1414,4 @@ diff_genes_in_clusts <- function(
   
     return(list(diff_genes=diff_genes, plot_volcano=plot_volcano))
 }
+
