@@ -25,6 +25,7 @@ library(future)
 reload_data=F
 source(here::here('r','fig_colors.R'))
 source(here::here('r','scrna','HTOdemux.R'))
+source(here::here('r','scrna','scrna_analysis_fxns.R'))
 
 options(future.globals.maxSize = 14000 * 1024^2)
 plan("sequential")
@@ -318,12 +319,12 @@ scrna.integrated[['SCT_ADT_INT']] <- integrate_feature(
 integrated.rds.file <- here::here(
      '..','..','scrnaseq_tcsl154',
      'rds',
-     paste0('combined.integrated.data.rds'))
+     paste0('combined.integrated.umap.data.rds'))
 
 saveRDS(scrna.integrated,integrated.rds.file)
 ```
 
-### Prune HTO Doublets, run UMAP
+### Prune HTO and CD4/CD8 Doublets, assign CD4/CD8
 
 ```{r}
 
@@ -331,11 +332,129 @@ scrna.integrated <- subset(scrna.integrated, subset = (HTO_status %in% c('HighQu
 
 hto_subset <- subset(scrna.integrated, cells=sample(Cells(scrna.integrated), 8000))
 
-t_out <- reassign_t_type(hto_subset, n_clust=6, plots)
-plots <- t_out$plots
-scrna.integrated <- t_out$scrna.integrated
+t_out <- reassign_t_type(scrna.integrated, n_clust=3, plots)
+plots <- t_out$plot_obj
+scrna.integrated <- t_out$seurat_obj
+rm(t_out)
 
-plots$hto_doublet_t_typefix <- DimPlot(scrna, reduction='umap.hto', group.by='CD4v8', label=T, 
-  cols=c('grey30','grey50','red'))
+plots$t_type_bars <- ggplot(
+  data.table(scrna.integrated@meta.data)) +
+  geom_bar(aes(x=car, fill=t_type)) +
+  facet_grid(k_type~donor, space='free', scales='free') +
+  coord_flip()
+```
+## Run WNN Clustering on all cells
+
+```{r}
+
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+scrna.integrated <- RunPCA(scrna.integrated, features = c(s.genes, g2m.genes), reduction.name = 'cc_pca')
+
+scrna.integrated <- RunPCA(scrna.integrated, assay='SCT_INT', reduction.name = 'rna_pca')
+
+# identify unique TCSL170 ADTs
+adt_count_ratios <- (
+  Matrix::rowSums(subset(scrna.integrated, subset=(donor == 'TCSL154'))[['SCT_ADT_INT']]@counts) / 
+    Matrix::rowSums(subset(scrna.integrated, subset=(donor == 'TCSL170'))[['SCT_ADT_INT']]@counts))
+tcsl170_adts <- names(which(-log10(adt_count_ratios) > 2))
+shared_adts <- names(which(-log10(adt_count_ratios) < 2))
+
+scrna.integrated <- RunPCA(scrna.integrated, assay='SCT_ADT_INT', features= shared_adts, 
+    nfeatures.print = 10, reduction.name='adt_pca')
+scrna_output <- sct_umap(scrna.integrated, title='All cells')
+
+scrna.integrated <- scrna_output$obj
+plots <- c(plots, scrna_output$plots)
+rm(scrna_output)
+
+plots$combined_umap_2 <- (
+  DimPlot(scrna.integrated, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 't_type', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 'k_type', label = TRUE, repel = TRUE, label.size = 2.5) +
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 'Phase', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 'donor', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend())
+```
+
+
+## Map TCSL170 subtypes onto new UMAP
+
+```{r}
+
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+integrated_metadata <- data.table(
+  scrna.integrated@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+sample_subtype_map <- merge(integrated_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna.integrated@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna.integrated@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5)
+```
+
+## Donor, T, and Stim amounts per cluster
+```{r}
+ggplot(data.table(scrna.integrated@meta.data)[t_type != 'DP'][, 
+    .N, by=c('seurat_clusters','donor','k_type','t_type')][N > 100]) + 
+  geom_bar(aes(x=seurat_clusters, y=N, fill=interaction(donor,k_type)), stat='identity') +
+  facet_wrap(~t_type, scales='free')
+
+## END OF DATA LOADING
 
 ```
+
+Finally, ran UMAP creation for all subsets made HD5 seurat objects for each with `07_run_subset_job.r`.
+
+------------------------------------------------------------------------------------------------------------------------
+
+## Map new clusters onto old subtypes
+
+
+Easiest way is to match based on most frequently assigned subtype. Do CD8 only first.
+
+```{r}
+scrna_cd8 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD8.stim.clean.h5Seurat')))
+
+cd8_metadata <- data.table(
+  scrna_cd8@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd8@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5)
+
+cd8_umap_plots <- umap_plot(scrna_cd8, assay='SCT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
+cd8_umap_plots_adt <- umap_plot(scrna_cd8, assay='SCT_ADT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
+
+clust_mapping_154 <- compare_clusters(scrna_cd8, 'seurat_clusters', 'subtype_154')
+
+ggplot(data.table(scrna_cd8@meta.data)[, 
+    list(N=.N, seurat_clusters), by=c('donor','car','k_type')][, 
+      pct := .N/N, by=c('donor','car','seurat_clusters','k_type')]) + 
+  geom_bar(aes(x=seurat_clusters, fill=donor, y=pct), stat='identity', position='dodge') + 
+  facet_grid(car + k_type ~ .)
+
+```
+

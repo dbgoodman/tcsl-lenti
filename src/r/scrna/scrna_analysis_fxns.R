@@ -25,7 +25,7 @@ organism = "org.Hs.eg.db"
 library(organism, character.only = TRUE)
 library(ReactomePA)
 
-####### GSEA 
+####### GSEA
 
 # get gene ids and entrez ids for gsea analysis
 get_gene_id_list <- function(subset_obj) {
@@ -417,10 +417,11 @@ get_cluster_enrich_plot <- function(
 umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution=NULL, cluster_name=NULL, 
     reduction='umap', feat_logfc_thresh=0.25, feat_min_pct=0.5) {
   
+  DefaultAssay(this_subset) <- assay
   stopifnot(!is.null(cluster_name) || !is.null(cluster_name))
   
   if (!is.null(cluster_resolution))
-    cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluandster_resolution))
+    cluster_col_name <- paste0(assay,'_snn_res.',as.character(cluster_resolution))
   if (!is.null(cluster_name))
     cluster_col_name <- cluster_name
 
@@ -1031,9 +1032,12 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, 
   
   plots = list()
   
-  # perform sctransform on 
-  if (redo_sct | !('SCT' %in% names(seurat_obj@assays) | !('SCT_ADT') %in% names(seurat_obj@assays))) 
-    seurat_obj <- run_sct(seurat_obj, pct.mt.cutoff)
+  # # perform sctransform on 
+  # if (redo_sct | !('SCT' %in% names(seurat_obj@assays) | !('SCT_ADT') %in% names(seurat_obj@assays))) 
+  #   seurat_obj <- run_sct(seurat_obj, pct.mt.cutoff)
+  
+  #DefaultAssay(seurat_obj) <- 'SCT_INT'
+  #seurat_obj <- RunHarmony(seurat_obj, 'donor', reduction='rna_pca',reduction.save='harmony_rna_pca')
   
   #WNN graph for both PCAs
   seurat_obj <- FindMultiModalNeighbors(
@@ -1051,22 +1055,26 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, 
   
   pl_clusters <- DimPlot(seurat_obj, reduction = 'wnn.umap', label = TRUE,
     repel = TRUE, label.size = 2.5) + NoLegend()
-  pl_cars <- DimPlot(seurat_obj, reduction = 'wnn.umap', group.by = 'car', label = TRUE,
+  pl_cars <- DimPlot(seurat_obj, reduction = 'wnn.umap', group.by = 'sample', label = TRUE,
     repel = TRUE, label.size = 2.5)
   pl_ktype <- DimPlot(seurat_obj, reduction = 'wnn.umap', group.by = 'k_type', label = TRUE,
     repel = TRUE, label.size = 2.5) + NoLegend()
   pl_ccphase <- DimPlot(seurat_obj, reduction = 'wnn.umap', group.by = 'Phase', label = TRUE,
     repel = TRUE, label.size = 2.5) + NoLegend()
-  plots$combined_umap <- pl_clusters + pl_ktype + pl_ccphase + pl_cars
+  pl_t_type <- DimPlot(seurat_obj, reduction = 'wnn.umap', group.by = 't_type', label = TRUE,
+    repel = TRUE, label.size = 2.5) + NoLegend()
+  pl_donors <- DimPlot(seurat_obj, reduction = 'wnn.umap', group.by = 'donor', label = TRUE,
+    repel = TRUE, label.size = 2.5) + NoLegend()
+  plots$combined_umap <- pl_clusters + pl_ktype + pl_ccphase + pl_cars + pl_t_type + pl_donors
   
-  DefaultAssay(seurat_obj) <- 'SCT_ADT'
+  DefaultAssay(seurat_obj) <- 'SCT_ADT_INT'
   adt_umap_plots <- umap_plot(seurat_obj, 
     plot_title_text=paste(title,"ADT WNN"), 
     assay='SCT_ADT', cluster_name=cluster_name, reduction= 'wnn.umap')
   
-  DefaultAssay(seurat_obj) <- 'SCT'
+  DefaultAssay(seurat_obj) <- 'SCT_INT'
   rna_umap_plots <- umap_plot(seurat_obj, 
-    plot_title_text=paste(title,"RNA WNN"), assay='SCT', cluster_name=cluster_name, reduction= 'wnn.umap')
+    plot_title_text=paste(title,"RNA WNN"), assay='SCT_INT', cluster_name=cluster_name, reduction= 'wnn.umap')
 
   plots$adt_umap_plots <- adt_umap_plots$umap_plots
   plots$rna_umap_plots <- rna_umap_plots$umap_plots
@@ -1188,7 +1196,7 @@ reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
       theme_bw(),
     ggplot(t_type_adt) + 
       geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type)) +
-      theme_bw(),
+      theme_bw())
     # ggplot(t_type_adt) + 
     #   geom_point(aes(x=CD8A.adt, y=CD4.adt, color=t_type_old)) +
     #   theme_bw())
@@ -1197,8 +1205,8 @@ reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
   scrna@meta.data$t_type_dp <- t_type_adt[, clust == doublet_clust]
   scrna@meta.data$t_type <- t_type_adt$t_type
   
-  plot_obj$t_type_reassign_table <- gt(as.data.frame.matrix(
-    table(scrna@meta.data$t_type, scrna@meta.data$CD4v8)))
+  # plot_obj$t_type_reassign_table <- gt(as.data.frame.matrix(
+  #   table(scrna@meta.data$t_type, scrna@meta.data$CD4v8)))
   
   #scrna@meta.data$t_type_old <- scrna@meta.data$CD4v8
   scrna@meta.data$CD4v8 <- scrna@meta.data$t_type

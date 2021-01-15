@@ -1753,7 +1753,7 @@ library(cowplot)
 library(gtable)
 library(grid)
 
-make_dendroheatmap <- function(
+make_dendroheatmap_horiz <- function(
   df, title, dendro_units=grid::unit(0.2, "null"), 
   legend_theme=theme(legend.position = "none"), boxnumbers=F)
 {
@@ -1819,6 +1819,75 @@ make_dendroheatmap <- function(
       coord_flip()
   plot_dendroheat <- insert_yaxis_grob(var_heatmap, 
     dendro_col, dendro_units, position = "right")
+  return(ggdraw(plot_dendroheat))
+}
+
+make_dendroheatmap <- function(
+  df, title, dendro_units=grid::unit(0.2, "null"), 
+  legend_theme=theme(legend.position = "none"), boxnumbers=F)
+{
+  
+  # Make dendrogram
+  car_mean_cast <- dcast(
+    df[k.type == 'pos'], 
+    CAR.align ~ assay + t.type, 
+    value.var='value.scale')
+  
+  car_dendro_m <- as.matrix(car_mean_cast[, -c(1:2)])
+  rownames(car_dendro_m) <- unlist(car_mean_cast[,1])
+  car_dendro <- as.dendrogram(hclust(d = dist(x = car_dendro_m)))
+  car_dendro <- rotate(car_dendro, names(sort(rowMeans(car_dendro_m))))
+
+  # Create dendrogram plot
+  dendro_vars_plot <- ggdendrogram(data = car_dendro, rotate = FALSE) + 
+    theme(axis.text.y = element_text(size = 6))
+  
+  # row order
+  df$CAR.align <- factor(
+      df$CAR.align,
+      levels = labels(car_dendro))
+  
+  #manual x labels
+  y_lab_man <- c('CD69 18h',
+    'Prolif d3-4','Prolif d14-16','Prolif d24',
+    'IFNy d3', 'IL2 d3', 'CD69 18h',
+    'Prolif d4','Prolif d14-16','Prolif d24')
+  
+  # heatmap
+  var_heatmap <- ggplot(df) + 
+    geom_tile(aes(y = interaction(assay,t.type), x = CAR.align, 
+                  fill = value.scale), colour = "black", size = .20, alpha=ifelse(boxnumbers, 0.5, 1)) + 
+    scale_fill_distiller('Z-score', 
+      palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
+    scale_y_discrete(expand=c(0,0),
+      labels=y_lab_man) +
+    scale_x_discrete(labels= (
+        function (breaks)
+          unlist(lapply(breaks, function(str)
+            strsplit(str, '|',fixed=T)[[1]][1])))) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.y = element_blank(),
+        panel.background = element_rect(fill='white'),
+        axis.title.x = element_blank()) +
+    labs(title=title)
+  
+    if (boxnumbers) {
+      var_heatmap <- var_heatmap + 
+        geom_text(aes(x = interaction(assay,t.type), y = CAR.align, 
+          label=round(value.scale,1)), colour = "black")
+    }
+  
+    var_heatmap <- var_heatmap + legend_theme
+  
+  # col dendro
+  dendro_data_col <- dendro_data(car_dendro, type = "rectangle")
+  
+  dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
+    geom_segment(data = segment(dendro_data_col), 
+        aes(x = x, y = y*0.99, xend = xend, yend = yend*0.99))
+  plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
+    dendro_col, dendro_units, position = "top")
+  
   return(ggdraw(plot_dendroheat))
 }
 
