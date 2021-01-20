@@ -20,6 +20,7 @@ library(ggplot2)
 library(data.table)
 library(cowplot)
 library(future)
+library(SeuratDisk)
 
 
 reload_data=F
@@ -417,8 +418,16 @@ ggplot(data.table(scrna.integrated@meta.data)[t_type != 'DP'][,
 ## END OF DATA LOADING
 
 ```
+------------------------------------------------------------------------------------------------------------------------
 
-Finally, ran UMAP creation for all subsets made HD5 seurat objects for each with `07_run_subset_job.r`.
+Finally, ran UMAP creation for all subsets made HD5 seurat objects for each with `07_run_subset_job_indiv.r`.
+
+```{r}
+
+
+
+
+```
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -439,11 +448,13 @@ cd8_metadata <- data.table(
       donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
 
 sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+get_cluster_enrich_plot(scrna_cd8, 'seurat_clusters', hide='', facet_formula=formula(~car))
 
 scrna_cd8@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
 scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
 
-DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5)
+DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) +
+  DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'seurat_clusters', label = TRUE, repel = TRUE, label.size = 2.5)
 
 cd8_umap_plots <- umap_plot(scrna_cd8, assay='SCT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
 cd8_umap_plots_adt <- umap_plot(scrna_cd8, assay='SCT_ADT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
@@ -455,6 +466,15 @@ ggplot(data.table(scrna_cd8@meta.data)[,
       pct := .N/N, by=c('donor','car','seurat_clusters','k_type')]) + 
   geom_bar(aes(x=seurat_clusters, fill=donor, y=pct), stat='identity', position='dodge') + 
   facet_grid(car + k_type ~ .)
-
 ```
 
+### Sheih Et all IRF Gene Signature
+
+```{r}
+
+# Genes from IRF cluster in Fig 7b of Shieh et al 2020 
+
+scrna_cd8 <- AddModuleScore(scrna_cd8, features=list('1'=c('CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB','GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3','NKG7','STMN1')),name='Sheih_et_al_IRF')
+
+
+```

@@ -381,7 +381,7 @@ get_cluster_pct_plot <- function(this_subset, cluster_col_name) {
 
 get_cluster_enrich_plot <- function(
   this_subset, cluster_col_name, max_log2_enrich=2, hide=c('KLRG1','Untransduced'),
-  bar_cutoff=0.03, reorder=T, na.rm=T) {
+  bar_cutoff=0.03, reorder=T, na.rm=T, facet_formula=formula(k_type+t_type~car)) {
 
   enrich_data <- data.table(this_subset@meta.data)[
     CD4v8 != 'intermediate' & !(car %in% hide) , .N, 
@@ -403,11 +403,11 @@ get_cluster_enrich_plot <- function(
   if (reorder)
     enrich_data[, cluster := reorder(cluster, mean_frac)]
   
-  plot <- ggplot(enrich_data[mean_frac > bar_cutoff]) + 
+  plot <- ggplot(enrich_data[mean_frac > bar_cutoff][, cluster := factor(cluster, levels=0:max(as.numeric(cluster)))]) + 
     geom_bar(aes(x=cluster, y=frac, fill=rel_frac_disp), stat='identity', color='grey50') +
     scale_fill_distiller('Log2 Enrichment\nvs mean CAR', palette='PuOr', direction=1,
       limits=c(-max_log2_enrich, max_log2_enrich)) +
-    facet_grid(k_type+t_type~car, space='free', scales='free_y') + labs(x='Log2 enrichment vs mean car') +
+    facet_grid(facet_formula, space='free', scales='free_y') + labs(x='Log2 enrichment vs mean car') +
     theme_bw() +
     coord_flip()
   
@@ -415,7 +415,7 @@ get_cluster_enrich_plot <- function(
 }
   
 umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution=NULL, cluster_name=NULL, 
-    reduction='umap', feat_logfc_thresh=0.25, feat_min_pct=0.5) {
+    reduction='umap', feat_logfc_thresh=0.25, feat_min_pct=0.5, subset.markers=NULL) {
   
   DefaultAssay(this_subset) <- assay
   stopifnot(!is.null(cluster_name) || !is.null(cluster_name))
@@ -429,9 +429,11 @@ umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution
     this_subset <- subset(this_subset, subset=(cluster_dropped == F))
   }
   
-  subset.markers <- FindAllMarkers(this_subset,
-  features = VariableFeatures(this_subset),
-  min.pct = feat_min_pct, logfc.threshold = feat_logfc_thresh)
+  if (is.null(subset.markers)) {
+    subset.markers <- FindAllMarkers(this_subset,
+    features = VariableFeatures(this_subset),
+    min.pct = feat_min_pct, logfc.threshold = feat_logfc_thresh)
+  }
   
   top.subset.markers <- subset.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
   
@@ -442,8 +444,7 @@ umap_plot <- function(this_subset, plot_title_text="", assay, cluster_resolution
     facet_wrap(~cluster, scales='free', ncol=3) +
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
   
-  
-  cluster_pct_plot <- get_cluster_pct_plot(this_subset, cluster_col_name)
+  cluster_pct_plot <- get_cluster_enrich_plot(this_subset, cluster_col_name, bar_cutoff=0, hide='')
   
   plot_title <- ggdraw() + 
     draw_label(
@@ -1070,7 +1071,7 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, 
   DefaultAssay(seurat_obj) <- 'SCT_ADT_INT'
   adt_umap_plots <- umap_plot(seurat_obj, 
     plot_title_text=paste(title,"ADT WNN"), 
-    assay='SCT_ADT', cluster_name=cluster_name, reduction= 'wnn.umap')
+    assay='SCT_ADT_INT', cluster_name=cluster_name, reduction= 'wnn.umap')
   
   DefaultAssay(seurat_obj) <- 'SCT_INT'
   rna_umap_plots <- umap_plot(seurat_obj, 
@@ -1295,10 +1296,11 @@ plot_clust_by_act <- function(seurat_obj, cluster_name='seurat_clusters') {
         pct_clust_car := n_clust_car/sum(n_clust_car), 
         by=.(car, k_type)][,
           cd19_clust_car_l2fc := log2(
-              pct_clust_car[k_type == 'cd19+']/pct_clust_car[k_type == 'baseline']), 
+              pct_clust_car[k_type == ifelse(.BY[2] == 'Untransduced', 'bead_stim', 'cd19+')]/
+                pct_clust_car[k_type == 'baseline']), 
           by=.(get(cluster_name), car)][, 
             cd19_clust_act_l2fc := mean(
-                cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced'))], na.rm=T), 
+                cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced')) | k_type == 'bead_stim'], na.rm=T), 
             by=get(cluster_name)]
     
     car_clust_data[, pct_clust_car_max := max(pct_clust_car), by=.(get(cluster_name), car)]
@@ -1380,27 +1382,31 @@ heatmap_clust_v_genes <- function(
 # compare cars/clusts
 diff_genes_in_clusts <- function(
   seurat_obj, ident_a, ident_b, cluster='seurat_clusters', logfc.threshold=0.25, min.pct=0.25,
-  method='MAST', label_top_n=20, label_top_rna=5) {
+  method='MAST', label_top_adt=20, label_top_rna=5, adt_only=F) {
   
   old_ident <- Idents(seurat_obj)
   Idents(seurat_obj) <- cluster 
   
-  diff_genes_rna <- FindMarkers(
-    seurat_obj, assay='SCT',
-    ident.1 = ident_a, ident.2=ident_b, method=method,
-    logfc.threshold = logfc.threshold, min.pct=0.25)
-  
   diff_genes_adt <- FindMarkers(
-    seurat_obj, assay='SCT_ADT',
+    seurat_obj, assay='SCT_ADT_INT',
     ident.1 = ident_a, ident.2=ident_b, method=method,
-    logfc.threshold = logfc.threshold, min.pct=0.25)
+    logfc.threshold = logfc.threshold, min.pct=min.pct)
   
-  diff_genes <- rbind(data.table(diff_genes_rna, keep.rownames=T)[, assay := 'RNA'],
-        data.table(diff_genes_adt, keep.rownames=T)[, assay := 'ADT'])
+  if (!adt_only) {
+    diff_genes_rna <- FindMarkers(
+      seurat_obj, assay='SCT_INT',
+      ident.1 = ident_a, ident.2=ident_b, method=method,
+      logfc.threshold = logfc.threshold, min.pct=min.pct)
+    
+    diff_genes <- rbind(data.table(diff_genes_rna, keep.rownames=T)[, assay := 'RNA'],
+          data.table(diff_genes_adt, keep.rownames=T)[, assay := 'ADT'])
+  } else {
+    diff_genes <- data.table(diff_genes_adt, keep.rownames=T)[, assay := 'ADT']
+  }
   
   diff_genes[, diff_dir := sign(avg_log2FC)]
-  diff_genes[assay=='RNA', display := order(log(p_val_adj)) %in% 1:label_top_n, by=diff_dir]
-  diff_genes[assay=='ADT', display := order(log(p_val_adj)) %in% 1:label_top_rna, by=diff_dir]
+  diff_genes[assay=='RNA' & p_val_adj < 0.05, display := order(log(p_val_adj)) %in% 1:label_top_rna, by=diff_dir]
+  diff_genes[assay=='ADT' & p_val_adj < 0.05, display := order(log(p_val_adj)) %in% 1:label_top_adt, by=diff_dir]
   diff_genes[display==T, label := rn, by=diff_dir]
   
   #mean_x_neg <- diff_genes[diff_dir == -1, mean(avg_log2FC)]
