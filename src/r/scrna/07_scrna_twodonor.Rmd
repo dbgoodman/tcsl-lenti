@@ -440,12 +440,20 @@ Easiest way is to match based on most frequently assigned subtype. Do CD8 only f
 scrna_cd8 <- LoadH5Seurat(here::here(
   '..','..','scrnaseq_tcsl154',
   'rds',
-  paste0('scrna.wnn.int.CD8.stim.clean.h5Seurat')))
+  paste0('scrna.wnn.int.CD8.act_clust.clean.h5Seurat')))
 
 cd8_metadata <- data.table(
   scrna_cd8@meta.data, keep.rownames=T)[,
     list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
       donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
 
 sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
 get_cluster_enrich_plot(scrna_cd8, 'seurat_clusters', hide='', facet_formula=formula(~car))
@@ -456,8 +464,8 @@ scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_m
 DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) +
   DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'seurat_clusters', label = TRUE, repel = TRUE, label.size = 2.5)
 
-cd8_umap_plots <- umap_plot(scrna_cd8, assay='SCT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
-cd8_umap_plots_adt <- umap_plot(scrna_cd8, assay='SCT_ADT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
+# cd8_umap_plots <- umap_plot(scrna_cd8, assay='SCT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
+# cd8_umap_plots_adt <- umap_plot(scrna_cd8, assay='SCT_ADT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
 
 clust_mapping_154 <- compare_clusters(scrna_cd8, 'seurat_clusters', 'subtype_154')
 
@@ -476,5 +484,110 @@ ggplot(data.table(scrna_cd8@meta.data)[,
 
 scrna_cd8 <- AddModuleScore(scrna_cd8, features=list('1'=c('CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB','GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3','NKG7','STMN1')),name='Sheih_et_al_IRF')
 
+```
 
+### Cluster PCAs
+
+```{r}
+
+  obj.avg <- AverageExpression(subset(
+    scrna_cd8, subset=(seurat_clusters %in% c(0:14))),
+    assay=c('SCT_INT','SCT_ADT_INT'), add.ident='donor', slot='scale.data')
+  obj.avg <- t(rbind(obj.avg$SCT_ADT_INT, obj.avg$SCT_INT))
+  obj.avg <- obj.avg[, apply(obj.avg,2,sd) > 0]
+  combined_pca <- prcomp(scale(obj.avg))
+  
+  # calculate pca stats
+  pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+      PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+      sd = combined_pca$sdev, 
+      var = combined_pca$sdev^2, 
+      var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+      var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+  
+  melt.pca.dt <- melt(
+    pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+  
+  pca_metrics_plot <- ggplot(melt.pca.dt) +
+    geom_line(aes(x = pc, y = value, color = metric)) +
+    geom_point(aes(x = pc, y = value, color = metric)) +
+    scale_x_continuous(limits = c(1, NA)) +
+    labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+         x = "Principal Component", y = "Fraction of Variance") +
+    theme_bw()
+  
+  projected.metrics <- data.table(
+    scale(obj.avg, combined_pca$center, combined_pca$scale) %*% combined_pca$rotation)
+  
+  projected.metrics <- projected.metrics[,
+      cluster := rownames(obj.avg)]
+  
+  projected.metrics <- data.table(projected.metrics)[, 
+    donor := unlist(data.table(projected.metrics)[,strsplit(cluster, '_')][2,])][,
+    cluster := unlist(data.table(projected.metrics)[, strsplit(cluster, '_')][1,])][]
+  
+  ggplot(
+    projected.metrics, aes(x=PC1, y=PC2, label=cluster, color=donor)) +
+    geom_point() + 
+    geom_text_repel()
+```
+
+### Act_Clust Assignment:
+
+```{r}
+
+#
+# GLYC 0 7
+# OXPHOS 2 13 3
+# TC2 10 14
+# IFNG 4 11
+# GNLY 17 1
+# INACT 5 6 8 9 12
+# REMOVE 15 16
+
+# oxphos vs glyc
+diffs <- diff_genes_in_clusts(scrna_cd8, c(2,3,14,10), 0, label_top_rna=50)
+#glyc genes
+message(print(paste(gsub('.adt','', diffs$diff_genes[avg_log2FC < 0 & -log(p_val_adj) > 50]$rn),collapse='\n')))
+#osphos genes
+message(print(paste(gsub('.adt','', diffs$diff_genes[avg_log2FC > 0 & -log(p_val_adj) > 10]$rn),collapse='\n')))
+
+# ifng vs oxphos and glyc
+diffs <- diff_genes_in_clusts(scrna_cd8, c(4,11), c(0,2,3,14,10), label_top_rna=50)
+message(print(paste(gsub('.adt','', diffs$diff_genes[avg_log2FC < 0 & -log(p_val_adj) > 50]$rn),collapse='\n')))
+
+```
+
+### CD4 Act Clust Assignment:
+
+```{r}
+scrna_cd4 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.act_clust.clean.h5Seurat')))
+
+cd4_metadata <- data.table(
+  scrna_cd4@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+get_cluster_enrich_plot(scrna_cd4, 'seurat_clusters', hide='', facet_formula=formula(~car))
+
+scrna_cd4@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+plot_grid(
+  get_cluster_enrich_plot(scrna_cd4, 'seurat_clusters', hide='', facet_formula=formula(~car))$plot,
+  DimPlot(scrna_cd4, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) +
+    DimPlot(scrna_cd4, reduction = 'wnn.umap', group.by = 'seurat_clusters', label = TRUE, repel = TRUE, label.size = 2.5),
+  ncol=1)
 ```
