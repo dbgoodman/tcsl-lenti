@@ -178,8 +178,74 @@ barplot_stacked_plot <- ggplot(subset_barplot_reads) +
     strip.background = element_blank(),
     panel.border = element_rect(colour = "black"))
 
-ggsave(here::here('..','figs','pooled','fig1_stacked_bar.pdf'), 
+ggsave(here::here('..','figs','pooled','fig2a_stackbar_single_donor.pdf'), 
        barplot_stacked_plot, height=6, width=9, useDingbats=FALSE)
+
+barplot_stacked_plot_horiz <- ggplot(subset_barplot_reads) +
+  geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
+    stat='identity', width=1) +
+  scale_fill_brewer(palette = "YlGn") +
+  facet_wrap(t.type ~ ., scales = 'free_x', nrow=1) +
+  labs(y='% sorted into each bin', x='CAR Costimulatory Domains, ranked') +
+  scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep) +
+  scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0, 0)), 
+                     breaks=c(0, .5, 1), labels=percent) +
+  theme_bw(base_size=12) + theme(axis.ticks = element_blank()) + 
+  theme(
+    axis.text.x = element_text(size=9, angle = 90, vjust = 0.5, hjust=1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_rect(colour = "black"))
+
+ggsave(here::here('..','figs','pooled','fig2a_stackbar_single_donor_horiz.pdf'), 
+       barplot_stacked_plot_horiz, height=6, width=9, useDingbats=FALSE)
+
+```
+
+# CTV1 and CTV2 barplot
+
+```{r}
+subset_barplot_reads <- read.counts[
+  assay %in% c('CTV1') & batch %in% c('prolif2') & donor %in% c('d1','d2') & k.type == 'pos']
+
+subset_barplot_reads <- subset_barplot_reads[,
+  CAR.ranked.sep := factor(
+    paste(CAR.align,t.type,batch,donor,sep='|'))]
+
+subset_barplot_reads[,
+  CAR.ranked.sep := factor(CAR.ranked.sep, levels=levels(
+    reorder(
+      CAR.ranked.sep[k.type == 'pos'], 
+      -rlog_car_score[k.type == 'pos'])))]
+
+remove_t_type_sep <- function (breaks)
+  unlist(lapply(breaks, function(str)
+    strsplit(str, '|',fixed=T)[[1]][1]))
+
+barplot_stacked_multi_plot <- ggplot(subset_barplot_reads) +
+  geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
+    stat='identity', width=1) +
+  scale_fill_brewer(palette = "YlGn") +
+  facet_wrap(sort.group ~ t.type, scales = 'free_x', ncol=2) +
+  labs(y='', x='') +
+  scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep) +
+  scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0, 0)), 
+                     breaks=c(0, .5, 1), labels=percent) +
+  theme_bw(base_size=18) + theme(axis.ticks = element_blank()) + 
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    strip.text= element_blank(),
+    panel.background = element_rect(fill= brewer.pal(4, 'YlGn')[1]),
+    legend.position = "none",
+    panel.border = element_rect(colour = "black"))
+
+ggsave(here::here('..','figs','pooled','fig2a_stackbar_both_donors.pdf'), 
+       barplot_stacked_multi_plot, height=6, width=9, useDingbats=FALSE)
 
 ```
 
@@ -1405,6 +1471,12 @@ data.dt[, CAR.type := factor(
 #### Replicate Comparison
 ```{r}
 
+assay_fig_labels <- c(
+  'Initial Proliferation\n(d0-d3/d4)', 
+  'Cumulative Proliferation\n(d0-d16)', 
+  'Cumulative Proliferation,\n(d0-d24)')
+
+
 # combined rlog car score for CTV1 & CTV2, baseline abundance for CTV3
 fig2_rep_comp <- rbind(
     plot_all_reps(
@@ -1414,10 +1486,7 @@ fig2_rep_comp <- rbind(
         df=read.counts[batch != 'post-cytof' & CAR.align != 'TNR8'], 
         value_col='car.abund.rel.baseline', df_only=T)[assay != 'CTV1'])
 
-fig2_rep_comp[, assay := factor(assay, 
-    labels=c('Initial Proliferation\n(d0-d3/d4)', 
-             'Cumulative Proliferation\n(d0-d16)', 
-             'Cumulative Proliferation,\n(d0-d24)'))]
+fig2_rep_comp[, assay := factor(assay, labels=assay_fig_labels)]
 
 replicate_comp_plot <- ggplot(data=fig2_rep_comp, 
        aes(x_scaled_sep, y_scaled_sep)) + 
@@ -1466,10 +1535,7 @@ data.subset.dt <- data.dt[
         (ref_set == 'CD' & test_set == 'A' & assay == 'CTV1'))]
 
 # rename facets
-data.subset.dt[, assay := factor(assay, 
-    labels=c('Initial Proliferation\n(d0-d3/d4)', 
-             'Cumulative Proliferation\n(d0-d16)', 
-             'Cumulative Proliferation\n(d0-d24)'))]
+data.subset.dt[, assay := factor(assay, labels=assay_fig_labels)]
 
 # max out at log10-15
 data.subset.dt[, padj.disp := -log10(padj)]
@@ -1527,9 +1593,7 @@ cast_4v8 <- dcast(data.dt[
 
 # rename facets
 cast_4v8[, assay := factor(assay, 
-    labels=c('Initial Proliferation\n(d0-d3/d4)', 
-             'Cumulative Proliferation\n(d0-d16)', 
-             'Cumulative Proliferation,\n(d0-d24)'))]
+    labels=assay_fig_labels))]
 
 # label significant hits
 cast_4v8[, CAR.type.size := CAR.type]
@@ -1607,6 +1671,33 @@ prolif_4v8_rel <- ggplot(cast_4v8[order(CAR.type)],
   theme(panel.border=element_rect(fill=NA)) +
   guides(size=F)
 
+prolif_4v8_rel_vert <- ggplot(cast_4v8[order(CAR.type)], 
+  aes(y=rel_8, x=mean_lfc,
+      color=CAR.type.size,
+      label=CAR.label.sig,
+      size=CAR.type.size)) + 
+  annotate(geom='label', x=-Inf, y=Inf, label='CD8 Skewed', 
+    label.r=unit(0,'pt'), size=3, vjust=.99, hjust=.01) +
+  annotate(geom='label', x=-Inf, y=-Inf, label='CD4 Skewed', 
+    label.r=unit(0,'pt'), size=3, vjust=.01, hjust=.01) +
+  geom_point() +
+  facet_grid(assay ~ ., scales='free_x') +
+  scale_color_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
+    values=c('grey50', receptor_cols, outlier_cols[2], outlier_cols[2]), guide=F) +
+  scale_size_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
+    values=c(0.8,2.5,2.5,1,2.5), guide=F) +
+  scale_x_continuous(limits=c(-3.25,3.25), breaks=c(-3:3)) +
+  scale_y_continuous(limits=c(-2.25,1.9)) +
+  geom_hline(yintercept=0, linetype='dashed', alpha=.7) +
+  geom_text_repel(size=3, point.padding=0.25, segment.color='grey') +
+  theme_minimal() + 
+  labs(y='log2 CD8:CD4 proliferation ratio', 
+       x='Rel. proliferation, log2 mean FC') +
+  theme(panel.border=element_rect(fill=NA)) +
+  guides(size=F)
+
 ggsave(here::here('..','figs','pooled','mixed_4v8_rel.pdf'), prolif_4v8_rel,
        height=2.5, width=7, useDingbats=FALSE)
 
@@ -1625,9 +1716,7 @@ cast_posneg <- dcast(data.dt[
     
 # rename facets
 cast_posneg[, assay := factor(assay, 
-    labels=c('Initial Proliferation\n(d0-d3/d4)', 
-             'Cumulative Proliferation\n(d0-d16)', 
-             'Cumulative Proliferation,\n(d0-d24)'))]
+    labels=assay_fig_labels))]
 
 # label significant hits
 cast_posneg[, CAR.type.size := CAR.type]
@@ -1753,7 +1842,8 @@ library(cowplot)
 library(gtable)
 library(grid)
 
-make_dendroheatmap_horiz <- function(
+# currently not using this, using regular, which is horizontal
+make_dendroheatmap_vert <- function(
   df, title, dendro_units=grid::unit(0.2, "null"), 
   legend_theme=theme(legend.position = "none"), boxnumbers=F)
 {
@@ -2041,6 +2131,131 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA))
 
+
+fig2_abundance_over_time_vert <- ggplot(prolif_data[order(CAR.type)], aes(
+    y=mean.car.abund.rel.baseline, x=assay,
+    color=CAR.type,
+    group=CAR.align,
+    label=CAR.align)) + 
+  # line
+  geom_line(aes(size=CAR.type)) +
+  scale_size_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c(0.5,1.5,1.5), guide=F) +
+  scale_color_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c('grey30', receptor_cols),
+    guide=F) +
+  #points
+  new_scale('size') +
+  geom_point(aes(size=CAR.type, color=CAR.type, group=CAR.align)) +
+  scale_size_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c(1,2,2), guide=F) +  
+  # text
+  new_scale('color') +
+  geom_text_repel(data=label_data,
+    aes(color=CAR.topbot),
+    nudge_x = 1.2,
+    direction = "y",
+    hjust = 1,
+    size = 3,
+    segment.size = 0.3,
+    segment.color='grey') +
+  scale_color_manual('',
+    labels=c('4-1BB', 'CD28','Top','Bottom'),
+    values=c(receptor_cols, outlier_cols),
+    guide=F) +
+  facet_grid(t.type ~ .) +
+  scale_x_discrete(
+    'Days of continuous CD19 stimulation', 
+    expand = c(0, 0.4, 0, 1.4), 
+    labels=c('Baseline', 'Day 3-4', 'Day 14-16', 'Day 24')) +
+  scale_y_continuous('Relative Proliferation,\n log2 FC') +
+  theme_minimal() +
+  theme(panel.border=element_rect(fill=NA))
+
+cast_4v8_abund <- copy(prolif_data[order(CAR.type)])
+cast_4v8_abund <- dcast(
+  cast_4v8_abund,
+  CAR.align + assay + CAR.type ~ t.type,
+  value.var='mean.car.abund.rel.baseline',
+  fun.aggregate=mean)
+cast_4v8_abund[, mean_lfc := mean(CD4, CD8), by=c('assay','CAR.align')]
+cast_4v8_abund[, rel_8 := CD8-CD4, by=c('assay','CAR.align')]
+
+cast_4v8[, mean_lfc := rowMeans(cbind(log2FoldChange_CD4, log2FoldChange_CD8))]
+cast_4v8[, rel_8 := log2FoldChange_CD8 - log2FoldChange_CD4]
+
+cast_4v8[CAR.type.size == 'other_sig' & xor(padj.disp_CD4 > -log10(0.05), 
+  padj.disp_CD8 > -log10(0.05)), CAR.type.size := 'other_sig_diff']
+
+init_assay_name <- assay_fig_labels[1]
+
+cast_4v8_abund <- rbind(
+  cast_4v8_abund,
+  cast_4v8[, list(
+    CAR.align, assay, CAR.type, 
+    CD4= log2FoldChange_CD4, CD8=log2FoldChange_CD8,
+    mean_lfc, rel_8)][
+      assay == init_assay_name])
+
+label_rel_data <- unique(prolif_data[assay %in% c('CTV2','CTV3'), 
+  list(t.type, CAR.align, mean.car.abund.rel.baseline, assay, CAR.type)])[, 
+    car_order := rank(mean.car.abund.rel.baseline), by=c('t.type','assay')][
+      car_order %in% c(1:(1+top_num),(40-top_num):40) | 
+        CAR.align %in% c('CD28','41BB')][, ]
+
+label_rel_data
+keep_assays <- assay_fig_labels
+
+# get CAR labels for rel 4v8 prolif plots
+cast_4v8_abund[, CAR.label := '']
+cast_4v8_abund[assay == 'CTV2' & CAR.align %in% label_rel_data[car_order > 20 & assay=='CTV2', 
+  CAR.align], CAR.label := CAR.align]
+cast_4v8_abund[assay == 'CTV3' & CAR.align %in% label_rel_data[car_order > 20 & assay=='CTV3', 
+  CAR.align], CAR.label := CAR.align]
+cast_4v8_abund[assay == init_assay_name & CAR.align %in% cast_4v8[assay==init_assay_name, 
+  CAR.label.sig], CAR.label := CAR.align]
+
+cast_4v8_abund[, CAR.type.size := 'other']
+cast_4v8_abund[CAR.label != '', CAR.type.size := 'other_sig']
+cast_4v8_abund[CAR.align %in%  c('4-1BB','CD28'), CAR.type.size := CAR.align]
+cast_4v8_abund[CAR.align %in%  c('4-1BB','CD28'), CAR.label := CAR.align]
+cast_4v8_abund[, CAR.type.size := factor(CAR.type.size, levels=c('other','4-1BB','CD28','other_sig','other_sig_diff'))]
+
+# rename 'CTV2/3' to labels
+cast_4v8_abund[assay == 'CTV2', assay := assay_fig_labels[2]]
+cast_4v8_abund[assay == 'CTV3', assay := assay_fig_labels[3]]
+
+prolif_4v8_rel_vert <- ggplot(cast_4v8_abund[
+  assay %in% keep_assays][, assay := factor(assay, levels=keep_assays)], 
+  aes(y=rel_8, x=mean_lfc,
+      size=CAR.type.size,
+      color=CAR.type.size,
+      label=CAR.label)) + 
+  annotate(geom='label', x=-Inf, y=Inf, label='CD8 Skewed', 
+    label.r=unit(0,'pt'), size=3, vjust=.99, hjust=.01) +
+  annotate(geom='label', x=-Inf, y=-Inf, label='CD4 Skewed', 
+    label.r=unit(0,'pt'), size=3, vjust=.01, hjust=.01) +
+  geom_point() +
+  facet_grid(assay ~ ., scales='free_x') +
+  scale_color_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
+    values=c('grey50', receptor_cols, outlier_cols[2], outlier_cols[2]), guide=F) +
+  scale_size_manual('',
+    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
+    values=c(0.8,2.5,2.5,1,2.5), guide=F) +
+  scale_x_continuous(limits=c(-2,2), breaks=c(-3:3)) +
+  scale_y_continuous(limits=c(-1.7,1.7)) +
+  geom_hline(yintercept=0, linetype='dashed', alpha=.7) +
+  geom_text_repel(size=3, point.padding=0.25, segment.color='grey') +
+  theme_minimal() + 
+  labs(y='log2 CD8:CD4 proliferation ratio', 
+       x='Rel. proliferation, log2 mean FC') +
+  theme(panel.border=element_rect(fill=NA)) +
+  guides(size=F)
+
 deseq2_abund_data <- all.deseq.results.dt[comparison=='ABCD.baseline' & k.type == 'pos']
 
 label_data_deseq2 <- unique(deseq2_abund_data[assay=='CTV3', 
@@ -2106,6 +2321,8 @@ ggsave(here::here('..','figs','pooled','abund_over_time.pdf'), fig2_abundance_ov
        height=3, width=8, useDingbats=FALSE)
 
 fig2_abundance_over_time
+
+
 ```
 
 ### Cytokines from pooled 02
@@ -2234,7 +2451,7 @@ cytokine_panel
 
 ```
 
-### Combined panels for figure 2
+### Combined panels for figure 2 - OLD
 
 ```{r fig.height=15, fig.width=11}
 
@@ -2258,7 +2475,7 @@ plot_bcd <- plot_grid(
   prolif_4v8_rel + bcd_add_left_margin,           #d
   rel_heights=c(1.6, 2.3, 1.6),
   rel_widths=c(1,1,1),
-  labels = c("B", "C", "D"), align='v', axis='lr',
+  labels = c("B", "C", "D"), align='v', axis='lr',fig2_abundance_over_time
   ncol = 1)
 
 plot_abcd <- plot_grid(
@@ -2275,7 +2492,7 @@ plot_abcd <- plot_grid(
   rel_widths=c(0.7,1),
   labels=c('',''))
 
-plot_abcde <- plot_grid(plot_abcd, 
+plot_abcde_old <- plot_grid(plot_abcd, 
   cytokine_panel + 
     guides(colour = guide_legend(reverse=T)) +
     theme(plot.margin = unit(c(0.5,1,1,0.8), "cm")),
@@ -2285,7 +2502,35 @@ plot_abcde <- plot_grid(plot_abcd,
 ggsave(here::here('..','figs','compiled','fig2.pdf'), plot_abcde,
        height=15, width=11, useDingbats=FALSE)
 
-plot_abcde
+plot_abcde_old
+```
+
+## Fig 2 New
+
+```{r}
+plot_a <- plot_grid(barplot_stacked_plot_horiz+theme(legend.position = "none"), barplot_stacked_multi_plot,
+  rel_widths=c(3.5,1),
+  align='h',
+  ncol = 2)
+
+plot_b <- cytokine_panel + 
+  guides(colour = guide_legend(reverse=T)) +
+  theme(plot.margin = unit(c(0.5,1,1,0.8), "cm"))
+
+plot_c <- fig2_abundance_over_time_vert
+
+plot_d <- prolif_4v8_rel_vert
+
+plot_e <- fig_2a_single_dendro
+
+plot_grid(
+  plot_a,
+  plot_b,
+  plot_grid(plot_c, plot_d, labels=c('C','D'), ncol=2),
+  plot_e,
+  labels=c('A','B','','E'), ncol=1, nrow=4, rel_heights=c(1,0.8,1.2,1))
+
+
 ```
 ## Fig 3 PCA
 
@@ -2365,4 +2610,5 @@ data.output.dir <- file.path(here::here(
   'lenti_screen_compiled_data','data'))
 save(list=ls(),
   file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+#load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
 ```
