@@ -55,6 +55,15 @@ make_ridge_plot <- function(df, var, show_line=F) {
        
   return(p)
 }
+
+# map day 0 to both plus and minus
+map_day_0 <- function(df) {
+  return(rbind(
+    df[k562!='none'],
+    df[k562=='none'][, k562 := 'cd19+'],
+    df[k562=='none'][, k562 := 'cd19-']
+  ))
+}
 ```
 
 ```{r fig.width=15, fig.height=6}
@@ -141,7 +150,7 @@ make_ridge_plot_panel <- function(df, var, show_line=F) {
   geom_density_ridges(aes(y=car.masked, x=value, fill=car.masked, height=..ndensity..)) +
   facet_grid(t_type ~ day) +
   xlim(c(600, NA)) +
-  theme_minimal(base_size=18) +
+  theme_minimal() +
   labs(x=var, y= 'CAR', title=paste0(var_disp, ' level (label = events/1e3)')) +
   scale_fill_manual(values=rev(c('grey50',rev(brewer.pal(9,'Greens')[6:8]),brewer.pal(9,'Blues')[c(6,8)])))
 
@@ -201,7 +210,7 @@ make_ridge_plot_panel <- function(df, var, show_line=F) {
     alpha=0.7) +
   facet_grid(t_type ~ day) +
   xlim(c(600, NA)) +
-  theme_minimal(base_size=9) +
+  theme_minimal() +
   scale_fill_manual(values=rev(car_colors)) +
   scale_color_manual(values=rev(car_colors))
 
@@ -230,11 +239,10 @@ ggsave(paste0(output_dir, '/ctv_ridge_d2_plot.pdf'),
        ctv_ridge_d2, width = 7, height = 4,
        units = 'in', dpi = 300)
 
-# klrg1 subset
-
-make_ridge_plot_panel(
-  ctv_fig_subset_dt[k562=='cd19+' & donor == 1 & car %in% c('CD28','KLRG1','zeta') & day == 3 & t_type == 'cd8'], 'ctv2_t') +
-    labs(x='CTV (AU)', y= 'CAR', title=paste0('Proliferation (Donor 1)'))
+ctv_2_days <- make_ridge_plot_panel(
+  ctv_fig_subset_dt[k562=='cd19+' & donor == 2 & day %in% c('d24', 'd33')], 'ctv2_t') +
+    labs(x='CTV (AU)', y= 'CAR', title=paste0('Proliferation (donor 2)')) + 
+  theme(legend.position='none')
 
 ```
 
@@ -339,13 +347,16 @@ ggsave(paste0(output_dir, '/ctv_ranked_dots_combined_plot.pdf'),
 ### Tile plot of means
 
 ```{r fig.width=10, fig.height=6}
-ctv_gated_means_dt <- ctv_gated_dt[, list(
+ctv_gated_means_dt <- ctv_fig_subset_dt[, list(
   value_mean= mean(value), value_sd= sd(value)),
   by=c('car','k562','day','donor','variable','t_type')][,
-    value_rel_day := value_mean-mean(value_mean),
+    value_rel_day := value_mean-mean(value_mean[car != 'KLRG1']),
       by=c('k562','day','donor','variable','t_type')]
 
-ctv_gated_means_subset <- ctv_gated_means_dt[variable=='ctv1_t' & car != 'KLRG1' & k562 == 'cd19+']
+ctv_gated_means_subset <- ctv_gated_means_dt[variable=='ctv2_t' & k562 == 'cd19+']
+
+max_val <- ctv_gated_means_subset[, max(abs(value_rel_day[car != 'KLRG1']))]
+ctv_gated_means_subset[abs(value_rel_day) > max_val, value_rel_day := max_val * sign(value_rel_day)]
 
 ggplot(ctv_gated_means_subset,
     aes(fill=0-value_rel_day, y=factor(car, levels=rev(levels(factor(car)))), x=day)) + 
@@ -353,7 +364,7 @@ ggplot(ctv_gated_means_subset,
   facet_grid(k562 ~ t_type + donor) + 
   scale_fill_viridis_c(
     'Mean proliferation, relative to mean',
-    limits = c(-1,1)*max(abs(ctv_gated_means_subset$value_rel_day)),
+    limits = c(-1,1)*max_val,
     na.value = 'darkgrey') + 
   theme_minimal() + 
   theme(
@@ -362,46 +373,67 @@ ggplot(ctv_gated_means_subset,
   scale_y_discrete(expand=c(0,0)) + 
   scale_x_discrete(expand=c(0,0))
 
+ctv_ridge_d2 <- make_ridge_plot_panel(
+  ctv_fig_subset_dt[k562=='cd19+' & donor == 2 & day %in% c('d14', 'd33')], 'ctv2_t') +
+    labs(x='CTV (AU)', y= 'CAR', title=paste0('Proliferation (donor 2)'))
+
 ```
   
 ### Tile plot, merged across 2 donors
 
 ```{r}
 
-ctv_gated_means_donormerge_dt <- ctv_gated_means_dt[, `:=`(
-  value_rel_day_mean= mean(value_rel_day),
+ctv_gated_means_donormerge_dt <- ctv_gated_means_subset[, `:=`(
+  value_rel_day_mean= mean(value_rel_day, na.rm=T),
   value_rel_day_sd= sd(value_rel_day)),
   by=c('k562','day','car','variable','t_type')]
 
-ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable=='ctv1_t' & car != 'KLRG1' & k562 == 'cd19+']
+ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable %in% c('ctv2_t') & car != 'KLRG1' & k562 == 'cd19+']
 
-cd27_lines_all <- ggplot(
-    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
-        value > censor_negative_min & t_type == 'cd8'][,
-            list(val_sd= sd(value), val_mean= mean(value)),
-        by=.(car, day, donor, variable, t_type)][
-                (donor == 2 | (donor == 1 & day < 33))], 
-    aes(x=day, y=val_mean/1000, 
-        ymin=(val_mean-val_sd)/1000, 
-        ymax=(val_mean+val_sd)/1000, color=car, group=car)) + 
-    geom_point() + 
-    geom_line() + 
-    facet_grid(~ donor, scale='free_x') + 
-    scale_x_continuous(breaks=c(0,6,15,24,33)) +
-    scale_y_continuous(limits=c(1.25,2.4)) +
-    scale_color_manual(
-        values=c(car_colors,grey)) +
-    scale_linetype_manual(
-        values=c(1,1,1,1,1,1,1,1,3)) +
-    theme_minimal(base_size=9) + 
-    geom_vline(xintercept=-Inf) + 
-    geom_hline(yintercept=-Inf) +
-    labs(y='CD27 log MFI (AU)', x='Days in culture')
+ggplot(ctv_gated_means_donormerge_subset,
+    aes(fill=0-value_rel_day_mean, y=factor(car, levels=rev(levels(factor(car)))), x=day)) + 
+  geom_tile() + 
+  facet_grid(k562 ~ t_type + variable) + 
+  scale_fill_viridis_c(
+    'Mean proliferation, relative to mean',
+    limits = c(-1,1)*max(abs(ctv_gated_means_donormerge_subset$value_rel_day_mean)),
+    na.value = 'darkgrey') + 
+  theme_minimal() + 
+  theme(
+    panel.background=element_rect(fill="darkgrey", colour="darkgrey"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_y_discrete(expand=c(0,0)) + 
+  scale_x_discrete(expand=c(0,0))
+```
+
+## Statistical tests
+
+Not working.
+
+```{r}
+
+vals <- as.matrix(
+  dcast(
+    ctv_gated_means_subset[variable == 'ctv2_t'],
+    car + t_type ~ day + donor, 
+    value.var='value_rel_day'))
+
+wilcox.test(as.numeric(vals[7,3:10]), as.numeric(vals[9,3:10]), paired=T)
 ```
 
 
+## Save
 
+```{r}
 
+rm(list=c('ctv_dt','ctv_fig_dt','ctv_banff_dt','ctv_banff_subset_dt','ctv_gated_dt'))
 
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+save(list=ls(),
+  file=file.path(data.output.dir, 'ctv_plot_data.Rdata'))
+```
 
 

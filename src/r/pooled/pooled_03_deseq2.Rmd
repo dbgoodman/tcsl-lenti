@@ -141,11 +141,11 @@ ggplot(read.counts) +
     facet_grid(t.type ~ assay + k.type)
 ```
 
-# Raw bin plot (for fig1?)
+# Raw bin plot (fig 2A)
 
 ```{r}
 subset_barplot_reads <- read.counts[
-  assay == 'CTV1' & batch == 'prolif2' & donor == 'd1' & k.type == 'pos']
+  assay == 'CTV1' & batch == 'prolif2' & donor == 'd2' & k.type == 'pos']
 
 subset_barplot_reads <- subset_barplot_reads[,
   CAR.ranked.sep := factor(
@@ -780,7 +780,7 @@ plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
 }
 ```
 
-```{r, fig.width=22.5, fig.height=7.5}
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
 read.counts[, car.abund.log := log10(car.abund)]
 
 #assay_rep_list:
@@ -847,7 +847,7 @@ plot_all_reps(value_col='rlog_car_score')  +
 
 #### Combining these together to summarize correlation among replicates
 
-```{r}
+```{r, eval=F}
 ggplot(data=plot_all_reps(df=read.counts[(CAR.align != 'TNR8')], 
         value_col='car.abund.rel.baseline', df_only=T), 
        aes(x_scaled_sep, y_scaled_sep)) + 
@@ -885,7 +885,7 @@ CTV1 & 2 with baseline abundance for CTV3.
 
 ### Individual Replicate, comparison among different measurements
 
-```{r, fig.width=22.5, fig.height=7.5}
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
 
 comp.df <- copy(read.counts[assay != 'baseline' & batch != 'post-cytof'])
 comp.df[, car.abund.rel.prev.scaled := scales::rescale(car.abund.rel.prev), 
@@ -982,34 +982,34 @@ deseq2_rc_measures <- comp.df[
 ```
 
 ## CAR score comparisons
-```{r, fig.width=22.5, fig.height=7.5}
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
 plot_measure_pair(comp.df, 'vst_car_score.scaled', 'CAR.score.scaled')
 plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'CAR.score.scaled')
 plot_measure_pair(comp.df, 'vst_car_score.scaled', 'rlog_car_score.scaled')
 ```
 
 ## CAR score to baseline abundance
-```{r, fig.width=22.5, fig.height=7.5}
-plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.baseline.scaled')
-plot_measure_pair(comp.df, 'vst_car_score.scaled', 'car.abund.rel.baseline.scaled')
-plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'car.abund.rel.baseline.scaled')
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
+# plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.baseline.scaled')
+# plot_measure_pair(comp.df, 'vst_car_score.scaled', 'car.abund.rel.baseline.scaled')
+# plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'car.abund.rel.baseline.scaled')
 ```
 
 ### CAR score to prev abundance
-```{r, fig.width=22.5, fig.height=7.5}
-plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.prev.scaled')
-plot_measure_pair(comp.df, 'vst_car_score.scaled', 'car.abund.rel.prev.scaled')
-plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'car.abund.rel.prev.scaled')
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
+# plot_measure_pair(comp.df, 'CAR.score.scaled', 'car.abund.rel.prev.scaled')
+# plot_measure_pair(comp.df, 'vst_car_score.scaled', 'car.abund.rel.prev.scaled')
+# plot_measure_pair(comp.df, 'rlog_car_score.scaled', 'car.abund.rel.prev.scaled')
 ```
 
 ### CAR score to prev baseline
-```{r, fig.width=22.5, fig.height=7.5}
-plot_measure_pair(comp.df, 'car.abund.rel.baseline.scaled', 'car.abund.rel.prev.scaled')
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
+# plot_measure_pair(comp.df, 'car.abund.rel.baseline.scaled', 'car.abund.rel.prev.scaled')
 ```
 
 ### CAR score to deseq2
 
-```{r, fig.width=22.5, fig.height=7.5}
+```{r, fig.width=22.5, fig.height=7.5, eval=F}
 plot_measure_pair(deseq2_rc_measures,
   'log2FoldChange_D_v_A',
   'car.abund.rel.prev.scaled') +
@@ -1110,7 +1110,7 @@ ggplot(all_rep_comparisons[assay == 'CTV3']) +
 ```
 
 ### pos/neg CTV3, within k.type
-```{r}
+```{r, eval=F}
 
 all_rep_comparisons <- read.counts[
   grepl('CTV', assay), 
@@ -1199,19 +1199,19 @@ ggplot(pos_neg_assay_plot,
     y='CD19+ Proliferation (scaled for replicate)', 
     x='CD19- : CD19+ Proliferation Ratio')
 
-ggplotly(ggplot(pos_neg_assay_plot, 
-     aes(x=xy_ratio, y=y_scaled_sep, label=CAR.align)) + 
-  geom_point() + 
-  facet_wrap(t.type ~ assay) + 
-  labs(
-      title='Average Prolifertation and -/+ ratio across replicates (interactive)',
-      y='CD19+ Proliferation (scaled for replicate)', 
-      x='CD19- : CD19+ Proliferation Ratio'))
+# ggplotly(ggplot(pos_neg_assay_plot, 
+#      aes(x=xy_ratio, y=y_scaled_sep, label=CAR.align)) + 
+#   geom_point() + 
+#   facet_wrap(t.type ~ assay) + 
+#   labs(
+#       title='Average Prolifertation and -/+ ratio across replicates (interactive)',
+#       y='CD19+ Proliferation (scaled for replicate)', 
+#       x='CD19- : CD19+ Proliferation Ratio'))
 ```
 
 ### 6 panel - all CTVs, CD4s and CD8s averaged separately
 
-```{r fig.height=4, fig,width=5}
+```{r fig.height=4, fig,width=5, eval=F}
 ggplot_pos_neg_assay <- ggplot(pos_neg_assay_plot, 
        aes(x=xy_ratio, y=y_scaled_sep, label=label.few)) + 
     geom_point() + 
@@ -1232,7 +1232,7 @@ ggsave(here::here('..','figs','pooled','relative_prolif.pdf'),
 ```
 
 ### 2 panel - all CD4s and CD8s averaged separately
-```{r fig.height=4, fig.width=4}
+```{r fig.height=4, fig.width=4, eval=F}
 
 pos_neg_comparisons_melt <- melt(
   pos_neg_comparisons[, 
@@ -1292,6 +1292,13 @@ cast_formula <- paste(cast_left, cast_right, sep= ' ~ ')
 
 pos_neg_assay_avg <- dcast(
   pos_neg_comparisons_melt, cast_formula, value.var='var_mean')
+
+pos_neg_assay_plot <- unique(
+  pos_neg_assay_avg[, list(t.type, y_scaled_comb, x_scaled_comb, CAR.align)])
+pos_neg_assay_plot[, label.few := '']
+pos_neg_assay_plot[
+  CAR.align %in% c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40'),
+  label.few := CAR.align]
 
 pos_neg_assay_plot[, label.few := '']
 pos_neg_assay_plot[
@@ -1399,7 +1406,7 @@ ggsave(here::here('..','figs','pooled','scaled_prolif_t_mean_ctv1.pdf'),
 
 ## Bin vs baseline measurements
 
-```{r, fig.height=8, fig.width=10}
+```{r, fig.height=8, fig.width=10, eval=F}
 ggplotly(make_volcanoes(all.deseq.results.dt[
   k.type == 'pos' & ref_set == 'baseline']), 
   tooltip = "label", session='knitr')
@@ -1417,7 +1424,7 @@ ggplotly(make_pos_neg(all.deseq.results.dt[
 
 ## Interbin measurements
 
-```{r, fig.height=15, fig.width=10}
+```{r, fig.height=15, fig.width=10, eval=F}
 ggplotly(make_volcanoes(all.deseq.results.dt[
   k.type == 'pos' & ref_set != 'baseline']), 
   tooltip = "label", session='knitr')
@@ -1431,7 +1438,7 @@ ggplotly(make_timeseries(all.deseq.results.dt[
 
 # cd19+ vs cd19-
 
-```{r, fig.height=5, fig.width=10}
+```{r, fig.height=5, fig.width=10, eval=F}
 ggplotly(make_pos_neg(all.deseq.results.dt[
   ref_set == 'baseline']), 
   tooltip = "label", session='knitr')
@@ -1593,7 +1600,7 @@ cast_4v8 <- dcast(data.dt[
 
 # rename facets
 cast_4v8[, assay := factor(assay, 
-    labels=assay_fig_labels))]
+    labels=assay_fig_labels)]
 
 # label significant hits
 cast_4v8[, CAR.type.size := CAR.type]
@@ -1716,7 +1723,7 @@ cast_posneg <- dcast(data.dt[
     
 # rename facets
 cast_posneg[, assay := factor(assay, 
-    labels=assay_fig_labels))]
+    labels=assay_fig_labels)]
 
 # label significant hits
 cast_posneg[, CAR.type.size := CAR.type]
@@ -2023,9 +2030,9 @@ fig_2a_single_dendro <- make_dendroheatmap(
   chosen_metrics,
   title='',
   legend_theme=theme(
-      legend.position = c(1, 0), 
-      legend.justification = c(-1.7, 0),
-      plot.margin = unit(c(5.5,33,33,5.5), "pt")))
+      legend.position = c(1, 0.5), 
+      legend.justification = c(0, 0.5),
+      plot.margin = unit(c(5.5,66,5.5,44), "pt")))
 
 fig_2a_single_dendro
 
@@ -2033,7 +2040,7 @@ fig_2a_single_dendro
 
 ### single heatmap, with numbers in boxes
 
-```{r}
+```{r, eval=F}
 patent_fig2a <- make_dendroheatmap(
   chosen_metrics,
   title='',
@@ -2380,7 +2387,7 @@ cytokine_panel
 ```
 ### Cytokines, Patent Version
 
-```{r}
+```{r, eval=F}
 
 # cd19+/cd19- cols
 
@@ -2444,16 +2451,16 @@ cytokine_panel <- ggplot(cytokine.pct.pos.melt) +
         legend.position=c(0.99,1.01)) +
   expand_limits(x = 0, y = 0)
 
-ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel,
+ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel_patent,
        height=3, width=8, useDingbats=FALSE)
 
-cytokine_panel
+cytokine_panel_patent
 
 ```
 
 ### Combined panels for figure 2 - OLD
 
-```{r fig.height=15, fig.width=11}
+```{r fig.height=15, fig.width=11, eval=F}
 
 #old version with replicate comparison
 # plot_grid(fig_2a_single_dendro, 
@@ -2475,7 +2482,7 @@ plot_bcd <- plot_grid(
   prolif_4v8_rel + bcd_add_left_margin,           #d
   rel_heights=c(1.6, 2.3, 1.6),
   rel_widths=c(1,1,1),
-  labels = c("B", "C", "D"), align='v', axis='lr',fig2_abundance_over_time
+  labels = c("B", "C", "D"), align='v', axis='lr',
   ncol = 1)
 
 plot_abcd <- plot_grid(
@@ -2499,7 +2506,7 @@ plot_abcde_old <- plot_grid(plot_abcd,
   ncol=1,
   rel_heights=c(1.1,0.3), labels=c('A','E'))
 
-ggsave(here::here('..','figs','compiled','fig2.pdf'), plot_abcde,
+ggsave(here::here('..','figs','compiled','fig2_old.pdf'), plot_abcde_old,
        height=15, width=11, useDingbats=FALSE)
 
 plot_abcde_old
@@ -2523,12 +2530,15 @@ plot_d <- prolif_4v8_rel_vert
 
 plot_e <- fig_2a_single_dendro
 
-plot_grid(
+plot_abcde <- plot_grid(
   plot_a,
   plot_b,
   plot_grid(plot_c, plot_d, labels=c('C','D'), ncol=2),
   plot_e,
   labels=c('A','B','','E'), ncol=1, nrow=4, rel_heights=c(1,0.8,1.2,1))
+
+ggsave(here::here('..','figs','compiled','fig2.pdf'), plot_abcde,
+       height=15, width=11, useDingbats=FALSE)
 
 
 ```

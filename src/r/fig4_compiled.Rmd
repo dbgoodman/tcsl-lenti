@@ -1,0 +1,414 @@
+---
+title: "fig4_compiled.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Fig4
+
+Plots adapted from plots_incucyte.Rmd.
+
+```{r cars}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(ggrepel)
+
+output_dir <- file.path(here::here('..','figs'))
+
+data_dir <- here::here('..','data')
+
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+
+load(file=file.path(data.output.dir, 'incucyte_plot_data.Rdata'))
+
+# add 'd' in front of days
+incucyte_new_dt[, day_f := factor(day, levels=c(0,8,15,22,29), labels=paste0('d',c(0,8,15,22,29)))]
+incucyte_new_dt[, t_type := factor(t_type, labels=toupper(unique(t_type)))]
+
+car_set <- c('41BB','CD28','BAFF-R','CD40','TACI','TNR8','KLRG1','zeta')
+chosen_measure <- 'redintensity'
+source(here::here('r','fig_colors.R'))
+
+
+
+```
+
+## Killing Intensity Means
+
+```{r, echo=FALSE}
+
+plot_set_time <- function(df, elapsed_hr, cast_y=donor, switch_facet=NULL){
+  
+
+  df_plot <- unique(df[Elapsed==elapsed_hr,
+    list(k562, day, t_type, donor, car, mean_value_none,
+         std_dev_value_none, day_f, Elapsed)])
+  
+  # add 'd' in front of days
+  df_plot[, t_type := toupper(t_type)]
+
+  
+  # use % killed insted of % remaning
+  df_plot[, mean_pct_killed := 1-mean_value_none]
+
+  t_type <- df_plot[, unique(t_type)]
+  stopifnot(length(t_type) == 1)
+  df_plot[, car := factor(car, levels=car_order)]
+  
+  # we are creating a name which will be unique per dot, and include the rank
+  df_plot[, 
+    day_rank := factor(paste(rank(mean_pct_killed), 
+      car, day, donor, t_type, sep= '|')), 
+    by=c('k562','day','t_type','donor')]
+  
+  cast_y=enquo(cast_y)
+
+  plot <- ggplot(df_plot,
+    aes(x=day_rank, 
+      y=mean_pct_killed, 
+      fill=car, color=car, group=car)) +
+    geom_linerange(aes(
+      ymin=mean_pct_killed-std_dev_value_none,
+      ymax=mean_pct_killed+std_dev_value_none)) +
+    geom_point(
+      color='grey30', 
+      shape=21, position=position_dodge(width=1),
+      size=3) +
+    facet_grid(vars(!!cast_y), vars(day_f), space='free', scales='free', switch=switch_facet) +
+    theme_minimal(base_size=12) +
+    theme(
+      plot.title = element_text(size = 25),
+      panel.spacing.y=unit(80,'pt'), 
+      axis.text.x=element_blank(),
+      panel.grid.minor.x = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.border = element_rect(fill=NA)) +
+    scale_fill_manual(values=rev(car_colors)) +
+    scale_color_manual(values=rev(car_colors)) +
+    scale_y_continuous(labels = scales::percent,
+      limits=c(0,1.05),
+      breaks=c(0, 0.25, 0.5, 0.75, 1)) +
+    geom_hline(yintercept=1, color='gray60', linetype=2) +
+    labs(x=" ", y=" ")
+
+  return(plot)
+}
+
+combine_plots <- function(plot1, plot2, legend_pct, use_leg=T, num_col=1) {
+  leg <- get_legend(plot1 + theme(legend.box.margin = margin(0, 0, 0, 12)))
+  prow <- plot_grid(
+    plot1 + theme(legend.position="none"),
+    plot2 + theme(legend.position="none"),
+    ncol= 1, align= 'v', axis= 'l')
+  
+  if (use_leg) {
+    plot_grid(prow, leg, rel_widths = c(1-legend_pct, legend_pct))
+  } else {
+    prow
+  }
+}
+
+combine_plots_vert <- function(plot1, plot2, legend_pct, use_leg=T, num_col=2, rel_widths=c(1,1)) {
+  
+  leg <- get_legend(plot1 + theme(legend.box.margin = margin(0, 0, 0, 12)))
+  
+  prow <- plot_grid(
+    plot1 + theme(legend.position="none"),
+    plot2 + theme(legend.position="none"),
+    ncol= 2, align= 'h', axis= 't', rel_widths=rel_widths)
+  
+  if (use_leg) {
+    plot_grid(prow, leg, rel_widths = c(1-legend_pct, legend_pct))
+  } else {
+    prow
+  }
+}
+
+killing_plots_combined_cd8 <- combine_plots(
+  plot_set_time(
+    incucyte_new_dt[k562=='mkate_cd19' & !noise & t_type == 'CD8' & donor == 1 &
+      measurement==chosen_measure & car!='none'], 30),
+  plot_set_time(
+    incucyte_new_dt[k562=='mkate_cd19' & !noise & t_type == 'CD8' & donor == 2 &
+      measurement==chosen_measure & car!='none'], 32),
+  0.2)
+
+killing_plots_combined_cd4 <- combine_plots(
+  plot_set_time(
+    incucyte_new_dt[k562=='mkate_cd19' & !noise & t_type == 'CD4' & donor == 1 &
+      measurement==chosen_measure & car!='none'], 80),
+  plot_set_time(
+    incucyte_new_dt[k562=='mkate_cd19' & !noise & t_type == 'CD4' & donor == 2 &
+      measurement==chosen_measure & car!='none'], 76), 
+  0.2)
+  
+
+### combined 4 and 8
+
+cd4_mean_dt <- incucyte_new_dt[
+  k562=='mkate_cd19' & !noise & t_type == 'CD4' & 
+  measurement==chosen_measure & car!='none' & 
+  ((donor == 1 & Elapsed == 80) | (donor == 2 & Elapsed == 76))][, 
+    `:=`(
+      Elapsed= 80, 
+      mean_value_none=mean(mean_value_none, na.rm=T), 
+      std_dev_value_none=sd(mean_value_none, na.rm=T)),
+    by=c('day_f','car_f','t_type')]
+
+cd8_mean_dt <- incucyte_new_dt[
+  k562=='mkate_cd19' & !noise & t_type == 'CD8' & 
+  measurement==chosen_measure & car!='none' & 
+  ((donor == 1 & Elapsed == 30) | (donor == 2 & Elapsed == 32))][, 
+    `:=`(
+      Elapsed= 32, 
+      mean_value_none=mean(mean_value_none, na.rm=T), 
+      std_dev_value_none=sd(mean_value_none, na.rm=T)),
+    by=c('day_f','car_f','t_type')]
+
+killing_plots_combined_all <- combine_plots(
+  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
+  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
+  0.2)
+
+killing_plots_combined_all <- combine_plots(
+  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
+  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
+  0.2, use_leg=F)
+
+killing_plots_combined_all_vert_old <- combine_plots_vert(
+  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet='x'),
+  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet='x'),
+  0.2, use_leg=F)
+
+```
+
+```{r}
+# Killing curves normalized to no cells
+
+incucyte_new_dt[, mean_value_none_rollmean5 := frollmean(mean_value_none, 5, algo='fast', align='center', fill=NA, na.rm=T), 
+  by=c('measurement','donor','day','k562','well','car','image')]
+
+incucyte_new_dt[, mean_value_none_rollmean10 := frollmean(mean_value_none, 10, algo='fast', align='center', fill=NA, na.rm=T), 
+  by=c('measurement','donor','day','k562','well','car','image')]
+
+incucyte_new_dt[Elapsed < 5, mean_value_none_rollmean10 := mean_value_none, 
+  by=c('measurement','donor','day','k562','well','car','image')]
+incucyte_new_dt[Elapsed < 2, mean_value_none_rollmean5 := mean_value_none, 
+  by=c('measurement','donor','day','k562','well','car','image')]
+
+
+# pick days
+cd4_days <- c(8,22)
+cd8_days <- c(0,29)
+
+
+plot_killing_cd4_log <- ggplot(incucyte_new_dt[k562=='mkate_cd19' & !noise & t_type == 'CD4' & measurement == chosen_measure & 
+    car!='none' & day_f %in% paste0('d',cd4_days) & donor %in% c(1,2)], 
+  aes(x=Elapsed, y=mean_value_none_rollmean10, group=interaction(car, day_f,donor), fill=day_f)) + 
+  geom_line(aes(color=car)) + 
+  facet_grid(donor~day_f, scales='free_y') + 
+  theme_minimal(base_size=12) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 15)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,100)) +
+  scale_y_continuous('% Tumor Cells remaining', limits=c(0.01, 1.05),
+  trans=log10_trans(), labels=scales::percent_format(accuracy=1)) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_manual(values=car_colors) + 
+  scale_fill_manual(values=car_colors) + 
+  geom_hline(yintercept=1,
+            color='gray60') +
+  geom_vline(xintercept=80, linetype=2, color='gray60') +
+  theme(panel.spacing = unit(1.3, "lines"), panel.border = element_rect(fill=NA))
+
+plot_killing_cd8_log <- ggplot(incucyte_new_dt[k562=='mkate_cd19' & !noise & t_type == 'CD8' & measurement == chosen_measure & 
+    car!='none' & day_f %in% paste0('d',cd8_days)  & donor %in% c(1,2)], 
+  aes(x=Elapsed, y=mean_value_none_rollmean10, group=interaction(car, day_f,donor), fill=day_f)) + 
+  geom_line(aes(color=car)) + 
+  facet_grid(donor~day_f, scales='free_y') + 
+  theme_minimal(base_size=12) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
+  theme(plot.title = element_text(size = 15)) + 
+  scale_x_continuous(expand=c(0,0), limits=c(0,50)) +
+  scale_y_continuous('', limits=c(0.01, 1.05),
+  trans=log10_trans(), labels=scales::percent_format(accuracy=1)) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_color_manual(values=car_colors) + 
+  scale_fill_manual(values=car_colors) + 
+  geom_hline(yintercept=1,
+            color='gray60') +
+  geom_vline(xintercept=32, linetype=2, color='gray60') +
+  theme(panel.spacing = unit(1.3, "lines"), panel.border = element_rect(fill=NA))
+
+killing_plots_combined_all_vert <- combine_plots_vert(
+  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet=NULL)
+   + theme(strip.text.y=element_blank(), plot.margin=margin(10,10,-20,10))+labs(y='% Target Cells Killed'),
+  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet=NULL)
+   + theme(strip.text.y=element_blank(), plot.margin=margin(10,10,-20,10), axis.text.y=element_blank()),
+  0.2, use_leg=F)
+
+in_vitro_killing <- plot_grid(
+  killing_plots_combined_all_vert,
+  plot_grid(
+    plot_killing_cd4_log
+      + labs(x='Hours of co-culture', y='% Tumor Cells remaining')
+      + theme(legend.position='none'),
+    plot_killing_cd8_log
+      + labs(x='Hours of co-culture', y='')
+      + theme(legend.position='none', axis.text.y=element_blank(), plot.margin=margin(5.5,5.5,5.5,-5.5)),
+    rel_widths=c(0.53,0.47)),
+  ncol=1, rel_heights=c(0.4,0.6))
+
+in_vitro_killing
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+### In Vivo Killing
+
+```{r}
+growth_dt <- fread("~/s3-roybal-tcsl/lenti_screen_compiled_data/data/invivo/tcsl166_growth.csv")
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt[, length_2 := as.numeric(length_2)]
+growth_dt <- growth_dt[car != '']
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Untransduced','zeta'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+ggplot(growth_dt,
+  aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
+  geom_line() +
+  facet_wrap(~car)
+
+growth_dt_means <- growth_dt[, list(
+  vol_lww = mean(vol_lww, na.rm=T),
+  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
+  vol_lwl = mean(vol_lwl, na.rm=T),
+  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
+  vol_lwlw = mean(vol_lwlw, na.rm=T),
+  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
+  by=c('car','day')]
+
+all_cars <- ggplot(growth_dt_means[day <=50],
+  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+  geom_line(legend=F) + geom_point(show.legend=F) +
+  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='None')*1) +
+  scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
+  labs(color="g", linetype="g") + theme_minimal()
+
+left_group <- c('None','Untransduced','41BB','BAFF-R','CD28','TACI')
+right_group <- c('None','Untransduced','KLRG1','zeta')
+car_linetypes <- 1+(levels(growth_dt_means[,car])=='None')*1
+names(car_linetypes) <- levels(growth_dt_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.margin = margin(6, 6, 6, 6),
+      panel.border = element_rect(fill=NA))
+
+
+in_vivo_tumor_growth <- plot_grid(
+  NULL,
+  plot_grid(
+    ggplot(growth_dt_means[day <=50 & car %in% left_group],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=car_linetypes) +
+      scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
+      theme_minimal() + plot_theme + labs(y=bquote('Tumor Volume'~(mm^3)), x='Days post tumor injection'),
+    ggplot(growth_dt_means[day <=50 & car %in% right_group],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=car_linetypes) +
+      scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
+      theme_minimal() + plot_theme + 
+      theme(axis.text.y=element_blank(), axis.title.y=element_blank(), plot.margin=margin(3,3,3,20)) +
+      labs(x='Days post tumor injection'),
+    rel_widths=c(0.55, 0.45), labels=c('D','E'), ncol=2, align='h',axis='lr'),
+  labels=c('C',''), rel_widths=c(1,2), ncol=2)
+  
+
+
+```
+### cytokines
+
+```{r}
+
+parent_folder = here::here('..')
+#flow.dt <- fread("/Users/camilliaazimi/Box\ Sync/tcsl/flow/TCSL105\ ALL\ FILES/Cytokines/tcsl105cytokines.csv")
+
+cytokine_fn <- "~/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/tcsl105_cytokines.csv"
+
+flow.dt <- fread(cytokine_fn)
+#getting rid of outliers with the next line
+flow.dt <- flow.dt[outlier == FALSE]
+
+flow.means.dt <- flow.dt[, list(
+  pct.mean= mean(pct, na.rm=T), 
+  pct.stdev= sd(pct, na.rm=T)),
+    by=c('k562','cell.type','car',
+         'days','cytokine', 'donor')][,
+    pct.mean.donor := mean(pct.mean, na.rm=T), 
+      by=c('car','days','cell.type','k562','cytokine')]
+
+cytokines <- ggplot(flow.means.dt[k562 == '+'][car=='Zeta', car := 'zeta'][car=='BAFFR', car := 'BAFF-R']) + 
+  geom_tile(aes(x=as.factor(days), y=factor(car, levels=rev(car_order)), fill=pct.mean.donor), color='white') + 
+  facet_grid( ~ cytokine) + scale_fill_viridis_c('% Positive Cells\n(mean of 2 donors)') +
+  labs(x='Days in culture',y='') +
+  theme_minimal() + 
+  theme(
+    panel.background=element_rect(fill="white", colour="white"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.position = "bottom") +
+  theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
+
+fig4_compiled <- plot_grid(
+  #top
+  plot_grid(
+    #A
+    plot_grid(
+      NULL,
+      in_vitro_killing, 
+      ncol=1,
+      rel_heights=c(0.3, 0.7)),
+    #B
+    plot_grid(
+      NULL,
+      cytokines,
+      ncol=1, 
+      rel_heights=c(0.3,0.7)
+    ),
+  ncol=2, rel_widths=c(0.6,0.4), labels=c('A','B')),
+  in_vivo_tumor_growth,
+  ncol=1, rel_heights=c(0.65,0.35))
+
+ggsave(here::here('..','figs','compiled','fig4.pdf'), fig4_compiled, height=10, width=11, useDingbats=FALSE)
+
+
+```
+

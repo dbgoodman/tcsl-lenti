@@ -381,13 +381,20 @@ get_cluster_pct_plot <- function(this_subset, cluster_col_name) {
 
 get_cluster_enrich_plot <- function(
   this_subset, cluster_col_name, max_log2_enrich=2, hide=c('KLRG1','Untransduced'),
-  bar_cutoff=0.03, reorder=T, na.rm=T, facet_formula=formula(k_type+t_type~car)) {
-
+  bar_cutoff=0.03, reorder=T, na.rm=T, facet_formula=formula(k_type+t_type~car),
+  color_by_donor=F) {
+  
+  if (color_by_donor) {
+    by_vars <- c('car', 'CD4v8', 'k_type','donor')
+  } else {
+    by_vars <- c('car', 'CD4v8', 'k_type')
+  }
+    
   enrich_data <- data.table(this_subset@meta.data)[
     CD4v8 != 'intermediate' & !(car %in% hide) , .N, 
     by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
       list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
-      by=c('car', 'CD4v8', 'k_type')][,
+      by=by_vars][,
         rel_frac := log2(frac/mean(frac)), by=c('CD4v8','k_type','cluster')]
   
   if (na.rm==T) {
@@ -1343,7 +1350,7 @@ heatmap_clust_v_genes <- function(
   
   feature_dt <- unique(melt(
     data.table(cbind(t(slot_data[kept_features,]), seurat_obj@meta.data)), 
-    measure.vars=features, variable.name='gene')[,
+    measure.vars=kept_features, variable.name='gene')[,
       `:=`(pct_exp_global=sum(value > 0)/.N, mean_exp_global=mean(value[value > 0])), by=c('CD4v8','gene')][,
         list(pct_exp=(sum(value > 0)/.N), mean_exp_fldch=log2(mean(value[value > 0])/mean_exp_global)), 
         by=c(split_name,'gene')])

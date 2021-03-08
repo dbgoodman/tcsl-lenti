@@ -18,7 +18,8 @@ require(RColorBrewer)
 parent_folder = here::here('..')
 #flow.dt <- fread("/Users/camilliaazimi/Box\ Sync/tcsl/flow/TCSL105\ ALL\ FILES/Cytokines/tcsl105cytokines.csv")
 
-cytokine_fn <- file.path(parent_folder,"Cytokines/tcsl105cytokines.csv")
+cytokine_fn <- "~/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/tcsl105_cytokines.csv"
+
 flow.dt <- fread(cytokine_fn)
 #getting rid of outliers with the next line
 flow.dt <- flow.dt[outlier == FALSE]
@@ -159,3 +160,4 @@ ggplot(flow.means.dt[k562 == '+' & donor == 2]) +
   theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
 ```
 
+```{r}

@@ -1,0 +1,293 @@
+---
+title: "fig3_complied.Rmd"
+output:
+  html_document:
+    code_folding: hide
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, 
+  output_dir = here::here('..','html','pooled'))})
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table)
+library(ggplot2)
+library(knitr)
+library(ggrepel)
+library(RColorBrewer)
+library(DESeq2)
+#library(rnaseqGene)
+library(plotly)
+library(Rtsne)
+library(scales)
+library(dplyr)
+library(grid)
+
+rm(list = ls())
+
+setDTthreads(8)
+
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
+
+# set this to true to re-run, else will load from s3
+rerun_deseq <- F
+
+# arrayed list of CARs
+array.list <- c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')
+
+# load colors
+source(here::here('r','fig_colors.R'))
+
+load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+load(file=file.path(data.output.dir, 'ctv_plot_data.Rdata'))
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Fig 3 PCA
+
+```{r}
+cast_metrics <- dcast(
+  total_combined, CAR.align ~ group + assay + k.type + t.type + comparison, 
+  value.var='value.scale')
+
+combined_pca <- prcomp(cast_metrics[,-1])
+
+# calculate pca stats
+pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+    PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+    sd = combined_pca$sdev, 
+    var = combined_pca$sdev^2, 
+    var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+    var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+
+melt.pca.dt <- melt(
+  pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+
+pca.stats.plot <- ggplot(melt.pca.dt) +
+  geom_line(aes(x = pc, y = value, color = metric)) +
+  geom_point(aes(x = pc, y = value, color = metric)) +
+  scale_x_continuous(limits = c(1, NA)) +
+  labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+       x = "Principal Component", y = "Fraction of Variance") +
+  theme_bw()
+
+# project data onto principal components
+projected.metrics <- scale(cast_metrics[, setdiff(names(cast_metrics), 
+  c("CAR.align")), with = FALSE],
+  combined_pca$center, combined_pca$scale) %*% combined_pca$rotation
+
+projected.metrics <- cbind.data.frame(CAR.align=cast_metrics[, CAR.align],
+  projected.metrics)
+
+projected.metrics <- data.table(merge(projected.metrics, 
+  unique(read.counts[, .(CAR.align, len)]), 
+  by = "CAR.align"))
+
+projected.metrics[CAR.align == '4-1BB', CAR.align := '41BB']
+projected.metrics[, CAR.annot := 'none']
+projected.metrics[CAR.align %in% names(car_colors), CAR.annot := CAR.align]
+projected.metrics[, CAR.annot := factor(
+  CAR.annot, levels=c(names(car_colors)[1:7], 'none'))]
+
+pca.pos.sort.group.plot <- ggplot(projected.metrics,
+    aes(x = PC1, y = PC2, label = CAR.align, 
+      size=(CAR.align %in% names(car_colors)), 
+      color=CAR.annot)) +
+  geom_point() +
+  geom_text_repel(data=projected.metrics[CAR.annot != 'none'],
+    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+  scale_size_discrete(guide=F) +
+  scale_color_manual('',
+    labels=c(names(car_colors)[1:7], 'other costims'),
+    values=c(car_colors[1:7], 'grey')) +
+  labs(title = 'PCA Using CD19+ Sort Group Bins') +
+  theme_bw() +
+  labs(title='') +
+  theme(axis.text = element_blank())
+
+
+ggsave(here::here('..','figs','new_pca.pdf'), pca.pos.sort.group.plot,
+       height=4, width=5, useDingbats=FALSE)
+
+pca.pos.sort.group.plot
+```
+
+## Fig 3 Abund over time
+
+```{r, echo=FALSE}
+
+car.abund.order <- c('CD28','4-1BB','BAFF-R','TACI','CD40','TNR8','KLRG1')
+
+car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
+          list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
+
+read.counts <- read.counts[car.abund.set, on=.(donor, CAR.align, t.type)]
+
+read.counts[, car.abund.rel.baseline := car.abund/car.abund.baseline,
+            by=.(donor, t.type, batch)]
+
+read.counts[assay == 'baseline',
+            car.abund.rel.baseline := 1,
+            by=.(batch, donor, t.type, CAR.align)]
+
+car.abund.data <- rbind(
+  read.counts[k.type == 'pos' & batch != 'post-cytof'], 
+  copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'pos'])[k.type != 'NA'][
+    CAR.align %in% array.list]
+
+car.abund.data[, CAR.align.ord := factor(CAR.align, levels=car.abund.order)]
+
+car.abund.plot <- ggplot(car.abund.data,
+    aes(
+      x=day, y=log2(car.abund.rel.baseline),
+      color= interaction(t.type), group= interaction(k.type, t.type, batch, donor))) + 
+  geom_vline(xintercept=-Inf) +
+  geom_hline(yintercept=-Inf) +
+  geom_line() + 
+  geom_point() +
+  scale_x_continuous(breaks=c(0,6,12,18,24), limits=c(0,24.5)) +
+  scale_color_manual('', values=brewer.pal(9, 'YlOrRd')[c(4,6)]) +
+  facet_wrap(~CAR.align.ord, ncol=8) + scale_linetype_manual(values=c(2,1)) +
+  labs(x='Timepoint (days)', y='Relative Proliferation, log2 FC') + 
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_minimal() +
+  theme(
+    legend.position='bottom',
+    strip.background=element_rect(linetype=1, color='white', size=3),
+    strip.text = element_text(color='white',face='bold'),
+    plot.margin = unit(c(.08,.01,.005,.1), "npc"))
+
+g <- ggplot_gtable(ggplot_build(car.abund.plot))
+strip_both <- which(grepl('strip-', g$layout$name))
+fills <- car_colors[c(car.abund.order[1], '41BB', car.abund.order[3:7])]
+k <- 1
+for (i in strip_both) {
+  j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+  g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[k]
+  #g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$col <- fills[k]
+  k <- k+1
+}
+
+abund_plot <- grid.draw(g)
+
+fig3_ab <- plot_grid(pca.pos.sort.group.plot + theme(legend.position='none'), g, 
+    rel_widths=c(1,3), ncol=2, labels=c('A','B'))
+```
+
+### CTV Traces
+
+```{r}
+  
+ctv_gated_means_subset <- ctv_gated_means_dt[variable=='ctv2_t' & k562 == 'cd19+']
+
+ctv_gated_means_donormerge_dt <- ctv_gated_means_subset[, `:=`(
+  value_rel_day_mean= mean(value_rel_day, na.rm=T),
+  value_rel_day_sd= sd(value_rel_day)),
+  by=c('k562','day','car','variable','t_type')]
+
+ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable %in% c('ctv2_t') & k562 == 'cd19+']
+
+max_val <- ctv_gated_means_donormerge_subset[, max(abs(value_rel_day_mean[car != 'KLRG1']))]
+ctv_gated_means_donormerge_subset[abs(value_rel_day_mean) > max_val, value_rel_day_mean := max_val * sign(value_rel_day_mean)]
+ctv_gated_means_donormerge_subset[, t_type := factor(t_type, labels=c('CD4','CD8'))]
+
+proliferation_tiles <- ggplot(ctv_gated_means_donormerge_subset,
+    aes(fill=0-value_rel_day_mean, y=factor(car, levels=rev(car_order)), x=day)) + 
+  geom_tile(color='white') + 
+  facet_grid(. ~ t_type) + 
+  scale_fill_viridis_c(
+    'Relative Proliferation (-ΔMFI)\n(mean of 2 donors)',
+    limits = c(-1,1)*max_val,
+    breaks=c(300, 150, 0, -150, -300),
+    labels=c(300,150,0,-150, '≤-300'),
+    na.value = '#FFFFFF') + 
+  theme_minimal(base_size=12) + 
+  theme(
+    panel.background=element_rect(fill="white", colour="white"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.position = "bottom") +
+  scale_y_discrete('', expand=c(0,0)) + 
+  scale_x_discrete('', expand=c(0,0))
+
+proliferation_tiles
+```
+```{r}
+make_ridge_plot_panel <- function(df, var, show_line=F) {
+  
+  df[, car := factor(car, levels=car_order)]
+  
+  df_ct <- df[, .N, by=c(c('day','car','donor','k562'))]
+  
+  var_disp = toupper(gsub('(.*)_t','\\1',var))
+  
+  p <- ggplot(df[variable == var & value < 3200]) + 
+  geom_density_ridges(
+    aes(y=factor(car, levels=rev(car_order)), x=value, color=car, fill=car, height=..ndensity..), 
+    alpha=0.7, scale=1) +
+  facet_grid( ~ t_type + day, switch="both") +
+  xlim(c(600, NA)) +
+  theme_minimal() +
+  scale_fill_manual(values=rev(car_colors)) +
+  scale_y_discrete(expand=c(0.05,0.01)) +
+  scale_color_manual(values=rev(car_colors))
+
+  
+  if (show_line) {
+    p <- p + geom_vline(xintercept=df[[var]])
+  }
+       
+  return(p)
+}
+
+ctv_2_days <- make_ridge_plot_panel(
+  ctv_fig_subset_dt[k562=='cd19+' & donor == 2 & (
+      (t_type == 'cd8' & day %in% c('d3', 'd33'))
+      | (t_type == 'cd4' & day %in% c('d14', 'd33')))], 'ctv2_t') +
+    labs(x='CTV (AU)\n (Donor 2)', y= '') + 
+  theme(
+    legend.position='none',
+    panel.border=element_rect(color='black', fill=NA),
+    axis.text.x = element_blank())
+
+ctv_2_days
+
+traces_right <- plot_grid(proliferation_tiles, ctv_2_days, align = "h", axis = "bt", rel_widths = c(1.6, 1))
+
+traces_horiz <- plot_grid(proliferation_tiles+theme(legend.position = "top"), ctv_2_days, ncol=1, align = "v", axis = "lr", rel_widths = c(1, 1))
+
+```
+
+### CD4 CD40 Cumulative Growth
+```{r}
+
+cd4_cumulative_growth <- fread(file.path(here::here('..', 'data', 'cd4_cumulative_growth.csv')))
+
+car_expansion <- melt(cd4_cumulative_growth, measure.vars=c('41BB','BAFF-R','CD28','CD40','KLRG1','TACI','TNR8','zeta'))
+names(car_expansion)
+
+cd4_expansion_plot <- ggplot(car_expansion[
+        measure=='expansion' & variable %in% c('CD40','CD28','41BB')], 
+    aes(x=V1, y=value, color=variable, shape=factor(donor))) + 
+  geom_line(size=1) +
+  geom_point(size=3) +
+  scale_color_manual('Domain', values =car_colors) + 
+  scale_shape_discrete('Donor') +
+  theme_bw() + labs(x='Days in culture with K562 targets', y='Cumulative Fold Expansion', title='Cumulative CD4 T cell Expansion in culture')
+
+fig3_cde_vert <- plot_grid(traces_horiz, cd4_expansion_plot, labels=c('C','D'))
+
+fig3_cde <- plot_grid(proliferation_tiles, ctv_2_days + theme(axis.text.y=element_blank()), cd4_expansion_plot, align = "h", axis = "bt", rel_widths = c(0.8,0.8, 1), labels=c('C','D','E'), nrow=1)
+
+fig3_compiled <- plot_grid(fig3_ab, fig3_cde, nrow=2, ncol=1, rel_heights=c(1,1.2))
+
+ggsave(here::here('..','figs','compiled','fig3.pdf'), fig3_compiled, height=7, width=11, useDingbats=FALSE)
+```
+
