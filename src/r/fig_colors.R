@@ -8,6 +8,16 @@ reds <- brewer.pal(9,'PuRd') #klrg1
 purple <- brewer.pal(9,'Purples')[c(7)] #zeta
 grey <- 'grey30' #unt
 
+colors_light <- toupper(paste0('#',c("978dc6","75abd8","44d9fa","57f2de",
+                             "73f1c3","b9efb2","d7f1aa","f6f3a2","f7de9e","f7c898")))
+colors_mid <- toupper(paste0('#',c("54478c","2c699a","048ba8","0db39e",
+                           "16db93","83e377","b9e769","efea5a","f1c453","f29e4c")))
+colors_dark <- toupper(paste0('#',c("241f3d","132e44","023d4a","064f46",
+                            "096040","267f1a","587f15","85810d","85620b","81460a")))
+
+# CAR COLORS
+# --------------------------------------------------------------------------------------------------
+
 # new set
 grey <- 'grey10' #zeta
 purples <- brewer.pal(9, 'Purples')[c(5, 7)] #TNR8, CD40
@@ -37,7 +47,34 @@ show_colors <- function(car_colors, car_order) {
         scale_fill_manual(values=as.character(car_colors))
 }
 
-# other palettes
+# SCRNA SUBTYPE COLORS
+# --------------------------------------------------------------------------------------------------
+all_colors <- list(
+    'NAIVE-CD62L'=colors_mid[1],
+    'NAIVE-CD7'=colors_mid[2],
+    'STAT1-IRF1'=colors_mid[4],
+    'STIM-INACT'=colors_mid[4],
+    'STIM-TC2'=colors_dark[10],
+    'TH2'=colors_dark[10],
+    'STIM-UNTR'=colors_mid[3],
+    'MEM-CD29'=colors_light[3],
+    'STIM-IFNG'=colors_mid[6],
+    'STIM-GNLY'=colors_mid[8],
+    'STIM-OXPHOS'=colors_mid[9],
+    'STIM-GLYC'=colors_mid[10])
+
+# SCRNA PHASE COLORS
+# --------------------------------------------------------------------------------------------------
+
+phase_colors <- list(
+    'S'='#B27FBE',
+    'G1'='#6CA6DC',
+    'G2M'='#EF5F9A')
+
+
+# OTHER_PALETTES
+# --------------------------------------------------------------------------------------------------
+
 
 outlier_cols <- brewer.pal(11, 'PiYG')[c(2,11)]
 

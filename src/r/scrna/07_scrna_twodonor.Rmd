@@ -330,7 +330,6 @@ saveRDS(scrna.integrated,integrated.rds.file)
 ```{r}
 
 scrna.integrated <- subset(scrna.integrated, subset = (HTO_status %in% c('HighQual','MidQual')))
-hto_subset <- subset(scrna.integrated, cells=sample(Cells(scrna.integrated), 8000))
 
 t_out <- reassign_t_type(scrna.integrated, n_clust=3, plots)
 plots <- t_out$plot_obj
@@ -404,7 +403,8 @@ sample_subtype_map <- merge(integrated_metadata, original_metadata, by='rn', all
 scrna.integrated@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
 scrna.integrated@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
 
-DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5)
+DimPlot(scrna.integrated, reduction = 'wnn.umap', group.by = 'subtype_154',
+  label = TRUE, repel = TRUE, label.size = 2.5)
 ```
 
 ## Donor, T, and Stim amounts per cluster
@@ -429,10 +429,16 @@ Finally, ran UMAP creation for all subsets made HD5 seurat objects for each with
 Easiest way is to match based on most frequently assigned subtype. Do CD8 only first.
 
 ```{r}
+## CD8 ACT
+
 scrna_cd8 <- LoadH5Seurat(here::here(
   '..','..','scrnaseq_tcsl154',
   'rds',
   paste0('scrna.wnn.int.CD8.act_clust.clean.h5Seurat')))
+
+combined.integrated.data <- readRDS(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','combined.integrated.umap.data.rds'))
 
 int_cd8_subset <- subset(combined.integrated.data,
     cells=intersect(
@@ -441,13 +447,6 @@ int_cd8_subset <- subset(combined.integrated.data,
 
 scrna_cd8[['RNA']] <- int_cd8_subset@assays$RNA
 scrna_cd8[['ADT']] <- int_cd8_subset@assays$ADT
-
-## phase plots
-
-phase_plots <- (
-  FeaturePlot(scrna_cd8, features=c('G2M.Score'), min.cutoff=-2, max.cutoff=1)+
-  FeaturePlot(scrna_cd8, features=c('S.Score'), min.cutoff=-1.5, max.cutoff=1)+
-  DimPlot(scrna_cd8, group.by ='Phase'))
 
 cd8_metadata <- data.table(
   scrna_cd8@meta.data, keep.rownames=T)[,
@@ -463,10 +462,274 @@ original_metadata <- rbind(
       rn := gsub('(.*)-\\d','\\1',rn_154)]
 
 sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
-get_cluster_enrich_plot(scrna_cd8, 'seurat_clusters', hide='', facet_formula=formula(~car))
-
 scrna_cd8@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
 scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+#CD8 act annotated clusters
+cd8_act_cluster_annotations <- fread(text="
+seurat_clusters   Activation    Subtype
+0         ACT         STIM-GLYC
+1         ACT         STIM-GNLY
+2         ACT         STIM-OXPHOS
+3         ACT         STIM-OXPHOS
+4         ACT         STIM-IFNG
+5         INACT       INACT
+6         INACT       INACT
+7         ACT         STIM-GLYC
+8         INACT       INACT
+9         INACT       INACT
+10        ACT         STIM-TC2
+11        ACT         STIM-IFNG
+12        INACT       INACT
+13        ACT         STIM-OXPHOS
+14        ACT         STIM-TC2
+")
+
+cd8_act_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+addtl_metadata <- cd8_act_cluster_annotations[data.table(scrna_cd8@meta.data),
+  on=c('seurat_clusters')]
+
+scrna_cd8@meta.data$Activation <- addtl_metadata$Activation
+scrna_cd8@meta.data$Subtype <- addtl_metadata$Subtype
+scrna_cd8@meta.data$Subtype <- factor(scrna_cd8@meta.data$Subtype)
+
+### CD8 ALL
+
+scrna_cd8_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD8.all.clean.h5Seurat')))
+
+cd8_all_metadata <- data.table(
+  scrna_cd8_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+sample_subtype_map <- merge(cd8_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+get_cluster_enrich_plot(scrna_cd8_all, 'seurat_clusters', hide='', facet_formula=formula(k_type~car))
+
+scrna_cd8_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd8_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Subtype', 'Subtype')
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Activation', 'Activation')
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'seurat_clusters', 'cd8_act_clust')
+
+int_cd8_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd8_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd8_all[['RNA']] <- int_cd8_all_subset@assays$RNA
+scrna_cd8_all[['ADT']] <- int_cd8_all_subset@assays$ADT
+rm(int_cd8_all_subset)
+
+#CD8 all annotated cluters
+cd8_all_cluster_annotations <- fread(text="
+seurat_clusters Subtype Activation
+0   NAIVE-IL7R   INACT
+1   STIM-OXPHOS  ACT
+2   NAIVE-CD7   INACT
+3   STIM-GLYC    ACT
+4   NAIVE-CD7   INACT
+5   MEM-CD29    INACT
+6   STIM-GNLY    ACT
+7   MEM-CD29    ACT
+8   NAIVE-CD7   INACT
+9   STIM-UNTR    ACT
+10  STIM-INACT    INACT
+11  STIM-INACT    INACT
+12  MEM-CD29    INACT
+13  NAIVE-IL7R   INACT
+14  MEM-CD29   INACT
+15  MEM-CD29   INACT
+16  REMOVE  REMOVE
+17  STIM-UNTR    INACT
+18  NAIVE-CD7   INACT
+19  MEM-CD29    INACT
+20  NAIVE-IL7R   INACT
+21  NAIVE-IL7R   INACT
+22  MEM-CD29    INACT
+23  NAIVE-CD7  INACT
+24  MEM-CD29    INACT
+25  REMOVE  REMOVE
+27  REMOVE  REMOVE
+28  MEM-CD29    INACT
+29  REMOVE  REMOVE
+30  REMOVE  REMOVE
+31  REMOVE  REMOVE
+")
+
+cd8_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+
+addtl_metadata <- cd8_all_cluster_annotations[
+  data.table(scrna_cd8_all@meta.data), on=c('seurat_clusters')]
+
+setnames(addtl_metadata,
+  c('i.Activation','Activation','i.Subtype','Subtype'),
+  c('Activation.act','Activation.inact','Subtype.act','Subtype.inact'))
+
+# save inact subtypes and activation status to start
+addtl_metadata[, Subtype := Subtype.inact]
+addtl_metadata[, Activation := Activation.inact]
+
+# if old subtype is missing or old subtype is 'INACT', then use new subtype
+addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
+  Subtype := Subtype.act]
+addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
+  Activation := Activation.act]
+addtl_metadata[Subtype.act == 'INACT',
+  Subtype := Subtype.inact]
+
+
+scrna_cd8_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
+scrna_cd8_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
+
+# get_cluster_enrich_plot(subset(scrna_cd8_all, Subtype != 'REMOVE'),
+#   'Subtype', hide='K_only', facet_formula=formula(k_type~car))
+
+# expr <- FetchData(scrna_cd8_all, c('Subtype','car')); get_cluster_enrich_plot(scrna_cd8_all[, which(expr$car != 'K_only' & expr$car != 'CD30' & expr$Subtype != 'REMOVE')],
+#   'Subtype', facet_formula=formula(k_type~car))
+
+### All
+
+scrna_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.all.clean.h5Seurat')))
+
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Subtype', 'Subtype')
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Activation', 'Activation')
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'seurat_clusters', 'cd8_all_clust')
+
+int_cd8_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_all[['RNA']] <- int_cd8_all_subset@assays$RNA
+scrna_all[['ADT']] <- int_cd8_all_subset@assays$ADT
+
+## CD4 Act
+
+scrna_cd4 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.act_clust.clean.h5Seurat')))
+
+cd4_metadata <- data.table(
+  scrna_cd4@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+scrna_cd4@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+int_cd4_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4[['RNA']] <- int_cd4_subset@assays$RNA
+scrna_cd4[['ADT']] <- int_cd4_subset@assays$ADT
+
+rm(int_cd4_subset)
+
+## CD4 all
+
+scrna_cd4_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.clean.h5Seurat')))
+
+cd4_all_metadata <- data.table(
+  scrna_cd4_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd4_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4_all@meta.data[,'act_clust_154'] <- factor(NA, levels=levels(sample_subtype_map$act_clusters))
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$act_clust_154 <- sample_subtype_map$act_clusters
+
+int_cd4_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4_all[['RNA']] <- int_cd4_all_subset@assays$RNA
+scrna_cd4_all[['ADT']] <- int_cd4_all_subset@assays$ADT
+
+rm(int_cd4_all_subset)
+
+#CD4 all annotated cluters
+cd4_all_cluster_annotations <- fread(text="
+seurat_clusters Subtype Activation
+1   NAIVE-IL7R  INACT
+2   STAT1-IRF1  MIXED
+3   STIM-OXPHOS ACT
+4   MEM-CD29   INACT
+5   STIM-GLYC   ACT
+6   NAIVE-IL7R  INACT
+7   STIM-IFNG   ACT
+8   STIM-OXPHOS ACT
+9   MEM-CD29   INACT
+10  STAT1-IRF1  MIXED
+11  NAIVE-IL7R  INACT
+12  MEM-CD29    INACT
+13  STIM-OXPHOS ACT
+14  MEM-CD29   INACT
+15  STAT1-IRF1  MIXED
+16  STAT1-IRF1  MIXED
+17  STAT1-IRF1  MIXED
+18  MEM-CD29    INACT
+19  TH2 MIXED
+20  MEM-CD29    INACT
+21  MEM-CD29    INACT
+22  STIM-IFNG   ACT
+23  REMOVE  REMOVE
+24  REMOVE  REMOVE
+25  STIM-UNTR   INACT
+26  MEM-CD29    INACT
+27  REMOVE  REMOVE
+28  REMOVE  REMOVE
+29  REMOVE  REMOVE
+30  MEM-CD29    INACT
+")
+
+cd4_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+
+addtl_metadata <- cd4_all_cluster_annotations[
+  data.table(scrna_cd4_all@meta.data), on=c('seurat_clusters')]
+
+scrna_cd4_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
+scrna_cd4_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
+
+```
+
+
+```{r}
+## phase plots
+
+phase_plots <- (
+  FeaturePlot(scrna_cd8, features=c('G2M.Score'), min.cutoff=-2, max.cutoff=1)+
+  FeaturePlot(scrna_cd8, features=c('S.Score'), min.cutoff=-1.5, max.cutoff=1)+
+  DimPlot(scrna_cd8, group.by ='Phase'))
+
+get_cluster_enrich_plot(scrna_cd8, 'seurat_clusters', hide='', facet_formula=formula(~car))
 
 DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) +
   DimPlot(scrna_cd8, reduction = 'wnn.umap', group.by = 'seurat_clusters', label = TRUE, repel = TRUE, label.size = 2.5)
@@ -490,19 +753,20 @@ ggplot(data.table(scrna_cd8@meta.data)[,
 
 # Genes from IRF cluster in Fig 7b of Shieh et al 2020 
 
-scrna_cd8 <- AddModuleScore(scrna_cd8, features=list('1'=c(
-  'CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB',  
-  'GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3',
-  'NKG7','STMN1')),name='Sheih_et_al_IRF')
-
 #oxphos hallmark set
 oxphos_genes <- c('ABCB7', 'ACAA1', 'ACAA2', 'ACADM', 'ACADSB', 'ACADVL', 'ACAT1', 'ACO2', 'AFG3L2', 'AIFM1', 'ALAS1', 'ALDH6A1', 'ATP1B1', 'ATP5F1A', 'ATP5F1B', 'ATP5F1C', 'ATP5F1D', 'ATP5F1E', 'ATP5MC1', 'ATP5MC2', 'ATP5MC3', 'ATP5ME', 'ATP5MF', 'ATP5MG', 'ATP5PB', 'ATP5PD', 'ATP5PF', 'ATP5PO', 'ATP6AP1', 'ATP6V0B', 'ATP6V0C', 'ATP6V0E1', 'ATP6V1C1', 'ATP6V1D', 'ATP6V1E1', 'ATP6V1F', 'ATP6V1G1', 'ATP6V1H', 'BAX', 'BCKDHA', 'BDH2', 'CASP7', 'COX10', 'COX11', 'COX15', 'COX17', 'COX4I1', 'COX5A', 'COX5B', 'COX6A1', 'COX6B1', 'COX6C', 'COX7A2', 'COX7A2L', 'COX7B', 'COX7C', 'COX8A', 'CPT1A', 'CS', 'CYB5A', 'CYB5R3', 'CYC1', 'CYCS', 'DECR1', 'DLAT', 'DLD', 'DLST', 'ECH1', 'ECHS1', 'ECI1', 'ETFA', 'ETFB', 'ETFDH', 'FDX1', 'FH', 'FXN', 'GLUD1', 'GOT2', 'GPI', 'GPX4', 'GRPEL1', 'HADHA', 'HADHB', 'HCCS', 'HSD17B10', 'HSPA9', 'HTRA2', 'IDH1', 'IDH2', 'IDH3A', 'IDH3B', 'IDH3G', 'IMMT', 'ISCA1', 'ISCU', 'LDHA', 'LDHB', 'LRPPRC', 'MAOB', 'MDH1', 'MDH2', 'MFN2', 'MGST3', 'MPC1', 'MRPL11', 'MRPL15', 'MRPL34', 'MRPL35', 'MRPS11', 'MRPS12', 'MRPS15', 'MRPS22', 'MRPS30', 'MTRF1', 'MTRR', 'MTX2', 'NDUFA1', 'NDUFA2', 'NDUFA3', 'NDUFA4', 'NDUFA5', 'NDUFA6', 'NDUFA7', 'NDUFA8', 'NDUFA9', 'NDUFAB1', 'NDUFB1', 'NDUFB2', 'NDUFB3', 'NDUFB4', 'NDUFB5', 'NDUFB6', 'NDUFB7', 'NDUFB8', 'NDUFC1', 'NDUFC2', 'NDUFS1', 'NDUFS2', 'NDUFS3', 'NDUFS4', 'NDUFS6', 'NDUFS7', 'NDUFS8', 'NDUFV1', 'NDUFV2', 'NNT', 'NQO2', 'OAT', 'OGDH', 'OPA1', 'OXA1L', 'PDHA1', 'PDHB', 'PDHX', 'PDK4', 'PDP1', 'PHB2', 'PHYH', 'PMPCA', 'POLR2F', 'POR', 'PRDX3', 'RETSAT', 'RHOT1', 'RHOT2', 'SDHA', 'SDHB', 'SDHC', 'SDHD', 'SLC25A11', 'SLC25A12', 'SLC25A20', 'SLC25A3', 'SLC25A4', 'SLC25A5', 'SLC25A6', 'SUCLA2', 'SUCLG1', 'SUPV3L1', 'SURF1', 'TCIRG1', 'TIMM10', 'TIMM13', 'TIMM17A', 'TIMM50', 'TIMM8B', 'TIMM9', 'TOMM22', 'TOMM70', 'UQCR10', 'UQCR11', 'UQCRB', 'UQCRC1', 'UQCRC2', 'UQCRFS1', 'UQCRH', 'UQCRQ', 'VDAC1', 'VDAC2', 'VDAC3')
 
 glycolysis_genes <- c('ABCB6', 'ADORA2B', 'AGL', 'AGRN', 'AK3', 'AK4', 'AKR1A1', 'ALDH7A1', 'ALDH9A1', 'ALDOA', 'ALDOB', 'ALG1', 'ANG', 'ANGPTL4', 'ANKZF1', 'ARPP19', 'ARTN', 'AURKA', 'B3GALT6', 'B3GAT1', 'B3GAT3', 'B3GNT3', 'B4GALT1', 'B4GALT2', 'B4GALT4', 'B4GALT7', 'BIK', 'BPNT1', 'CACNA1H', 'CAPN5', 'CASP6', 'CD44', 'CDK1', 'CENPA', 'CHPF', 'CHPF2', 'CHST1', 'CHST12', 'CHST2', 'CHST4', 'CHST6', 'CITED2', 'CLDN3', 'CLDN9', 'CLN6', 'COG2', 'COL5A1', 'COPB2', 'CTH', 'CXCR4', 'CYB5A', 'DCN', 'DDIT4', 'DEPDC1', 'DLD', 'DPYSL4', 'DSC2', 'ECD', 'EFNA3', 'EGFR', 'EGLN3', 'ELF3', 'ENO1', 'ENO2', 'ERO1A', 'EXT1', 'EXT2', 'FAM162A', 'FBP2', 'FKBP4', 'FUT8', 'G6PD', 'GAL3ST1', 'GALE', 'GALK1', 'GALK2', 'GAPDHS', 'GCLC', 'GFPT1', 'GLCE', 'GLRX', 'GMPPA', 'GMPPB', 'GNE', 'GNPDA1', 'GOT1', 'GOT2', 'GPC1', 'GPC3', 'GPC4', 'GPR87', 'GUSB', 'GYS1', 'GYS2', 'HAX1', 'HDLBP', 'HK2', 'HMMR', 'HOMER1', 'HS2ST1', 'HS6ST2', 'HSPA5', 'IDH1', 'IDUA', 'IER3', 'IGFBP3', 'IL13RA1', 'IRS2', 'ISG20', 'KDELR3', 'KIF20A', 'KIF2A', 'LCT', 'LDHA', 'LDHC', 'LHPP', 'LHX9', 'MDH1', 'MDH2', 'ME1', 'ME2', 'MED24', 'MERTK', 'MET', 'MIF', 'MIOX', 'MPI', 'MXI1', 'NANP', 'NASP', 'NDST3', 'NDUFV3', 'NOL3', 'NSDHL', 'NT5E', 'P4HA1', 'P4HA2', 'PAM', 'PAXIP1', 'PC', 'PDK3', 'PFKFB1', 'PFKP', 'PGAM1', 'PGAM2', 'PGK1', 'PGLS', 'PGM2', 'PHKA2', 'PKM', 'PKP2', 'PLOD1', 'PLOD2', 'PMM2', 'POLR3K', 'PPFIA4', 'PPIA', 'PPP2CB', 'PRPS1', 'PSMC4', 'PYGB', 'PYGL', 'QSOX1', 'RARS1', 'RBCK1', 'RPE', 'RRAGD', 'SAP30', 'SDC1', 'SDC2', 'SDC3', 'SDHC', 'SLC16A3', 'SLC25A10', 'SLC25A13', 'SLC35A3', 'SLC37A4', 'SOD1', 'SOX9', 'SPAG4', 'SRD5A3', 'STC1', 'STC2', 'STMN1', 'TALDO1', 'TFF3', 'TGFA', 'TGFBI', 'TKTL1', 'TPBG', 'TPI1', 'TPST1', 'TSTA3', 'TXN', 'UGP2', 'VCAN', 'VEGFA', 'VLDLR', 'XYLT2', 'ZNF292')
 
-scrna_cd8 <- AddModuleScore(scrna_cd8, assay='RNA', features=list('1'=oxphos_genes),name='hallmark_oxphos')
 
-oxphos_gene_clust <- heatmap_clust_v_genes(scrna_cd8, 'seurat_clusters', assay='RNA', features=oxphos_genes, use_pct=T, use_slot='data')$plot
+
+scrna_cd8 <- AddModuleScore(scrna_cd8, assay='RNA', features=list('1'=oxphos_genes),name='hallmark_oxphos')
+scrna_cd8 <- AddModuleScore(scrna_cd8, assay='RNA', features=list('1'=glycolysis_genes),name='hallmark_glycolysis')
+scrna_cd8 <- AddModuleScore(scrna_cd8, features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
+
+oxphos_gene_clust <- heatmap_clust_v_genes(
+  scrna_cd8, 'seurat_clusters', assay='RNA',
+  features=oxphos_genes, use_pct=T, use_slot='data')$plot
 
 ```
 
@@ -510,11 +774,16 @@ oxphos_gene_clust <- heatmap_clust_v_genes(scrna_cd8, 'seurat_clusters', assay='
 
 ```{r}
 
-  obj.avg <- AverageExpression(subset(
-    scrna_cd8, subset=(seurat_clusters %in% c(0:14))),
-    assay=c('SCT_INT','SCT_ADT_INT'), add.ident='donor', slot='scale.data')
+
+
+plot_cluster_pca <- function(seurat_obj, cluster_on='seurat_clusters',idents='donor') {
+  
+  obj.avg <- AverageExpression(seurat_obj,
+    assay=c('SCT_INT','SCT_ADT_INT'), add.ident=idents, slot='scale.data')
+  
   obj.avg <- t(rbind(obj.avg$SCT_ADT_INT, obj.avg$SCT_INT))
   obj.avg <- obj.avg[, apply(obj.avg,2,sd) > 0]
+  
   combined_pca <- prcomp(scale(obj.avg))
   
   # calculate pca stats
@@ -546,10 +815,16 @@ oxphos_gene_clust <- heatmap_clust_v_genes(scrna_cd8, 'seurat_clusters', assay='
     donor := unlist(data.table(projected.metrics)[,strsplit(cluster, '_')][2,])][,
     cluster := unlist(data.table(projected.metrics)[, strsplit(cluster, '_')][1,])][]
   
-  ggplot(
+  pca_plot <- ggplot(
     projected.metrics, aes(x=PC1, y=PC2, label=cluster, color=donor)) +
     geom_point() + 
     geom_text_repel()
+  
+  return(list(plot=pca_plot, metrics=projected.metrics, pca=pca.dt))
+}
+
+cd8_all_pca_plot <- plot_cluster_pca(subset(scrna_cd8_all, subset=(seurat_clusters != 29 & seurat_clusters != 26))
+
 ```
 
 ### Act_Clust Assignment:
@@ -565,31 +840,7 @@ oxphos_gene_clust <- heatmap_clust_v_genes(scrna_cd8, 'seurat_clusters', assay='
 # INACT 5 6 8 9 12
 # REMOVE 15 16 17
 
-#CD8 old annotated cluters
-cd8_act_cluster_annotations <- fread(text="
-seurat_clusters   Activation    Subtype
-0         ACT         ACT-GLYC
-1         ACT         ACT-GNLY
-2         ACT         ACT-OXPHOS
-3         ACT         ACT-OXPHOS
-4         ACT         ACT-IFNG
-5         INACT       INACT
-6         INACT       INACT
-7         ACT         ACT-GLYC
-8         INACT       INACT
-9         INACT       INACT
-10        ACT         ACT-TC2
-11        ACT         ACT-IFNG
-12        INACT       INACT
-13        ACT         ACT-OXPHOS
-14        ACT         ACT-TC2
-")
 
-cd8_act_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
-addtl_metadata <- cd8_act_cluster_annotations[data.table(scrna_cd8@meta.data), on=c('seurat_clusters')]
-scrna_cd8@meta.data$Activation <- addtl_metadata$Activation
-scrna_cd8@meta.data$Subtype <- addtl_metadata$Subtype
-scrna_cd8@meta.data$Subtype <- factor(scrna_cd8@meta.data$Subtype)
 
 cluster_cols = c(
   'ACT-GLYC'=brewer.pal(9,'OrRd')[8],
@@ -602,8 +853,8 @@ cluster_cols = c(
   'REST-TCM'=brewer.pal(9,'YlGn')[6],
   'REST-CXCR3'=brewer.pal(9,'YlGn')[3])
 
-cluster_name <- 'Subtype'
-car_clust_pct <- data.table(scrna_cd8@meta.data)[
+cluster_name <- 'Subty[e'
+car_clust_pct <- data.table(scrna_cd8@meta.data[donor == 'TCSL154'])[
   as.numeric(get(cluster_name)) %in% c(0:12,14), .N, 
   by=c('car',cluster_name)][, 
     pct_car := N/sum(N), by='car'][,
@@ -620,7 +871,15 @@ cd8_act_enrich_plot <- ggplot(car_clust_pct) +
     x=get(cluster_name),
     y=factor(car, c("CD28","4-1BB","BAFF-R","TACI","CD40","CD30","TNR8","Zeta","KLRG1","Untransduced")),
     fill=log2_ce_trunc, size=pct_car), pch=21, color='black') + 
-  scale_fill_distiller(palette='PRGn', direction=1, limits=c(-1,1), na.value = brewer.pal(9,'PRGn')[1]) + scale_size(range=c(1,10)) + theme_minimal()
+  scale_fill_distiller(
+    palette='PRGn',
+    direction=1,
+    limits=c(-1,1),
+    na.value = brewer.pal(9,'PRGn')[1]) + 
+  scale_size(range=c(1,10)) +
+  theme_minimal()
+
+
 ```
 
 ### CD8 Gene Set Plots
@@ -642,7 +901,7 @@ oxphos_diffs <- diff_genes_in_clusts(scrna_cd8, c(2,3,13), c(0,1,4,6,10,11,14), 
 message(print(paste(gsub('.adt','', diffs$diff_genes[avg_log2FC > 0 & -log(p_val_adj) > 50]$rn),collapse='\n')))
 
 # gnly vs ifng/glyc/oxphos
-gnly_diffs <- diff_genes_in_clusts(scrna_cd8, c(1), c(0,2,3,4,10,11,13,14), label_top_rna=50)
+gnly_diffs <- ≈
 message(print(paste(gsub('.adt','', diffs$diff_genes[avg_log2FC > 0 & -log(p_val_adj) > 50]$rn),collapse='\n')))
 
 
@@ -696,7 +955,6 @@ plot_grid(clust_mapping_154$plot_a_in_b, clust_mapping_154$plot_b_in_a)
 clust_mapping_154 <- compare_clusters(scrna_cd8_all, 'Subtype', 'seurat_clusters')
 plot_grid(clust_mapping_154$plot_a_in_b, clust_mapping_154$plot_b_in_a)
 
-
 ggplot(data.table(scrna_cd8_all@meta.data)[car != 'K_only',
     list(N=.N, seurat_clusters), by=c('donor','car','k_type')][, 
       pct := .N/N, by=c('donor','car','seurat_clusters','k_type')]) + 
@@ -706,9 +964,38 @@ ggplot(data.table(scrna_cd8_all@meta.data)[car != 'K_only',
 
 ```
 
-#### Clust Act Plots
+#### Clust Assignment Act Plots
 
 ```{r}
+
+#mapping to old clusts:
+cd8_all_old_map <- compare_clusters(scrna_cd8_all, 'seurat_clusters', 'subtype_154')
+
+# best subtypes per cluster
+cd8_all_old_map$clust_co_counts[subtype_154==best_b_in_a, list(seurat_clusters, subtype_154, pct_b_in_a, pct_a_in_b)][order(subtype_154)]
+# best clusters per subtype
+cd8_all_old_map$clust_co_counts[best_a_in_b==seurat_clusters, list(seurat_clusters, subtype_154, pct_b_in_a, pct_a_in_b)][order(subtype_154)]
+#---
+  
+#mapping to new clusts:
+cd8_all_new_map <- compare_clusters(scrna_cd8_all, 'seurat_clusters', 'Subtype')
+
+# best subtypes per cluster
+cd8_all_new_map$clust_co_counts[Subtype==best_b_in_a, list(seurat_clusters, Subtype, pct_b_in_a, pct_a_in_b)][order(Subtype)]
+# best clusters per subtype
+cd8_all_new_map$clust_co_counts[best_a_in_b==seurat_clusters, list(seurat_clusters, Subtype, pct_b_in_a, pct_a_in_b)][order(Subtype)]
+
+#cd8 inact cluster adt markers
+heatmap_clust_v_genes(subset(scrna_cd8_all, seurat_clusters %in% c(0,2,4,8,13,20,21,18,5,12,14,15)), 'seurat_clusters', assay='SCT_ADT_INT', features=rownames(scrna_cd8_all@assays$SCT_ADT_INT)[-2], use_slot='scale.data')
+
+#module scores
+scrna_cd8_all <- AddModuleScore(scrna_cd8_all, assay='RNA', features=list('1'=oxphos_genes),name='hallmark_oxphos')
+scrna_cd8_all <- AddModuleScore(scrna_cd8_all, assay='RNA', features=list('1'=glycolysis_genes),name='hallmark_glycolysis')
+scrna_cd8_all <- AddModuleScore(scrna_cd8_all, features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
+
+
+  
+```
 
 ### FC Activation plots
 ```{r}
@@ -732,6 +1019,101 @@ ggplot(scrna_dt[!is.na(Subtype)]) +
     axis.text=element_blank(),
     axis.ticks=element_blank(), panel.grid=element_blank())
 ```
+
+
+### CD8 inact cluster assignment
+```{r}
+
+# this took about 1.5 hrs:
+
+# cd8_inact_var_features <- FindAllMarkers(subset(scrna_cd8_all, seurat_clusters %in% c(0,2,4,8,13,20,21,18,5,12,14,15)), assay='SCT_INT')
+# 
+# saveRDS(cd8_inact_var_features, here::here(
+#   '..','..','scrnaseq_tcsl154',
+#   'rds','scrna.wnn.int.CD8.all.inact_var_features.rds'))
+
+cd8_inact_var_features <- readRDS(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.CD8.all.inact_var_features.rds')))
+
+cd8_inact_var_plot <- heatmap_clust_v_genes(subset(scrna_cd8_all, seurat_clusters %in% c(0,2,4,8,13,20,21,18,5,12,14,15)), 'seurat_clusters', assay='SCT_INT', features=unique(data.table(cd8_inact_var_features)[, .SD[c(order(-avg_log2FC)[1:20])], by='cluster']$gene), use_slot='scale.data')
+```
+
+### TICA data
+
+```{r}
+#wget https://zenodo.org/record/4263972/files/TICAtlas_downsampled_1000.h5ad?download=1
+#mv TICAtlas_downsampled_1000.h5ad\?download\=1 TICAtlas_downsampled_1000.h5ad
+library(SeuratDisk)
+Convert(here::here('..','data','TICAtlas_downsampled_1000.h5ad'), dest = "h5seurat", overwrite = TRUE)
+scrna_TICAtlas <- LoadH5Seurat(here::here('..','data','TICAtlas_downsampled_1000.h5seurat'))
+Idents(scrna_TICAtlas) <- scrna_TICAtlas@meta.data$cell_type
+t_cell_types <- unique(grep('T cell', scrna_TICAtlas@meta.data$cell_type, value=T))
+scrna_TICAtlas_t <- FindVariableFeatures(subset(scrna_TICAtlas, cell_type %in% t_cell_types))
+
+TICA_markers <- data.table(
+  FindAllMarkers(scrna_TICAtlas_t, 
+  features=rownames(scrna_TICAtlas@assays$RNA@data), only.positive=T))
+
+TICA_modules <- list()
+
+for (cluster_i in levels(TICA_markers$cluster)) {
+  TICA_modules[[cluster_i]] <- TICA_markers[cluster==cluster_i]$gene
+}
+
+scrna_cd8_all <- AddModuleScore(scrna_cd8_all, features=TICA_modules,name='TICA.')
+```
+
+### SingleR
+
+```{r}
+
+# withr::with_makevars(
+#   new=c(CXX14 = "g++", CXX14FLAGS= "-g -O3 $(LTO)",
+#   CXX14PICFLAGS = "-fpic", CXX14STD = "-std=gnu++14"),
+#   code= {
+#     BiocManager::install(c('SingleR','celldex'))
+#   })
+
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("SingleR", version = "devel")
+# install.packages("remotes")
+# remotes::install_github("LTLA/celldex")
+
+library(celldex)
+ref <- MonacoImmuneData()
+ref <- ref[, grep('T cell',ref$label.fine)]
+library(SingleR)
+pred.hesc <- SingleR(test = as.SingleCellExperiment(scrna_cd8_all), ref = ref, assay.type.test=1,
+    labels = ref$label.fine)
+scrna_cd8_all[["SingleR.labels"]] <- pred.hesc$labels
+
+
+#combine 2 & 4, 3 & 29, 1 is now IL7R
+
+```
+
+### CD4 Loading
+
+```{r}
+
+#metadata and old mapping
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+#load combined integrated if not already loaded
+if (!('combined.integrated.data' %in% ls())) {
+  combined.integrated.data <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','combined.integrated.umap.data.rds'))
+}
+
+
+
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Subtype', 'Subtype')
+
+scrn
 
 
 ```
@@ -769,4 +1151,170 @@ plot_grid(
   DimPlot(scrna_cd4, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) +
     DimPlot(scrna_cd4, reduction = 'wnn.umap', group.by = 'seurat_clusters', label = TRUE, repel = TRUE, label.size = 2.5),
   ncol=1)
+
+
+int_cd4_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4[['RNA']] <- int_cd4_subset@assays$RNA
+scrna_cd4[['ADT']] <- int_cd4_subset@assays$ADT
+
+## CD4 all
+
+scrna_cd4_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.clean.h5Seurat')))
+
+cd4_all_metadata <- data.table(
+  scrna_cd4_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd4_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4_all@meta.data[,'act_clust_154'] <- factor(NA, levels=levels(sample_subtype_map$act_clusters))
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$act_clust_154 <- sample_subtype_map$act_clusters
+
+
+plot_grid(
+  get_cluster_enrich_plot(scrna_cd4_all, 'seurat_clusters', hide='K_only', facet_formula=formula(k_type~car), bar_cutoff=0.01)$plot,
+  DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) +
+    DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 'seurat_clusters', label = TRUE, repel = TRUE, label.size = 2.5),
+  ncol=1)
+
+
+int_cd4_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4_all[['RNA']] <- int_cd4_all_subset@assays$RNA
+scrna_cd4_all[['ADT']] <- int_cd4_all_subset@assays$ADT
+
+scrna_all_plots <- (
+   DimPlot(scrna_cd4_all, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5) + 
+     NoLegend() +
+   DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 't_type', label = TRUE, repel = TRUE, label.size = 2.5) + 
+     NoLegend() +
+   DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 'k_type', label = TRUE, repel = TRUE, label.size = 2.5) +
+     NoLegend() +
+   DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 'Phase', label = TRUE, repel = TRUE, label.size = 2.5) + 
+     NoLegend() +
+   DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 'donor', label = TRUE, repel = TRUE, label.size = 2.5) + 
+     NoLegend() +
+   DimPlot(scrna_cd4_all, reduction = 'wnn.umap', group.by = 'car', label = TRUE, repel = TRUE, label.size = 2.5) + 
+     NoLegend() + 
+   DimPlot(subset(crna_cd4_all, !is.na(subtype_154))), reduction = 'wnn.umap', group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) + 
+     NoLegend())
+
+
+scrna_cd4_all <- AddModuleScore(scrna_cd4_all, features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core')
+scrna_cd4_all <- AddModuleScore(scrna_cd4_all, features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
+scrna_cd4_all <- AddModuleScore(scrna_cd4_all, assay='RNA', features=list('1'=glycolysis_genes),name='hallmark_glyolysis')
+scrna_cd4_all <- AddModuleScore(scrna_cd4_all, assay='RNA', features=list('1'=oxphos_genes),name='hallmark_oxphos')
+
+cd4_interesting_features=c(
+  'ANXA1','CXCR3','CD2','BIRC3','HOPX','CD74','CCL5','ITGB1','IFNG',
+  'PFN1','GZMB','GZMK','HSPE1','SRM','IL2RA','BATF3','C1QBP','FABP5',
+  'IL13','IL5','GATA3','FAM162A','BNIP3','BNIP3L','HILPDA','LDHA',
+  'NAMPT','PGK1','ARG2','MT2A');
+
+cd4_adt_features = c(
+  'CD7.adt','CD62L.adt','IL7R.adt','CD29.adt','CD27.adt','CD28.adt',
+  'CD45RA.adt','CD45.RO.adt','IL2RA.adt','Tim3.adt','OX40.adt','LAG3.adt')
+
+FeaturePlot(scrna_cd4_all, features=cd4_adt_features)
+
+# CD4 All SingleR
+
+library(celldex)
+ref <- MonacoImmuneData()
+ref <- ref[, grep('T cell',ref$label.fine)]
+library(SingleR)
+pred.hesc <- SingleR(test = as.SingleCellExperiment(scrna_cd4_all), ref = ref, assay.type.test=1,
+    labels = ref$label.fine)
+scrna_cd4_all[["SingleR.labels"]] <- pred.hesc$labels
+
+cd4_avgs <- AverageExpression(
+  scrna_cd4_all, assays=c('SCT_ADT_INT','SCT_INT'),
+  group.by='seurat_clusters')
+
+dist <- dist(t(rbind(cd4_avgs$SCT_ADT_INT, cd4_avgs$SCT_INT)[,c(0:8,10:19,21:28)]), diag=TRUE)
+hc <- hclust(dist)
+plot(hc)
+
+# CD4 umap plot
+cd4_all_rna_umap <- umap_plot(scrna_cd4_all, assay='SCT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
+cd4_all_adt_umap <- umap_plot(scrna_cd4_all, assay='SCT_ADT_INT', cluster_name='seurat_clusters', reduction='wnn.umap')
+
+# adt maps for cd4_all
+
+#http://www.gsea-msigdb.org/gsea/msigdb/download_geneset.jsp?geneSetName=HALLMARK_PI3K_AKT_MTOR_SIGNALING&fileType=txt
+# copy pathways from one to another:
+# for (pathway in gsub('.$','',grep('1$',names(scrna_cd4_all@meta.data), value=T))) AddModuleScore(scrna_all, features=list('1'=get_geneset(pathway)), name=pathway)
+#map from cd4_all to all
+
+#gsea subsets
+gsea_subsets <- c(
+  "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+  "KEGG_MTOR_SIGNALING_PATHWAY",
+  "HALLMARK_MTORC1_SIGNALING",
+  "BIOCARTA_NFKB_PATHWAY",
+  "GILMORE_CORE_NFKB_PATHWAY",
+  "HALLMARK_GLYCOLYSIS",
+  "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+  "HALLMARK_IL6_JAK_STAT3_SIGNALING",
+  "HALLMARK_MYC_TARGETS_V2",
+  "GSE23321_CD8_STEM_CELL_MEMORY_VS_CENTRAL_MEMORY_CD8_TCELL_DN",
+  "GSE23321_CD8_STEM_CELL_MEMORY_VS_CENTRAL_MEMORY_CD8_TCELL_UP",
+  "GSE23321_CENTRAL_MEMORY_VS_NAIVE_CD8_TCELL_DN",
+  "GSE23321_CENTRAL_MEMORY_VS_NAIVE_CD8_TCELL_UP",
+  "GSE23321_CENTRAL_VS_EFFECTOR_MEMORY_CD8_TCELL_DN",
+  "GSE23321_CENTRAL_VS_EFFECTOR_MEMORY_CD8_TCELL_UP",
+  "BIOCARTA_CD40_PATHWAY",
+  "BIOCARTA_41BB_PATHWAY",
+  "BIOCARTA_NFKB_PATHWAY",
+  "GO_LYMPHOCYTE_COSTIMULATION",
+  "FATTY_ACID_OXIDATION",
+  "HALLMARK_HYPOXIA",
+  "GO_NEGATIVE_REGULATION_OF_TYPE_I_INTERFERON_PRODUCTION",
+  "BIOCARTA_IFNG_PATHWAY",
+  "BIOCARTA_IFNA_PATHWAY"
+  )
+
+scrna_all <- map_geneset(scrna_all, gsea_subsets)
+scrna_all <- AddModuleScore(scrna_all, features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core')
+scrna_all <- AddModuleScore(scrna_all, features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
+
+
+
+
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'seurat_clusters', 'all_clust_cd4')
+cd4_154_clusters <- compare_clusters(scrna_all[, scrna_all[['t_type']]=='CD4'], 'seurat_clusters', 'subtype_154_cd4')
+cd4_154_clusters$clust_co_counts[, n_clust := sum(n_clust_car[!is.na(subtype_154_cd4)]), by=seurat_clusters]
+cd4_154_clusters$clust_co_counts[n_clust > 100 & subtype_154_cd4 == best_b_in_a]
+
+### sct scores for cd29 core etc
+# sct scores look better than raw rna (not scaled)
+scrna_cdr_all <- AddModuleScore(scrna_cdr_all, features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core_sct')
+scrna_cd8_all <- AddModuleScore(scrna_cd8_all, features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core_sct')
+plot_grid(
+  VlnPlot(scrna_cd4_all, features=c('Nicolet_et_al_CD29core_sct1'), group.by='car', y.max=5, pt.size=0) + geom_boxplot(width=0.1, fill="white"),
+  VlnPlot(scrna_cd8_all, features=c('Nicolet_et_al_CD29core_sct1'), group.by='car', y.max=5, pt.size=0) + geom_boxplot(width=0.1, fill="white"))
+plot_grid(
+  VlnPlot(scrna_cd4_all, features=c('Nicolet_et_al_CD29core_sct1'), group.by='Subtype', y.max=5, pt.size=0) + geom_boxplot(width=0.1, fill="white"),
+  VlnPlot(scrna_cd8_all, features=c('Nicolet_et_al_CD29core_sct1'), group.by='Subtype', y.max=5, pt.size=0) + geom_boxplot(width=0.1, fill="white"))
 ```

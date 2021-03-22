@@ -382,26 +382,28 @@ get_cluster_pct_plot <- function(this_subset, cluster_col_name) {
 get_cluster_enrich_plot <- function(
   this_subset, cluster_col_name, max_log2_enrich=2, hide=c('KLRG1','Untransduced'),
   bar_cutoff=0.03, reorder=T, na.rm=T, facet_formula=formula(k_type+t_type~car),
+  bar_position='stack',
+  by_vars=c('car', 'CD4v8', 'k_type'),
   color_by_donor=F) {
   
-  if (color_by_donor) {
-    by_vars <- c('car', 'CD4v8', 'k_type','donor')
-  } else {
-    by_vars <- c('car', 'CD4v8', 'k_type')
-  }
+  rhs <- formula.tools::rhs.vars(facet_formula)
+  
+  if (color_by_donor)
+    by_vars <- c(by_vars, donor)
     
   enrich_data <- data.table(this_subset@meta.data)[
     CD4v8 != 'intermediate' & !(car %in% hide) , .N, 
-    by=c('car', cluster_col_name, 'CD4v8', 'k_type')][,
+    by=c(by_vars, cluster_col_name)][,
       list(cluster=get(cluster_col_name), t_type=CD4v8, frac=N/sum(N)), 
       by=by_vars][,
-        rel_frac := log2(frac/mean(frac)), by=c('CD4v8','k_type','cluster')]
+        rel_frac := log2(frac/mean(frac)),
+        by=c('cluster', by_vars[!(by_vars %in% rhs)])]
   
   if (na.rm==T) {
     enrich_data <- enrich_data[!is.na(cluster)]
   }
   
-  enrich_data[, mean_frac := mean(frac), by=c('CD4v8','k_type','cluster')]
+  enrich_data[, mean_frac := mean(frac), by=c('cluster', by_vars[!(by_vars %in% rhs)])]
   
   enrich_data[, rel_frac_disp := ifelse(abs(rel_frac) > max_log2_enrich, 
     sign(rel_frac)*max_log2_enrich,
@@ -410,8 +412,8 @@ get_cluster_enrich_plot <- function(
   if (reorder)
     enrich_data[, cluster := reorder(cluster, mean_frac)]
   
-  plot <- ggplot(enrich_data[mean_frac > bar_cutoff][, cluster := factor(cluster, levels=0:max(as.numeric(cluster)))]) + 
-    geom_bar(aes(x=cluster, y=frac, fill=rel_frac_disp), stat='identity', color='grey50') +
+  plot <- ggplot(enrich_data[mean_frac > bar_cutoff]) + 
+    geom_bar(aes(x=cluster, y=frac, fill=rel_frac_disp), stat='identity', color='grey50', position=bar_position) +
     scale_fill_distiller('Log2 Enrichment\nvs mean CAR', palette='PuOr', direction=1,
       limits=c(-max_log2_enrich, max_log2_enrich)) +
     facet_grid(facet_formula, space='free', scales='free_y') + labs(x='Log2 enrichment vs mean car') +
@@ -1094,12 +1096,18 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, 
 }
 
 # Map clusters from one object to another
-map_clusters <- function(from_obj, to_obj, from_cluster_name, to_cluster_name) {
+map_clusters <- function(from_obj, to_obj, from_cluster_name, to_cluster_name, overwrite.rm=F) {
   from_clust_data <- data.table(from_obj@meta.data, keep.rownames=T)[,
   list(rn, clust= get(from_cluster_name))][
     data.table(to_obj@meta.data, keep.rownames=T), on=('rn')]
 
-  to_obj@meta.data[[to_cluster_name]] <- from_clust_data$clust
+  if (overwrite.rm || !(to_cluster_name %in% names(to_obj@meta.data))) {
+    to_obj@meta.data[[to_cluster_name]] <- from_clust_data$clust
+  } else {
+    to_obj@meta.data[[to_cluster_name]][
+      !is.na(from_clust_data$clust)] <- from_clust_data$clust[
+        !is.na(from_clust_data$clust)]
+  }
   return(to_obj)
 }
 
@@ -1151,11 +1159,11 @@ compare_clusters <- function(seurat_obj, clust_a, clust_b) {
   clust_co_counts <- data.table(seurat_obj@meta.data)[, 
     list(n_clust_car=.N), by=c(clust_a, clust_b)]
   
-  clust_co_counts <- clust_co_counts[, c(clust_a, 'pct_a_in_b','best_a_in_b') := list(
+  clust_co_counts[!is.na(get(clust_a)) & !is.na(get(clust_b)), c(clust_a, 'pct_a_in_b','best_a_in_b') := list(
       get(clust_a), n_clust_car/sum(n_clust_car), get(clust_a)[which.max(n_clust_car/sum(n_clust_car))]), 
     by=c(clust_b)]
 
-  clust_co_counts <- clust_co_counts[, c(clust_b, 'pct_b_in_a', 'best_b_in_a') := list(
+  clust_co_counts[!is.na(get(clust_b)) & !is.na(get(clust_a)), c(clust_b, 'pct_b_in_a', 'best_b_in_a') := list(
       get(clust_b), n_clust_car/sum(n_clust_car), get(clust_b)[which.max(n_clust_car/sum(n_clust_car))]), 
     by=c(clust_a)]
   
@@ -1263,7 +1271,8 @@ make_dendroheatmap <- function(
   # heatmap
   var_heatmap <- ggplot(cor.df) + 
     geom_tile(aes(x = x, y = y, fill = value),
-      colour = "black", size = .20) + 
+      #colour = "black", size = .20) + 
+    )+
     scale_fill_distiller('Correlation', 
       palette=palette, limits=limits, oob=scales::squish, direction=1) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
@@ -1434,5 +1443,50 @@ diff_genes_in_clusts <- function(
   Idents(seurat_obj) <- old_ident
   
     return(list(diff_genes=diff_genes, plot_volcano=plot_volcano))
+}
+
+#function to get GSEA genes
+get_geneset <- function(geneset_name) {
+  tmp <- tempfile()
+  download.file(paste0(
+    'http://www.gsea-msigdb.org/gsea/msigdb/download_geneset.jsp?geneSetName=',
+    geneset_name,
+    '&fileType=txt'), tmp)
+  gene_list <- fread(tmp)
+  file.remove(tmp)
+  return(gene_list[-1][,get(geneset_name)])
+}
+
+map_geneset <- function(seurat_obj, geneset_list) {
+
+  for (geneset in geneset_list) {
+    if (!(paste0(geneset,'1') %in% names(seurat_obj@meta.data))) {
+      message(paste0("Adding Geneset: ",geneset))
+      DefaultAssay(seurat_obj) <- 'RNA'
+      seurat_obj <- AddModuleScore(seurat_obj, features=list('1'=get_geneset(geneset)), name=geneset)
+    }
+  }
+  return(seurat_obj)
+}
+
+#remove bead stim, cd30, censored clusters, DP cells, etc
+prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL) {
+  no_cd30 <- seurat_obj$car != 'CD30' & seurat_obj$car != 'K_only'
+  no_beadstim <- seurat_obj$k_type != 'bead_stim'
+  no_rmclust <- seurat_obj$Subtype != 'REMOVE' & !is.na(seurat_obj$Subtype)
+  
+  if (length(cars)) {
+    cars <- seurat_obj$car %in% cars
+  } else {
+    cars <- rep(T,length(seurat_obj$car))
+  }
+
+  if (length(k_types)) {
+    k_types <- seurat_obj$k_type %in% k_types
+  } else {
+    k_types <- rep(T,length(seurat_obj$k_type))
+  }
+  
+  return(seurat_obj[, no_cd30 & no_beadstim & no_rmclust & cars & k_types])
 }
 

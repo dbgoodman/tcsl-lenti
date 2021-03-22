@@ -1,0 +1,664 @@
+---
+title: "Two Donor scRNAseq"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(tidyr)
+library(Seurat)
+library(patchwork)
+library(cluster)
+library(parallelDist)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+library(future)
+library(SeuratDisk)
+
+reload_data=F
+source(here::here('r','fig_colors.R'))
+source(here::here('r','scrna','HTOdemux.R'))
+source(here::here('r','scrna','scrna_analysis_fxns.R'))
+
+options(future.globals.maxSize = 14000 * 1024^2)
+plan("sequential")
+plan()
+```
+
+## CD8 ACT Loading
+
+```{r}
+## CD8 ACT
+
+#load combined integrated if not already loaded
+if (!('combined.integrated.data' %in% ls())) {
+  combined.integrated.data <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','combined.integrated.umap.data.rds'))
+}
+
+scrna_cd8 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD8.act_clust.clean.h5Seurat')))
+
+combined.integrated.data <- readRDS(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','combined.integrated.umap.data.rds'))
+
+int_cd8_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd8$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd8[['RNA']] <- int_cd8_subset@assays$RNA
+scrna_cd8[['ADT']] <- int_cd8_subset@assays$ADT
+
+cd8_metadata <- data.table(
+  scrna_cd8@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+scrna_cd8@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+#CD8 act annotated clusters
+cd8_act_cluster_annotations <- fread(text="
+seurat_clusters   Activation    Subtype
+0         ACT         STIM-GLYC
+1         ACT         STIM-GNLY
+2         ACT         STIM-OXPHOS
+3         ACT         STIM-OXPHOS
+4         ACT         STIM-IFNG
+5         INACT       INACT
+6         INACT       INACT
+7         ACT         STIM-GLYC
+8         INACT       INACT
+9         INACT       INACT
+10        ACT         STIM-TC2
+11        ACT         STIM-IFNG
+12        INACT       INACT
+13        ACT         STIM-OXPHOS
+14        ACT         STIM-TC2
+")
+
+cd8_act_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+addtl_metadata <- cd8_act_cluster_annotations[data.table(scrna_cd8@meta.data),
+  on=c('seurat_clusters')]
+
+scrna_cd8@meta.data$Activation <- addtl_metadata$Activation
+scrna_cd8@meta.data$Subtype <- addtl_metadata$Subtype
+scrna_cd8@meta.data$Subtype <- factor(scrna_cd8@meta.data$Subtype)
+```
+
+### CD8 ALL Loading
+
+```{r}
+scrna_cd8_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD8.all.clean.h5Seurat')))
+
+cd8_all_metadata <- data.table(
+  scrna_cd8_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+sample_subtype_map <- merge(cd8_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd8_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd8_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Subtype', 'Subtype')
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Activation', 'Activation')
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'seurat_clusters', 'cd8_act_clust')
+
+int_cd8_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd8_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd8_all[['RNA']] <- int_cd8_all_subset@assays$RNA
+scrna_cd8_all[['ADT']] <- int_cd8_all_subset@assays$ADT
+rm(int_cd8_all_subset)
+
+#CD8 all annotated cluters
+cd8_all_cluster_annotations <- fread(text="
+seurat_clusters Subtype Activation
+0   NAIVE-CD62L   INACT
+1   STIM-OXPHOS  ACT
+2   NAIVE-CD7   INACT
+3   STIM-GLYC    ACT
+4   NAIVE-CD7   INACT
+5   MEM-CD29    INACT
+6   STIM-GNLY    ACT
+7   MEM-CD29    ACT
+8   NAIVE-CD7   INACT
+9   STIM-UNTR    ACT
+10  STIM-INACT    INACT
+11  STIM-INACT    INACT
+12  MEM-CD29    INACT
+13  NAIVE-CD62L   INACT
+14  MEM-CD29   INACT
+15  MEM-CD29   INACT
+16  REMOVE  REMOVE
+17  STIM-UNTR    INACT
+18  NAIVE-CD7   INACT
+19  MEM-CD29    INACT
+20  NAIVE-CD62L   INACT
+21  NAIVE-CD62L   INACT
+22  MEM-CD29    INACT
+23  NAIVE-CD7  INACT
+24  MEM-CD29    INACT
+25  REMOVE  REMOVE
+27  REMOVE  REMOVE
+28  MEM-CD29    INACT
+29  REMOVE  REMOVE
+30  REMOVE  REMOVE
+31  REMOVE  REMOVE
+")
+
+cd8_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+
+addtl_metadata <- cd8_all_cluster_annotations[
+  data.table(scrna_cd8_all@meta.data), on=c('seurat_clusters')]
+
+setnames(addtl_metadata,
+  c('i.Activation','Activation','i.Subtype','Subtype'),
+  c('Activation.act','Activation.inact','Subtype.act','Subtype.inact'))
+
+# save inact subtypes and activation status to start
+addtl_metadata[, Subtype := Subtype.inact]
+addtl_metadata[, Activation := Activation.inact]
+
+# if old subtype is missing or old subtype is 'INACT', then use new subtype
+addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
+  Subtype := Subtype.act]
+addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
+  Activation := Activation.act]
+addtl_metadata[Subtype.act == 'INACT',
+  Subtype := Subtype.inact]
+
+
+scrna_cd8_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
+scrna_cd8_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
+
+
+cd8_all.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.cd8.all.annotated.h5Seurat')
+SaveH5Seurat(scrna_cd8_all, cd8_all.h5.file)
+```
+
+
+### CD4 ACT Loading
+
+```{r}
+
+scrna_cd4 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.act_clust.clean.h5Seurat')))
+
+cd4_metadata <- data.table(
+  scrna_cd4@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+scrna_cd4@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+int_cd4_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4[['RNA']] <- int_cd4_subset@assays$RNA
+scrna_cd4[['ADT']] <- int_cd4_subset@assays$ADT
+
+rm(int_cd4_subset)
+```
+
+
+### CD4 ALL Loading
+
+```{r}
+scrna_cd4_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.clean.h5Seurat')))
+
+cd4_all_metadata <- data.table(
+  scrna_cd4_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd4_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4_all@meta.data[,'act_clust_154'] <- factor(NA, levels=levels(sample_subtype_map$act_clusters))
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$act_clust_154 <- sample_subtype_map$act_clusters
+
+int_cd4_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4_all[['RNA']] <- int_cd4_all_subset@assays$RNA
+scrna_cd4_all[['ADT']] <- int_cd4_all_subset@assays$ADT
+
+rm(int_cd4_all_subset)
+
+#CD4 all annotated clusters
+cd4_all_cluster_annotations <- fread(text="
+seurat_clusters Subtype Activation
+0   NAIVE-CD62L  INACT
+1   NAIVE-CD62L  INACT
+2   STAT1-IRF1  MIXED
+3   STIM-OXPHOS ACT
+4   MEM-CD29   INACT
+5   STIM-GLYC   ACT
+6   NAIVE-CD62L  INACT
+7   STIM-IFNG   ACT
+8   STIM-OXPHOS ACT
+9   MEM-CD29   INACT
+10  STAT1-IRF1  MIXED
+11  NAIVE-CD62L  INACT
+12  MEM-CD29    INACT
+13  STIM-OXPHOS ACT
+14  MEM-CD29   INACT
+15  STAT1-IRF1  MIXED
+16  STAT1-IRF1  MIXED
+17  STAT1-IRF1  MIXED
+18  MEM-CD29    INACT
+19  TH2 MIXED
+20  MEM-CD29    INACT
+21  MEM-CD29    INACT
+22  STIM-IFNG   ACT
+23  REMOVE  REMOVE
+24  REMOVE  REMOVE
+25  STIM-UNTR   INACT
+26  MEM-CD29    INACT
+27  REMOVE  REMOVE
+28  REMOVE  REMOVE
+29  REMOVE  REMOVE
+30  MEM-CD29    INACT
+")
+
+cd4_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+
+addtl_metadata <- cd4_all_cluster_annotations[
+  data.table(scrna_cd4_all@meta.data), on=c('seurat_clusters')]
+
+scrna_cd4_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
+scrna_cd4_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
+
+cd4_all.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.cd4.all.annotated.h5Seurat')
+SaveH5Seurat(scrna_cd4_all, cd4_all.h5.file)
+```
+
+### All T-Cells Loading
+
+```{r}
+scrna_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.all.clean.h5Seurat')))
+
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Subtype', 'Subtype')
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Activation', 'Activation')
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'seurat_clusters', 'cd8_all_clust')
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Subtype', 'Subtype')
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Activation', 'Activation')
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'seurat_clusters', 'cd4_all_clust')
+
+int_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_all[['RNA']] <- int_all_subset@assays$RNA
+scrna_all[['ADT']] <- int_all_subset@assays$ADT
+
+rm(combined.integrated.data)
+rm(int_all_subset)
+
+all.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.all.annotated.h5Seurat')
+SaveH5Seurat(scrna_cd4_all, all.h5.file)
+```
+
+### GSEA subsets
+
+```{r}
+gsea_subsets <- c(
+  "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+  "KEGG_MTOR_SIGNALING_PATHWAY",
+  "HALLMARK_MTORC1_SIGNALING",
+  "BIOCARTA_NFKB_PATHWAY",
+  "GILMORE_CORE_NFKB_PATHWAY",
+  "HALLMARK_GLYCOLYSIS",
+  "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+  "HALLMARK_IL6_JAK_STAT3_SIGNALING",
+  "HALLMARK_MYC_TARGETS_V2",
+  "GSE23321_CD8_STEM_CELL_MEMORY_VS_CENTRAL_MEMORY_CD8_TCELL_DN",
+  "GSE23321_CD8_STEM_CELL_MEMORY_VS_CENTRAL_MEMORY_CD8_TCELL_UP",
+  "GSE23321_CENTRAL_MEMORY_VS_NAIVE_CD8_TCELL_DN",
+  "GSE23321_CENTRAL_MEMORY_VS_NAIVE_CD8_TCELL_UP",
+  "GSE23321_CENTRAL_VS_EFFECTOR_MEMORY_CD8_TCELL_DN",
+  "GSE23321_CENTRAL_VS_EFFECTOR_MEMORY_CD8_TCELL_UP",
+  "BIOCARTA_CD40_PATHWAY",
+  "BIOCARTA_41BB_PATHWAY",
+  "BIOCARTA_NFKB_PATHWAY",
+  "GO_LYMPHOCYTE_COSTIMULATION",
+  "FATTY_ACID_OXIDATION",
+  "HALLMARK_HYPOXIA",
+  "GO_NEGATIVE_REGULATION_OF_TYPE_I_INTERFERON_PRODUCTION",
+  "BIOCARTA_IFNG_PATHWAY",
+  "BIOCARTA_IFNA_PATHWAY"
+  )
+
+scrna_all <- map_geneset(scrna_all, gsea_subsets)
+
+### Paper gene modules
+
+Sheih_et_al_IRF <- c('CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB',
+  'GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3',
+  'NKG7','STMN1')
+
+Nicolet_et_al_CD29core <- c('PRSS23', 'FLNA', 'SELPLG', 'YWHAQ', 'ANXA1',
+  'CX3CR1, PXN', 'FGFBP2', 'GZMH', 'TOB1', 'CD52', 'LITAF', 'FCGR3A',
+  'ITGB1', 'LGALS1', 'HOPX', 'GZMB', 'GNLY', 'PATL2')
+
+scrna_all <- AddModuleScore(scrna_all,
+  features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core')
+scrna_all <- AddModuleScore(scrna_all,
+  features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
+
+cd4_rna_subset_markers <- FindAllMarkers(
+  scrna_cd4_all[, !(
+    scrna_cd4_all[['car']] == c('CD30') |
+    scrna_cd4_all[['Subtype']] == c('REMOVE') |
+    scrna_cd4_all[['k_type']] == c('bead_stim'))],
+  assay='SCT_INT')
+```
+
+```{r}
+
+umap_dt <- data.table(cbind(scrna_all@meta.data, scrna_all@reductions$wnn.umap@cell.embeddings))
+
+umap_dt <- umap_dt[Subtype != 'REMOVE' & !is.na(Subtype) & car != 'K_only']
+
+labels_dt <- umap_dt[, list(wnnUMAP_1=mean(wnnUMAP_1), wnnUMAP_2=mean(wnnUMAP_2)), by=c('Subtype','t_type')]
+
+plots$subtypes<- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
+  geom_point(size=0.3) + 
+  coord_fixed() +
+  geom_label_repel(
+    data=labels_dt,
+    aes(x=wnnUMAP_1, y=wnnUMAP_2, label=Subtype),
+    fill= alpha(c("white"),0.9), force=0.5) + 
+  scale_color_manual(values=all_colors) +
+  theme_minimal() + 
+  theme(
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    panel.grid=element_blank())
+
+inset_umap_point_size = 0.05
+
+# per car
+plots$per_car <- ggplot() +
+  geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2), data=umap_dt[,list(wnnUMAP_1, wnnUMAP_2)], size=0.1, color='grey80') +
+  geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2, color=k_type), data=umap_dt, size=0.2) + 
+  facet_grid(k_type~car) +
+  coord_fixed() + 
+  theme_minimal() + 
+  theme(
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    panel.grid=element_blank())
+
+#per phase
+plots$per_phase <- ggplot(
+    umap_dt[order(Phase)], aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Phase)) +
+  geom_point(size=inset_umap_point_size, alpha=0.75) + 
+  coord_fixed() +
+  scale_color_manual(values=phase_colors) +
+  theme_minimal() + 
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  theme(
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    legend.justification = c(0,1),
+    panel.grid=element_blank())
+
+#per donor
+plots$per_donor <- ggplot(
+    umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, 
+      color=factor(donor, labels=c('A','B')))) +
+  geom_point(size=inset_umap_point_size, alpha=0.75) + 
+  scale_color_discrete('Donor') +
+  coord_fixed() +
+  theme_minimal() + 
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  theme(
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    legend.justification = c(0,1),
+    panel.grid=element_blank())
+
+#stimulation
+cluster_stim <- unique(data.table(umap_dt)[, list(n_clust_car= .N), 
+  by=c(cluster_name, "car", "k_type","t_type")][, 
+    pct_clust_car := n_clust_car/sum(n_clust_car), 
+    by=.(car, k_type, t_type)][,
+      cd19_clust_car_l2fc := log2(
+          pct_clust_car[k_type == ifelse(.BY[2] == 'Untransduced', 'bead_stim', 'cd19+')]/
+            pct_clust_car[k_type == 'baseline']), 
+      by=.(get(cluster_name), car, t_type)][, 
+        cd19_clust_act_l2fc := mean(
+            cd19_clust_car_l2fc[!(car %in% c('KLRG1','Untransduced')) | k_type == 'bead_stim'], na.rm=T), 
+        by=get(cluster_name)][, list(Subtype, t_type, cd19_clust_act_l2fc)])
+
+cluster_stim[is.nan(cd19_clust_act_l2fc), cd19_clust_act_l2fc := 100]
+
+plots$activation <- ggplot(
+    umap_dt[cluster_stim, on=c('t_type','Subtype')][sample(.N)], 
+    aes(x=wnnUMAP_1, y=wnnUMAP_2, 
+      color=cd19_clust_act_l2fc)) +
+  geom_point(size=inset_umap_point_size, alpha=0.75) + 
+  scale_color_distiller(
+    'Stim:Unstim',
+    palette='PuOr', direction=-1, oob=scales::squish, limits=c(-5,5),
+    breaks=c(-5,-3,0,3,5),
+    labels=rev(c('>32x stim','8x stim','1:1','8x unstim','>32x unstim'))) +
+  coord_fixed() +
+  theme_minimal() + 
+  theme(
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    panel.grid=element_blank(),
+    legend.justification = c(0,1),
+    legend.key.width=unit(0.4, 'lines'))
+
+combined_inset_umap <- plot_grid(
+  plots$per_phase,
+  NULL,
+  plots$per_donor,
+  NULL,
+  plots$activation,
+  ncol=1,
+  rel_heights=c(1,-0.1,1,-0.1,1))
+```
+
+# CAR vs clusters
+
+```{r}
+
+cd4_order <- c(
+  'STIM-GLYC',
+  'TH2',
+  'STIM-OXPHOS',
+  'STIM-IFNG',
+  'STAT1-IRF1',
+  'STIM-UNTR',
+  'MEM-CD29',
+  'NAIVE-IL7R'
+)
+
+cd8_order <- c(
+  'STIM-GLYC',
+  'STIM-TC2',
+  'STIM-OXPHOS',
+  'STIM-IFNG',
+  'STIM-GNLY',
+  'STIM-INACT',
+  'STIM-UNTR',
+  'MEM-CD29',
+  'NAIVE-CD7',
+  'NAIVE-IL7R'
+)
+
+# cd8 dots
+car_clust_pct_act <- data.table(scrna_cd8_all@meta.data)[
+  k_type == 'cd19+' & !is.na(Subtype) & car != 'CD30' & Subtype != 'REMOVE', .N, 
+  by=c('car','Subtype')][, 
+    pct_car := N/sum(N), by='car'][,
+      clust_count := sum(N), by='Subtype'][,
+        log2_clust_enrich := log2(pct_car/mean(pct_car)), by='Subtype']
+
+car_clust_pct_act[, log2_ce_trunc := ifelse(
+  test= abs(log2_clust_enrich) > 1, 
+  yes= 1 * sign(log2_clust_enrich), 
+  no= log2_clust_enrich)]
+
+plots$cd8_stim_dots <- ggplot(car_clust_pct_act) + 
+  geom_point(aes(
+    x=factor(Subtype, levels=rev(cd8_order)),
+    y=factor(car, c("CD28","4-1BB","BAFF-R","TACI","CD40","TNR8","Zeta","KLRG1","Untransduced")),
+    color=log2_ce_trunc, size=pct_car)) + 
+  scale_color_distiller('log2\nCAR Enrichment', palette='PRGn', direction=1, 
+    breaks=c(-1,-0.5,0,0.5,1), labels=c('< -1','-0.5','0','0.5','> 1')) + 
+  scale_size('% CAR Cells', range=c(1,15)) + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  coord_flip() +
+  labs(y='', x='')
+
+# cd4 dots
+car_clust_pct_act <- data.table(scrna_cd4_all@meta.data)[
+  k_type == 'cd19+' & !is.na(Subtype) & car != 'CD30' & Subtype != 'REMOVE', .N, 
+  by=c('car','Subtype')][, 
+    pct_car := N/sum(N), by='car'][,
+      clust_count := sum(N), by='Subtype'][,
+        log2_clust_enrich := log2(pct_car/mean(pct_car)), by='Subtype']
+
+car_clust_pct_act[, log2_ce_trunc := ifelse(
+  test= abs(log2_clust_enrich) > 1, 
+  yes= 1 * sign(log2_clust_enrich), 
+  no= log2_clust_enrich)]
+
+plots$cd4_stim_dots <- ggplot(car_clust_pct_act) + 
+  geom_point(aes(
+    x=factor(Subtype, levels=rev(cd4_order)),
+    y=factor(car, c("CD28","4-1BB","BAFF-R","TACI","CD40","TNR8","Zeta","KLRG1","Untransduced")),
+    color=log2_ce_trunc, size=pct_car)) + 
+  scale_color_distiller('log2\nCAR Enrichment', palette='PRGn', direction=1, 
+    breaks=c(-1,-0.5,0,0.5,1), labels=c('< -1','-0.5','0','0.5','> 1')) + 
+  scale_size('% CAR Cells', range=c(1,15), breaks=c(0.1,0.2,0.3)) + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_flip() +
+  labs(y='', x='')
+
+plot_grid(
+  plots$cd4_stim_dots+theme(axis.text.x = element_blank()),
+  plots$cd8_stim_dots,
+  ncol=1,
+  rel.heights=c(0.8,1))
+
+```
+
+
+
+```{r}
+Idents(scrna_cd8_all) <- 'Subtype'
+cd4_rna_subset_markers <- FindAllMarkers(
+  prune_cells(scrna_cd4_all),
+  assay='SCT_INT',
+  test.use='MAST')
+
+Idents(scrna_cd8_all) <- 'Subtype'
+scrna_cd8_all <- prune_cells(scrna_cd8_all)
+subtypes=unique(scrna_cd8_all$Subtype)
+FindMarker.wrapper <- function(x) {
+
+  markers_dt <- data.table(
+    FindMarkers(scrna_cd8_all,
+      ident.1=subtypes[x],
+      only.pos = TRUE, min.pct=0.25,
+      assay='SCT_INT', test.use='MAST'),
+    keep.rownames=T)
+
+  markers_dt$Subtype <- subtypes[x]
+}
+
+gc()
+Markers <- bplapply(1:length(subtypes), FindMarker.wrapper,BPPARAM=MulticoreParam(12))
+
+cd8_rna_subset_markers <- FindAllMarkers(
+  prune_cells(scrna_cd8_all),
+  assay='SCT_INT',
+  test.use='MAST')
+
+
+cd4_marker_genes.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('cd4_marker_genes.rds'))
+cd8_marker_genes.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('cd8_marker_genes.rds'))
+
+saveRDS(cd4_rna_subset_markers, cd4_marker_genes.rds.file)
+saveRDS(cd8_rna_subset_markers, cd8_marker_genes.rds.file)
+
+```
