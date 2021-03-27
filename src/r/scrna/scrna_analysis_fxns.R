@@ -50,6 +50,116 @@ get_gene_id_list <- function(subset_obj) {
   return(gene_ids)
 }
 
+
+
+AddModuleScoreParallel <- function (object, features, pool = NULL, nbin = 24, ctrl = 100, 
+    k = FALSE, assay = NULL, name = "Cluster", seed = 1, search = FALSE, 
+    ...) 
+{
+    if (!is.null(x = seed)) {
+        set.seed(seed = seed)
+    }
+    assay.old <- DefaultAssay(object = object)
+    assay <- assay %||% assay.old
+    DefaultAssay(object = object) <- assay
+    assay.data <- GetAssayData(object = object)
+    features.old <- features
+    if (k) {
+        .NotYetUsed(arg = "k")
+        features <- list()
+        for (i in as.numeric(x = names(x = table(object@kmeans.obj[[1]]$cluster)))) {
+            features[[i]] <- names(x = which(x = object@kmeans.obj[[1]]$cluster == 
+                i))
+        }
+        cluster.length <- length(x = features)
+    }
+    else {
+        if (is.null(x = features)) {
+            stop("Missing input feature list")
+        }
+        features <- lapply(X = features, FUN = function(x) {
+            missing.features <- setdiff(x = x, y = rownames(x = object))
+            if (length(x = missing.features) > 0) {
+                warning("The following features are not present in the object: ", 
+                  paste(missing.features, collapse = ", "), ifelse(test = search, 
+                    yes = ", attempting to find updated synonyms", 
+                    no = ", not searching for symbol synonyms"), 
+                  call. = FALSE, immediate. = TRUE)
+                if (search) {
+                  tryCatch(expr = {
+                    updated.features <- UpdateSymbolList(symbols = missing.features, 
+                      ...)
+                    names(x = updated.features) <- missing.features
+                    for (miss in names(x = updated.features)) {
+                      index <- which(x == miss)
+                      x[index] <- updated.features[miss]
+                    }
+                  }, error = function(...) {
+                    warning("Could not reach HGNC's gene names database", 
+                      call. = FALSE, immediate. = TRUE)
+                  })
+                  missing.features <- setdiff(x = x, y = rownames(x = object))
+                  if (length(x = missing.features) > 0) {
+                    warning("The following features are still not present in the object: ", 
+                      paste(missing.features, collapse = ", "), 
+                      call. = FALSE, immediate. = TRUE)
+                  }
+                }
+            }
+            return(intersect(x = x, y = rownames(x = object)))
+        })
+        cluster.length <- length(x = features)
+    }
+    if (!all(Seurat:::LengthCheck(values = features))) {
+        warning(paste("Could not find enough features in the object from the following feature lists:", 
+            paste(names(x = which(x = !Seurat:::LengthCheck(values = features)))), 
+            "Attempting to match case..."))
+        features <- lapply(X = features.old, FUN = CaseMatch, 
+            match = rownames(x = object))
+    }
+    if (!all(Seurat:::LengthCheck(values = features))) {
+        stop(paste("The following feature lists do not have enough features present in the object:", 
+            paste(names(x = which(x = !Seurat:::LengthCheck(values = features)))), 
+            "exiting..."))
+    }
+    pool <- pool %||% rownames(x = object)
+    data.avg <- Matrix::rowMeans(x = assay.data[pool, ])
+    data.avg <- data.avg[order(data.avg)]
+    data.cut <- cut_number(x = data.avg + rnorm(n = length(data.avg))/1e+30, 
+        n = nbin, labels = FALSE, right = FALSE)
+    names(x = data.cut) <- names(x = data.avg)
+    ctrl.use <- vector(mode = "list", length = cluster.length)
+    for (i in 1:cluster.length) {
+        features.use <- features[[i]]
+        for (j in 1:length(x = features.use)) {
+            ctrl.use[[i]] <- c(ctrl.use[[i]], names(x = sample(x = data.cut[which(x = data.cut == 
+                data.cut[features.use[j]])], size = ctrl, replace = FALSE)))
+        }
+    }
+    ctrl.use <- lapply(X = ctrl.use, FUN = unique)
+    ctrl.scores <- matrix(data = numeric(length = 1L), nrow = length(x = ctrl.use), 
+        ncol = ncol(x = object))
+    for (i in 1:length(ctrl.use)) {
+        features.use <- ctrl.use[[i]]
+        ctrl.scores[i, ] <- Matrix::colMeans(x = assay.data[features.use, 
+            ])
+    }
+    features.scores <- matrix(data = numeric(length = 1L), nrow = cluster.length, 
+        ncol = ncol(x = object))
+    for (i in 1:cluster.length) {
+        features.use <- features[[i]]
+        data.use <- assay.data[features.use, , drop = FALSE]
+        features.scores[i, ] <- Matrix::colMeans(x = data.use)
+    }
+    features.scores.use <- features.scores - ctrl.scores
+    rownames(x = features.scores.use) <- paste0(name, 1:cluster.length)
+    features.scores.use <- as.data.frame(x = t(x = features.scores.use))
+    rownames(x = features.scores.use) <- colnames(x = object)
+    object[[colnames(x = features.scores.use)]] <- features.scores.use
+    DefaultAssay(object = object) <- assay.old
+    return(features.scores.use)
+}
+
 # run gsea analysis on GO, Reactome, Kegg
 pathway_enrichment <- function(marker_set,
     logfc.thresh=0.25, min.pct=0.2, minGSSize=3, maxGSSize=100, nperm=1000, ident='car') {
@@ -1469,17 +1579,54 @@ map_geneset <- function(seurat_obj, geneset_list) {
   return(seurat_obj)
 }
 
+map_geneset_parallel <- function(seurat_obj, geneset_list, assay='RNA', nbin=24, cores=8) {
+
+  get_module_score_parallel <- function(geneset_i) {
+    geneset <- geneset_list[geneset_i]
+    message(paste0("Adding Geneset: ",geneset))
+    DefaultAssay(seurat_obj) <- assay
+    module_score <- tryCatch({
+      AddModuleScoreParallel(
+        seurat_obj, features=list('1'=get_geneset(geneset)), name=geneset, nbin=nbin)
+    }, error= function(e) {
+      print(e)
+      warning(paste0(geneset, ' failed.'))
+      return(data.frame())
+    })
+    return(module_score)
+  }
+
+  geneset_scores <- bplapply(
+    1:length(geneset_list),
+    get_module_score_parallel,BPPARAM=MulticoreParam(cores, log=T))
+  
+  geneset_scores <- do.call('cbind', geneset_scores)
+  names(geneset_scores) <- gsub('(.*)1$','\\1',names(geneset_scores))
+  return(geneset_scores)
+}
+
+
+
 #remove bead stim, cd30, censored clusters, DP cells, etc
-prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL) {
+prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, rescale=F) {
   no_cd30 <- seurat_obj$car != 'CD30' & seurat_obj$car != 'K_only'
   no_beadstim <- seurat_obj$k_type != 'bead_stim'
-  no_rmclust <- seurat_obj$Subtype != 'REMOVE' & !is.na(seurat_obj$Subtype)
+  no_rmclust <- seurat_obj$Subtype != 'REMOVE' &
+    !is.na(seurat_obj$Subtype) &
+      seurat_obj$Subtype != 'NA'
   
   if (length(cars)) {
     cars <- seurat_obj$car %in% cars
   } else {
     cars <- rep(T,length(seurat_obj$car))
   }
+  
+  if (length(subtypes)) {
+    subtypes <- seurat_obj$Subtype %in% subtypes
+  } else {
+    subtypes <- rep(T,length(seurat_obj$Subtype))
+  }
+
 
   if (length(k_types)) {
     k_types <- seurat_obj$k_type %in% k_types
@@ -1487,6 +1634,11 @@ prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL) {
     k_types <- rep(T,length(seurat_obj$k_type))
   }
   
-  return(seurat_obj[, no_cd30 & no_beadstim & no_rmclust & cars & k_types])
+  new_obj <- seurat_obj[, no_cd30 & no_beadstim & no_rmclust & cars & k_types & subtypes]
+  if (rescale) {
+    new_obj <- ScaleData(new_obj, assay='SCT_INT')
+    new_obj <- ScaleData(new_obj,assay= 'SCT_ADT_INT')
+  }
+  return(new_obj)
 }
 

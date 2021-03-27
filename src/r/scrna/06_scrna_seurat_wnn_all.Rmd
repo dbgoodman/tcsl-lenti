@@ -480,7 +480,6 @@ cd4_interesting_features=c(
   'NAMPT','PGK1','ARG2','MT2A');
 
 cd4_bad_mixed_clusts <- c(18,19)
-cd4_ba
 scrna_cd4_all <- subset(scrna_cd4_all, seurat_clusters %in% cd4_bad_mixed_clusts, invert=T)
 
 make_dendroheatmap(cor(

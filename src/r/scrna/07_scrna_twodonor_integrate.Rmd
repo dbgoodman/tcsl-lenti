@@ -1,0 +1,247 @@
+---
+title: "Two Donor scRNAseq"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(tidyr)
+library(Seurat)
+library(patchwork)
+library(cluster)
+library(parallelDist)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+library(future)
+library(SeuratDisk)
+
+
+reload_data=F
+source(here::here('r','fig_colors.R'))
+source(here::here('r','scrna','HTOdemux.R'))
+source(here::here('r','scrna','scrna_analysis_fxns.R'))
+
+options(future.globals.maxSize = 14000 * 1024^2)
+plan("sequential")
+plan()
+```
+
+
+### Integrate SCT RNA
+
+```{r}
+
+integrate_feature <- function(scrna.list, assay_name, initial_assay, assay_only=F, remove_other_assays=F, use_ref=F) {
+  
+  integrated_assay_name <- paste0(assay_name, "_INT")
+  
+  # only one assay
+  if (remove_other_assays) {
+    scrna.assay.list <- lapply(
+      1:length(scrna.list),
+      function(i) {
+        obj <- CreateSeuratObject(
+          scrna.list[[i]][[assay_name]],
+          assay=assay_name,
+          meta.data=scrna.list[[i]]@meta.data)
+        obj[[initial_assay]] <- scrna.list[[i]][[initial_assay]]
+        return(obj)
+      }
+    )
+  } else {
+    scrna.assay.list <- scrna.list
+  }
+  
+  for (i in 1:length(scrna.assay.list)) {
+    DefaultAssay(scrna.assay.list[[i]]) <- assay_name
+  }
+  
+  integrate.features <- SelectIntegrationFeatures(
+    object.list = scrna.assay.list, 
+    nfeatures = 3000,
+    assay=rep(assay_name, length(scrna.assay.list)))
+  gc()
+  
+  scrna.assay.list <- PrepSCTIntegration(
+    assay=assay_name, object.list = scrna.assay.list, 
+    anchor.features = integrate.features, 
+    verbose = TRUE)
+  gc()
+  
+  if (use_ref) {
+    scrna.anchors <- FindIntegrationAnchors(
+      object.list = scrna.assay.list,
+      normalization.method = "SCT",
+      anchor.features = integrate.features,
+      reference = use_ref)
+  } else {
+    scrna.anchors <- FindIntegrationAnchors(
+      object.list = scrna.assay.list,
+      normalization.method = "SCT", 
+      anchor.features = integrate.features,
+      verbose = TRUE)
+  }
+  gc()
+  
+  scrna.integrated <- IntegrateData(
+    anchorset = scrna.anchors,
+    normalization.method = "SCT", 
+    verbose = TRUE,
+    new.assay.name = integrated_assay_name)
+  gc()
+    
+  if (assay_only) {
+    return(scrna.integrated[[integrated_assay_name]])
+  } else {
+    return(scrna.integrated)
+  }
+}
+
+scrna.integrated <- integrate_feature(
+  scrna.list, 
+  assay_name='SCT',
+  initial_assay='RNA',
+  assay_only=F,
+  remove_other_assays=F)
+scrna.integrated[['SCT_ADT_INT']] <- integrate_feature(
+  scrna.list,
+  assay_name='SCT_ADT',
+  initial_assay='ADT',
+  assay_only=T,
+  remove_other_assays=T)
+
+integrated.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('combined.integrated.umap.data.rds'))
+
+saveRDS(scrna.integrated,integrated.rds.file)
+
+```
+
+### Prune HTO and CD4/CD8 Doublets, assign CD4/CD8
+
+```{r}
+
+scrna.integrated <- subset(scrna.integrated, subset = (HTO_status %in% c('HighQual','MidQual')))
+
+t_out <- reassign_t_type(scrna.integrated, n_clust=3, plots)
+plots <- t_out$plot_obj
+scrna.integrated <- t_out$seurat_obj
+rm(t_out)
+
+plots$t_type_bars <- ggplot(
+  data.table(scrna.integrated@meta.data)) +
+  geom_bar(aes(x=car, fill=t_type)) +
+  facet_grid(k_type~donor, space='free', scales='free') +
+  coord_flip()
+```
+## Run WNN Clustering on all cells
+
+```{r}
+
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+
+scrna.integrated <- RunPCA(scrna.integrated, features = c(s.genes, g2m.genes), reduction.name = 'cc_pca')
+scrna.integrated <- RunPCA(scrna.integrated, assay='SCT_INT', reduction.name = 'rna_pca')
+
+# identify unique TCSL170 ADTs
+adt_count_ratios <- (
+  Matrix::rowSums(subset(scrna.integrated, subset=(donor == 'TCSL154'))[['SCT_ADT_INT']]@counts) / 
+    Matrix::rowSums(subset(scrna.integrated, subset=(donor == 'TCSL170'))[['SCT_ADT_INT']]@counts))
+
+tcsl170_adts <- names(which(-log10(adt_count_ratios) > 2))
+shared_adts <- names(which(-log10(adt_count_ratios) < 2))
+
+scrna.integrated <- RunPCA(scrna.integrated, assay='SCT_ADT_INT', features= shared_adts, 
+    nfeatures.print = 10, reduction.name='adt_pca')
+scrna_output <- sct_umap(scrna.integrated, title='All cells')
+
+scrna.integrated <- scrna_output$obj
+plots <- c(plots, scrna_output$plots)
+rm(scrna_output)
+```
+
+## Map TCSL170 subtypes onto new UMAP
+
+```{r}
+
+scrna.wnn.cd4_all_metadata <- readRDS(
+  "~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS(
+  "~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[,
+      list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[,
+      list(rn_154=rn, sample, t_type, Subtype)])[,
+  rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+integrated_metadata <- data.table(
+  scrna.integrated@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+sample_subtype_map <- merge(
+  integrated_metadata, original_metadata, by='rn', all=T)[
+    !is.na(Subtype) & !is.na(rn_orig)]
+
+scrna.integrated@meta.data[,'subtype_154'] <- factor(
+  NA, levels=levels(sample_subtype_map$Subtype))
+scrna.integrated@meta.data[
+  sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+plots$combined_umap_2 <- (
+  DimPlot(scrna.integrated, reduction = 'wnn.umap',
+      label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap',
+      group.by = 't_type', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap',
+      group.by = 'k_type', label = TRUE, repel = TRUE, label.size = 2.5) +
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap',
+      group.by = 'Phase', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap',
+      group.by = 'donor', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend() +
+  DimPlot(scrna.integrated, reduction = 'wnn.umap',
+      group.by = 'subtype_154', label = TRUE, repel = TRUE, label.size = 2.5) + 
+    NoLegend()))
+```
+
+## Donor, T, and Stim amounts per cluster
+```{r}
+plots$cells_per_donor <- ggplot(
+    data.table(scrna.integrated@meta.data)[t_type != 'DP'][, 
+      .N, by=c('seurat_clusters','donor','k_type','t_type')][N > 100]) + 
+  geom_bar(aes(x=seurat_clusters, y=N, fill=interaction(donor,k_type)),
+    stat='identity') +
+  facet_wrap(~t_type, scales='free')
+
+## END OF DATA LOADING
+
+integrated.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.all.clean.h5Seurat')
+
+SaveH5Seurat(scrna.integrated, integrated.h5.file)
+
+integration.plots.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('02_integration_plots.rds'))
+
+saveRDS(plots, integration.plots.rds.file)
+```

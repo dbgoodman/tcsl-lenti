@@ -1292,8 +1292,7 @@ gsea_subsets <- c(
   "HALLMARK_HYPOXIA",
   "GO_NEGATIVE_REGULATION_OF_TYPE_I_INTERFERON_PRODUCTION",
   "BIOCARTA_IFNG_PATHWAY",
-  "BIOCARTA_IFNA_PATHWAY"
-  )
+  "BIOCARTA_IFNA_PATHWAY")
 
 scrna_all <- map_geneset(scrna_all, gsea_subsets)
 scrna_all <- AddModuleScore(scrna_all, features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core')

@@ -30,8 +30,6 @@ scrna_subset_fxns <- list(
     (k_type == 'bead_stim' & car == 'Untransduced')) & seurat_clusters %in% act_clusters))
 )
 
-
-
 for (this_t_type in t_types) {
   for (this_subset_fxn in names(scrna_subset_fxns)) {
   
