@@ -357,7 +357,7 @@ rm(int_all_subset)
 all.h5.file <- here::here(
   '..','..','scrnaseq_tcsl154',
   'rds','scrna.wnn.int.all.annotated.h5Seurat')
-SaveH5Seurat(scrna_cd4_all, all.h5.file, overwrite=T)
+SaveH5Seurat(scrna_all, all.h5.file, overwrite=T)
 ```
 
 ### GSEA subsets
@@ -409,8 +409,7 @@ scrna_all <- map_geneset(scrna_all, gsea_subsets)
 ### Paper gene modules
 
 Sheih_et_al_IRF <- c('CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB',
-  'GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3',
-  'NKG7','STMN1')
+  'GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3', 'NKG7','STMN1')
 
 Nicolet_et_al_CD29core <- c('PRSS23', 'FLNA', 'SELPLG', 'YWHAQ', 'ANXA1',
   'CX3CR1, PXN', 'FGFBP2', 'GZMH', 'TOB1', 'CD52', 'LITAF', 'FCGR3A',
@@ -435,7 +434,9 @@ umap_dt <- data.table(cbind(scrna_all@meta.data, scrna_all@reductions$wnn.umap@c
 
 umap_dt <- umap_dt[Subtype != 'REMOVE' & !is.na(Subtype) & car != 'K_only']
 
-labels_dt <- umap_dt[, list(wnnUMAP_1=mean(wnnUMAP_1), wnnUMAP_2=mean(wnnUMAP_2)), by=c('Subtype','t_type')]
+labels_dt <- umap_dt[, 
+  list(wnnUMAP_1=mean(wnnUMAP_1), wnnUMAP_2=mean(wnnUMAP_2)),
+  by=c('Subtype','t_type')]
 
 plots$subtypes<- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
   geom_point(size=0.3) + 
@@ -456,7 +457,8 @@ inset_umap_point_size = 0.05
 
 # per car
 plots$per_car <- ggplot() +
-  geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2), data=umap_dt[,list(wnnUMAP_1, wnnUMAP_2)], size=0.1, color='grey80') +
+  geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2), 
+    data=umap_dt[,list(wnnUMAP_1, wnnUMAP_2)], size=0.1, color='grey80') +
   geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2, color=k_type), data=umap_dt, size=0.2) + 
   facet_grid(k_type~car) +
   coord_fixed() + 
@@ -641,91 +643,141 @@ plot_grid(
 
 
 ```{r}
-find_genes_parallel <- function(seurat_obj, ident_name, 'SCT_INT', min.pct=0.25, features=NULL, test.use='wilcox') {
+# find_genes_parallel <- function(seurat_obj, ident_name, 'SCT_INT', min.pct=0.25, features=NULL, test.use='wilcox') {
+#   
+#   idents=unique(seurat_obj[[ident_name]])[[1]]
+#   
+#   FindMarker.wrapper <- function(x) {
+#   
+#     message(paste0('Starting FindMarkers for: ',idents[x]))
+#     
+#     markers_dt <- data.table(
+#       FindMarkers(seurat_obj,
+#         ident.1=idents[x],
+#         only.pos = TRUE, min.pct=min.pct,
+#         features=features,
+#         assay=assay, test.use=test.use),
+#       keep.rownames=T)
+#   
+#     markers_dt$ident <- idents[x]
+#     
+#     message(paste0('Completed FindMarkers for: ',idents[x]))
+#     
+#     return(markers_dt)
+#   }
+#   gc()
+#   subset_markers <- bplapply(
+#     1:length(idents),
+#     FindMarker.wrapper,BPPARAM=MulticoreParam(12, log=T))
+#   
+#   subset_markers <- rbindlist(subset_markers)
+#   return(subset_markers)
+# }
+# 
+# cd8_rna_mast_markers <- find_genes_parallel(scrna_cd8_all, 'Subtype', assay='RNA', min.pct=0.20, test.use='MAST')
+# 
+# cd8_rna_mast_markers <- find_genes_parallel(scrna_cd8_all, 'Subtype', assay='RNA', min.pct=0.20, test.use='MAST', features=scrna_cd8_all@assays$SCT_INT@var.features)
+# 
+# cd4_marker_genes.rds.file <- here::here(
+#      '..','..','scrnaseq_tcsl154',
+#      'rds',
+#      paste0('cd4_marker_genes_.rds'))
+# 
+# cd8_marker_genes.rds.file <- here::here(
+#      '..','..','scrnaseq_tcsl154',
+#      'rds',
+#      paste0('cd8_marker_genes_all.rds'))
+# 
+# saveRDS(cd8_rna_mast_markers, cd8_marker_genes.rds.file)
+# saveRDS(cd8_rna_subset_markers, cd8_marker_genes.rds.file)
+# 
+# cd8_cast_markers <- dcast(cd8_rna_subset_markers, rn ~ Subtype, value.var='avg_log2FC', fill=0)
+# rownames(cd8_cast_markers) <- cd8_cast_markers$rn
+# 
+# #cd8_rna_mast_markers <- readRDS(cd8_marker_genes.rds.file)
+# 
+# Idents(scrna_cd8_all) <- 'Subtype'
+# all_genes <- AverageExpression(
+#   prune_cells(scrna_cd8_all, rescale=T),
+#   assays = 'SCT_INT',
+#   features = cd8_rna_mast_markers$rn,
+#   return.seurat = FALSE,
+#   group.by = "Subtype",
+#   add.ident="donor",
+#   slot = "scale.data"
+# )
+# 
+# melted_genes <- reshape2::melt(all_genes[[1]])
+# melted_genes <- data.table(melted_genes)
+# names(melted_genes) <- c('gene','subtype','zscore')
+# melted_genes[, donor := gsub('.*_(.*)','\\1', subtype)]
+# melted_genes[, subtype := gsub('(.*)_(.*)','\\1', subtype)]
+# melted_genes[, subtype := factor(subtype, levels=cd8_order)]
+# #melted_genes[, gene := factor(gene, row_dend$labels)]
+# melted_genes[, best_subtype := subtype[which.max(zscore)], by=gene]
+# melted_genes[, zdiff := zscore[which.max(zscore)] - mean(zscore), by=gene]
+# gene_order <- unique(melted_genes[subtype == best_subtype, gene[order(zdiff)]])
+# melted_genes[, gene := factor(gene, levels=gene_order)]
+# 
+# 
+# 
+# cd8_rna_subset_markers[p_val_adj < 0.05, best_subtype := Subtype[which.max(avg_log2FC)], by=rn]
+# ggplot(cd8_rna_subset_markers) + geom_raster(aes(x=Subtype, y=rn, fill=avg_log2FC)) + facet_grid(best_subtype~., scales='free', space='free') + scale_fill_distiller(palette='PuOr', oob=scales::squish, limit=max(abs(melted_genes$zscore)) * c(-1, 1), type='div')
+```
+
+```{r}
+
+cd4_genes <- list(
+  'STIM-IFNG'= c(
+    "GZMA", "GZMH", "CD2", "CD74", "HLA-DRA", "IFNG", "ITGB2",
+    "PRF1", "EOMES", "GNLY", "LAG3"),
+  'STIM-GLYC'= c(
+    "HILPDA", "IL2RA", "BNIP3", "PGK1", "ARG2", "CTLA4", "TNFRSF9", "TNFRSF18"),
+  'STIM-OXPHOS'= c(
+    "HSPE1", "MT-CO3", "MT-CO2", "HSP90AA1", "FABP5",
+    "MKI67", "SRM", "C1QBP", "MT-ND1", "MT-ATP6"),
+  'STAT1-IRF1'= c(
+    "STAT1", "STMN1", "IFITM1", "IFITM2", "IFITM3", "IRF1", "CALM2", "ID3"),
+  'NAIVE-CD62L'= c(
+    "SELL", "LRRN3", "SOCS2", "FAM13A"),
+  'STIM-UNTR'= c(
+    "CCR7", "CD7", "CD69", "CD27", "MAL"),
+  'TH2'= c(
+    "IL5", "IL13", "GATA3", "IL4"),
+  'MEM-CD29'= c(
+    "S100A4", "KLRB1", "ITGB1", "ITGA4", "GZMH", "HOPX",
+    "NKG7", "NEAT1", "CXCR3", "KLRG1", "CCR5"))
+
+cd8_genes <-list(
+  "NAIVE-CD7"= c(
+    "IFITM2", "VIM", "STMN1", "HMGN2", "STIM1", "CD7", "IFITM1", "TCF7"),
+  "MEM-CD29"= c(
+    "EOMES", "ITGA1", "ITGB2", "CXCR3","S100A4", "ANXA1", "KLRG1", "HOPX"),
+  "STIM-IFNG"= c(
+    "IFNG", "GZMH", "GZMK", "GZMB", "NKG7", "CCR5", "HLA-DQA1", "CD74",
+    "CD2","CCL5","CCL3",'CCL4'),
+  "STIM-GLYC"= c(
+    "ARG2", "BNIP3", "BNIP3L", "LAYN", "HILPDA", "MT2",
+    "LDHA", "FAM162A", "JUNB"),
+  "STIM-UNTR"= c(
+    "S100A10", "CD38", "LAYN", "ENO1", "PGK1", "IGFBP2", "NEAT1", "STAT1", "CD27", "TNFAIP2"),
+  "STIM-OXPHOS"= c(
+    "HMGA1", "FKBP4", "HSPD1", "HSP90AB1",
+    "IL5", "C1QBP", "EIF5A", "HSPH1", "MD-ND3", "SRM",
+    "IL2RA"),
+  "STIM-INACT"= c(
+    "CTSW", "DDX21", "CYP1B1", "BATF3", "GZMA", "TNFSF10", "PFN1"),
+  "STIM-GNLY"= c(
+    "GNLY", "LAYN", "TNFRSF18", "RUNX3", "CTSW", "CBLB", "LGALS3"),
+  "NAIVE-CD62L"= c(
+    "SELL", "MAL", "KLF2", "TXNIP", "IL7R", "LRRN3"))
+
+make_gene_heatmap <- function(
+    seurat_obj, subtype_order, max_genes=100, label_genes=NULL, 
+    rescale=T, use_dendsort=T) {
   
-  idents=unique(seurat_obj[[ident_name]])[[1]]
-  
-  FindMarker.wrapper <- function(x) {
-  
-    message(paste0('Starting FindMarkers for: ',idents[x]))
-    
-    markers_dt <- data.table(
-      FindMarkers(seurat_obj,
-        ident.1=idents[x],
-        only.pos = TRUE, min.pct=min.pct,
-        features=features,
-        assay=assay, test.use=test.use),
-      keep.rownames=T)
-  
-    markers_dt$ident <- idents[x]
-    
-    message(paste0('Completed FindMarkers for: ',idents[x]))
-    
-    return(markers_dt)
-  }
-  gc()
-  subset_markers <- bplapply(
-    1:length(idents),
-    FindMarker.wrapper,BPPARAM=MulticoreParam(12, log=T))
-  
-  subset_markers <- rbindlist(subset_markers)
-  return(subset_markers)
-}
-
-cd8_rna_mast_markers <- find_genes_parallel(scrna_cd8_all, 'Subtype', assay='RNA', min.pct=0.20, test.use='MAST')
-
-cd8_rna_mast_markers <- find_genes_parallel(scrna_cd8_all, 'Subtype', assay='RNA', min.pct=0.20, test.use='MAST', features=scrna_cd8_all@assays$SCT_INT@var.features)
-
-cd4_marker_genes.rds.file <- here::here(
-     '..','..','scrnaseq_tcsl154',
-     'rds',
-     paste0('cd4_marker_genes_.rds'))
-
-cd8_marker_genes.rds.file <- here::here(
-     '..','..','scrnaseq_tcsl154',
-     'rds',
-     paste0('cd8_marker_genes_all.rds'))
-
-saveRDS(cd8_rna_mast_markers, cd8_marker_genes.rds.file)
-saveRDS(cd8_rna_subset_markers, cd8_marker_genes.rds.file)
-
-cd8_cast_markers <- dcast(cd8_rna_subset_markers, rn ~ Subtype, value.var='avg_log2FC', fill=0)
-rownames(cd8_cast_markers) <- cd8_cast_markers$rn
-
-#cd8_rna_mast_markers <- readRDS(cd8_marker_genes.rds.file)
-
-Idents(scrna_cd8_all) <- 'Subtype'
-all_genes <- AverageExpression(
-  prune_cells(scrna_cd8_all, rescale=T),
-  assays = 'SCT_INT',
-  features = cd8_rna_mast_markers$rn,
-  return.seurat = FALSE,
-  group.by = "Subtype",
-  add.ident="donor",
-  slot = "scale.data"
-)
-
-melted_genes <- reshape2::melt(all_genes[[1]])
-melted_genes <- data.table(melted_genes)
-names(melted_genes) <- c('gene','subtype','zscore')
-melted_genes[, donor := gsub('.*_(.*)','\\1', subtype)]
-melted_genes[, subtype := gsub('(.*)_(.*)','\\1', subtype)]
-melted_genes[, subtype := factor(subtype, levels=cd8_order)]
-#melted_genes[, gene := factor(gene, row_dend$labels)]
-melted_genes[, best_subtype := subtype[which.max(zscore)], by=gene]
-melted_genes[, zdiff := zscore[which.max(zscore)] - mean(zscore), by=gene]
-gene_order <- unique(melted_genes[subtype == best_subtype, gene[order(zdiff)]])
-melted_genes[, gene := factor(gene, levels=gene_order)]
-
-
-
-cd8_rna_subset_markers[p_val_adj < 0.05, best_subtype := Subtype[which.max(avg_log2FC)], by=rn]
-ggplot(cd8_rna_subset_markers) + geom_raster(aes(x=Subtype, y=rn, fill=avg_log2FC)) + facet_grid(best_subtype~., scales='free', space='free') + scale_fill_distiller(palette='PuOr', oob=scales::squish, limit=max(abs(melted_genes$zscore)) * c(-1, 1), type='div')
-
-
-make_gene_heatmap <- function(seurat_obj, subtype_order, max_genes=100) {
-  
-  seurat_obj <- ScaleData(seurat_obj, assay='SCT_INT')
+  if (rescale)
+    seurat_obj <- ScaleData(seurat_obj, assay='SCT_INT')
   
   all_genes <- AverageExpression(
     seurat_obj,
@@ -749,17 +801,23 @@ make_gene_heatmap <- function(seurat_obj, subtype_order, max_genes=100) {
   gene_order <- unique(melted_genes[subtype == best_subtype, gene[order(zdiff)]])
   melted_genes[, gene := factor(gene, levels=gene_order)]
   melted_genes[, max_score := max(abs(zscore)), by='gene']
+  melted_genes[, mean_zscore := mean(zscore), by=c('gene','subtype')]
   
   #reorder
   new_gene_order <- c()
-  for (group_i in na.omit(unique(melted_genes$best_subtype))) {
-    
-    cast_group <- dcast(melted_genes[!is.na(subtype) & best_subtype == group_i], 
-        gene ~ subtype + donor, value.var='zscore')
-    
-    group_gene_order <- dendsort(hclust(dist(
-      cast_group[,-1])))$order
-    group_genes <- as.character(cast_group$gene[group_gene_order])
+  for (group_i in rev(subtype_order)) {
+    if (use_dendsort) {
+      cast_group <- dcast(melted_genes[!is.na(subtype) & best_subtype == group_i], 
+          gene ~ subtype + donor, value.var='zscore')
+      
+      group_gene_order <- dendsort(hclust(dist(
+        cast_group[,-1])))$order
+      group_genes <- as.character(cast_group$gene[group_gene_order])
+    } else {
+      group_genes <- melted_genes[
+        !is.na(subtype) & best_subtype == group_i][
+          subtype == best_subtype][order(mean_zscore), unique(as.character(gene))]
+    }
     new_gene_order <- c(new_gene_order, group_genes)
   }
   
@@ -770,28 +828,76 @@ make_gene_heatmap <- function(seurat_obj, subtype_order, max_genes=100) {
   best_genes <- unique(
     melted_genes[subtype == best_subtype][
       rev(new_gene_order), on='gene'][,
-        list(subtype, mean(zscore)), by='gene'])[,
+        list(subtype, mean_zscore), by='gene'])[order(-mean_zscore),
           gene[1:max_genes], by='subtype']$V1
+  
+  label_gene_list <- unique(unlist(label_genes, use.names=F))
+  best_genes <- unique(c(best_genes, label_gene_list))
+  
+  # for annotation
+  best_per_subtype <-unique(
+    melted_genes[subtype == best_subtype][
+      rev(new_gene_order), on='gene'][,
+        list(subtype, mean(zscore)), by='gene'])[,
+          is_best := gene %in% gene[1:max_genes], by='subtype']
+  
+  melted_genes[
+    gene %in% best_genes &
+    subtype == best_subtype &
+    donor == donor[1],
+      label := ifelse(gene %in% label_gene_list, as.character(gene), NA)]
     
   # alternate none with subtype name (two donors)
   row_names <- as.vector(t(cbind(rep('', length(subtype_order)), subtype_order)))
   unique_donor_subset <- unique(melted_genes[, list(donor, subtype)])
   n_lines <- unique_donor_subset[, length(unique(subtype))]
   
-  de_gene_heatmap <- ggplot(melted_genes[gene %in% best_genes]) + 
-    geom_raster(aes(x=interaction(donor,subtype), y=gene, fill=zscore)) +
+  max_x <- length(levels(melted_genes[gene %in% best_genes, interaction(donor,subtype)]))
+  
+  display_genes <- melted_genes[gene %in% best_genes]
+  
+  separator_table <- display_genes[
+      subtype == best_subtype & donor == donor[1], list(n_genes= as.double(.N)), by='subtype']
+      
+  separator_table[rev(subtype_order), on='subtype', pos := cumsum(n_genes)+0.5]
+  
+  label_table <- display_genes[,
+    paste(na.omit(label), collapse=', '), by='subtype'][
+      separator_table, on='subtype']
+  
+  de_gene_heatmap <- ggplot(display_genes) + 
+    geom_tile(aes(x=interaction(donor,subtype), y=gene, fill=zscore)) +
     scale_x_discrete(expand=c(0,0)) + 
     scale_y_discrete(expand=c(0,0)) +
+    coord_cartesian(clip = 'off') +
     geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
-    facet_grid(best_subtype~., scales='free', space='free') +
+    geom_segment(data=separator_table, color='black', linetype=2, 
+      y=separator_table$pos, yend=separator_table$pos, x=0.5, xend=max_x+3.25) +
     scale_fill_distiller(palette='PuOr', oob=scales::squish, limit=c(-2, 2), type='div') +
+    geom_label(
+      data=label_table,
+      label.size=0,
+      fill=NA,
+      nudge_x=0.55,
+      size=2.25,
+      aes(x=max_x, y=pos-2.5, label=stringr::str_wrap(V1, 22), vjust=1, hjust=0)
+    ) +
     theme_minimal() +
+    # geom_text_repel(
+    #   force        = 0.5,
+    #   nudge_x      = 0.15,
+    #   hjust        = 0,
+    #   segment.size = 0.2,
+    #   size=2,
+    #   xlim=c(max_x+0.5, max_x+0.5),
+    #   aes(x=max_x+0.5, y=gene, label=label)) +
     theme(
       axis.text.x=element_blank(),
+      strip.text.y=element_blank(),
       axis.text.y=element_blank(),
       axis.title.x=element_blank(),
       axis.title.y=element_blank(),
-      plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
+      plot.margin = unit(c(5.5, 22, 0, 5.5), "points"))
   
   donor_idents <- ggplot(unique_donor_subset) + 
     geom_tile(aes(x=interaction(donor, subtype), fill=donor, y='a')) + 
@@ -799,13 +905,13 @@ make_gene_heatmap <- function(seurat_obj, subtype_order, max_genes=100) {
     scale_y_discrete(expand=c(0,0)) +
     geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
     theme_minimal() +
-    coord_fixed(ratio=1/4) +
+    coord_fixed(ratio=1/8) +
     theme(
       axis.text.x=element_blank(),
       axis.text.y=element_blank(),
       axis.title.x=element_blank(),
       axis.title.y=element_blank(),
-      plot.margin = unit(c(0, 5.5, 0, 5.5), "points"))
+      plot.margin = unit(c(0, 22, 0, 5.5), "points"))
   
   cluster_idents <- ggplot(unique_donor_subset) + 
     geom_tile(aes(x=interaction(donor, subtype), fill=subtype, y='a')) + 
@@ -814,25 +920,45 @@ make_gene_heatmap <- function(seurat_obj, subtype_order, max_genes=100) {
     scale_y_discrete(expand=c(0,0)) +
     scale_fill_manual(values=all_colors) +
     theme_minimal() +
-    coord_fixed(ratio=1/4) +
+    coord_fixed(ratio=1/8) +
     theme(
       legend.position = 'none',
       axis.text.x = element_text(angle = 90, vjust = -1.5, hjust=1),
       axis.title.y= element_blank(),
       axis.title.x=element_blank(),
       axis.text.y=element_blank(),
-      plot.margin = unit(c(0, 5.5, 5.5, 5.5), "points"))
-  
+      panel.background = element_blank(),
+      plot.margin = unit(c(0, 22, 5.5, 5.5), "points"))
+
   return(de_gene_heatmap / donor_idents / cluster_idents)
 }
 
-cd8_gene_heatmap <- make_gene_heatmap(prune_cells(scrna_cd8_all), cd8_order, max_genes=100)
-cd4_gene_heatmap <- make_gene_heatmap(prune_cells(scrna_cd4_all), cd4_order, max_genes=100)
+# cd4_pruned <- prune_cells(scrna_cd4_all, rescale=T)
+# cd8_pruned <- prune_cells(scrna_cd8_all, rescale=T)
+
+cd4_gene_heatmap <- make_gene_heatmap(cd4_pruned, cd4_order, max_genes=50, label_genes=cd4_genes, rescale=F, 
+  use_dendsort=F)
+cd8_gene_heatmap <- make_gene_heatmap(cd8_pruned, cd8_order, max_genes=50, label_genes=cd8_genes, rescale=F, 
+  use_dendsort=F)
+
+cd4_gene_heatmap[[1]] <- cd4_gene_heatmap[[1]] + 
+  scale_y_discrete('Top 50 DE genes per cluster') + ggtitle('CD4') + theme(
+    legend.position='none', axis.title.y=element_text(angle = 90))
+cd4_gene_heatmap[[2]] <- cd4_gene_heatmap[[2]] + theme(legend.position='none')
+
+cd8_gene_heatmap[[1]] <- cd8_gene_heatmap[[1]] + ggtitle('CD8')
+# cd8_gene_heatmap[[2]] <- cd8_gene_heatmap[[2]] + theme(legend.position='none')
+
+(cd4_gene_heatmap | plot_spacer() | cd8_gene_heatmap | (
+  (plot_spacer() / guide_area()) + plot_layout(heights=c(8,1)))) +
+    plot_layout(widths=c(8,0.001,9,0.1), guides='collect')
+```
+
 
 ### ADT
 
 
-
+```{r}
 adt_groups <- list(
   'Activation/Costimulation'= c(
     "IL2RA",
@@ -970,7 +1096,8 @@ cd4_stim_citeseq_map <- make_adt_heatmap(prune_cd4, adt_groups, cd4_order)
  "HMGA1, HSP90AA1, FKBP4 (mtor), HSPD1, MT-CO3, HSP90AB1, CXCL10, IL5, C1QBP, EIF5A, HSPH1, MYC, MD-ND3, SRM, MTHFD2, MT-ATP6, HSPE1, HSP8, IL22, IL13, IL2RA"
 "STIM-INACT"=
  "BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1"
-
+"NAIVE-CD62L"=
+ "SELL, MAL, KLF2, TXNIP, IL7R, LRRN3"
 "MEM-CD29"=
  "CD8A, CXCR3, CD28, CD45RO, CD29, HVEM"
 "STIM-IFNG"=
@@ -982,7 +1109,7 @@ cd4_stim_citeseq_map <- make_adt_heatmap(prune_cd4, adt_groups, cd4_order)
 "STIM-OXPHOS"=
  "ICOS, CD2, LAG3, CD80, CD30, ICOS, IL2RA"
 "STIM-INACT"=
- "Tim3, CD2, CD7, CCR6, GITR"
+ "Tim3, CD2, CD7, CCR6, TNFRSF18"
 
 NAIVE-CD7: IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7
 
@@ -1004,6 +1131,7 @@ STIM-OXPHOS-proteins: ICOS, CD2, LAG3, CD80, CD30
 
 STIM-INACT-genes: BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1
 STIM-INACT-proteins: Tim3, CD2, CD7, CCR6, GITR
+
 ```
 
 ## Protein expression
