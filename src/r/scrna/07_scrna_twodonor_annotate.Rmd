@@ -31,414 +31,54 @@ source(here::here('r','scrna','scrna_analysis_fxns.R'))
 options(future.globals.maxSize = 14000 * 1024^2)
 plan("sequential")
 plan()
+
+plots <- list()
 ```
 
-## CD8 ACT Loading
+## Load annotated subtypes
 
 ```{r}
-## CD8 ACT
 
-#load combined integrated if not already loaded
-if (!('combined.integrated.data' %in% ls())) {
-  combined.integrated.data <- readRDS(here::here(
-    '..','..','scrnaseq_tcsl154',
-    'rds','combined.integrated.umap.data.rds'))
-}
-
-scrna_cd8 <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.CD8.act_clust.clean.h5Seurat')))
-
-combined.integrated.data <- readRDS(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds','combined.integrated.umap.data.rds'))
-
-int_cd8_subset <- subset(combined.integrated.data,
-    cells=intersect(
-      names(scrna_cd8$cell), 
-      names(combined.integrated.data$cell)))
-
-scrna_cd8[['RNA']] <- int_cd8_subset@assays$RNA
-scrna_cd8[['ADT']] <- int_cd8_subset@assays$ADT
-
-cd8_metadata <- data.table(
-  scrna_cd8@meta.data, keep.rownames=T)[,
-    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
-      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
-
-scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
-scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
-
-original_metadata <- rbind(
-    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
-    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
-      rn := gsub('(.*)-\\d','\\1',rn_154)]
-
-sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
-scrna_cd8@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
-scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
-
-#CD8 act annotated clusters
-cd8_act_cluster_annotations <- fread(text="
-seurat_clusters   Activation    Subtype
-0         ACT         STIM-GLYC
-1         ACT         STIM-GNLY
-2         ACT         STIM-OXPHOS
-3         ACT         STIM-OXPHOS
-4         ACT         STIM-IFNG
-5         INACT       INACT
-6         INACT       INACT
-7         ACT         STIM-GLYC
-8         INACT       INACT
-9         INACT       INACT
-10        ACT         STIM-OXPHOS
-11        ACT         STIM-IFNG
-12        INACT       INACT
-13        ACT         STIM-OXPHOS
-14        ACT         STIM-OXPHOS
-")
-
-cd8_act_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
-addtl_metadata <- cd8_act_cluster_annotations[data.table(scrna_cd8@meta.data),
-  on=c('seurat_clusters')]
-
-scrna_cd8@meta.data$Activation <- addtl_metadata$Activation
-scrna_cd8@meta.data$Subtype <- addtl_metadata$Subtype
-scrna_cd8@meta.data$Subtype <- factor(scrna_cd8@meta.data$Subtype)
-```
-
-### CD8 ALL Loading
-
-```{r}
-scrna_cd8_all <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.CD8.all.clean.h5Seurat')))
-
-cd8_all_metadata <- data.table(
-  scrna_cd8_all@meta.data, keep.rownames=T)[,
-    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
-      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
-
-sample_subtype_map <- merge(cd8_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
-
-scrna_cd8_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
-scrna_cd8_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
-
-scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Subtype', 'Subtype')
-scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Activation', 'Activation')
-scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'seurat_clusters', 'cd8_act_clust')
-
-int_cd8_all_subset <- subset(combined.integrated.data,
-    cells=intersect(
-      names(scrna_cd8_all$cell), 
-      names(combined.integrated.data$cell)))
-
-scrna_cd8_all[['RNA']] <- int_cd8_all_subset@assays$RNA
-scrna_cd8_all[['ADT']] <- int_cd8_all_subset@assays$ADT
-rm(int_cd8_all_subset)
-
-#CD8 all annotated cluters
-cd8_all_cluster_annotations <- fread(text="
-seurat_clusters Subtype Activation
-0   NAIVE-CD62L   INACT
-1   STIM-OXPHOS  ACT
-2   NAIVE-CD7   INACT
-3   STIM-GLYC    ACT
-4   NAIVE-CD7   INACT
-5   MEM-CD29    INACT
-6   STIM-GNLY    ACT
-7   MEM-CD29    ACT
-8   NAIVE-CD7   INACT
-9   STIM-UNTR    ACT
-10  STIM-INACT    INACT
-11  STIM-INACT    INACT
-12  MEM-CD29    INACT
-13  NAIVE-CD62L   INACT
-14  MEM-CD29   INACT
-15  MEM-CD29   INACT
-16  REMOVE  REMOVE
-17  STIM-UNTR    INACT
-18  NAIVE-CD7   INACT
-19  MEM-CD29    INACT
-20  NAIVE-CD62L   INACT
-21  NAIVE-CD62L   INACT
-22  MEM-CD29    INACT
-23  NAIVE-CD7  INACT
-24  MEM-CD29    INACT
-25  REMOVE  REMOVE
-27  REMOVE  REMOVE
-28  MEM-CD29    INACT
-29  REMOVE  REMOVE
-30  REMOVE  REMOVE
-31  REMOVE  REMOVE
-")
-
-cd8_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
-
-addtl_metadata <- cd8_all_cluster_annotations[
-  data.table(scrna_cd8_all@meta.data), on=c('seurat_clusters')]
-
-setnames(addtl_metadata,
-  c('i.Activation','Activation','i.Subtype','Subtype'),
-  c('Activation.act','Activation.inact','Subtype.act','Subtype.inact'))
-
-# save inact subtypes and activation status to start
-addtl_metadata[, Subtype := Subtype.inact]
-addtl_metadata[, Activation := Activation.inact]
-
-# if old subtype is missing or old subtype is 'INACT', then use new subtype
-addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
-  Subtype := Subtype.act]
-addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
-  Activation := Activation.act]
-addtl_metadata[Subtype.act == 'INACT',
-  Subtype := Subtype.inact]
-
-
-scrna_cd8_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
-scrna_cd8_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
-
-
+#CD8
 cd8_all.h5.file <- here::here(
   '..','..','scrnaseq_tcsl154',
   'rds','scrna.wnn.int.cd8.all.annotated.h5Seurat')
-SaveH5Seurat(scrna_cd8_all, cd8_all.h5.file, overwrite=T)
-```
+scrna_cd8_all <- LoadH5Seurat(cd8_all.h5.file, overwrite=T)
 
-
-### CD4 ACT Loading
-
-```{r}
-
-scrna_cd4 <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.CD4.act_clust.clean.h5Seurat')))
-
-cd4_metadata <- data.table(
-  scrna_cd4@meta.data, keep.rownames=T)[,
-    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
-      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
-
-original_metadata <- rbind(
-    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
-    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
-      rn := gsub('(.*)-\\d','\\1',rn_154)]
-
-sample_subtype_map <- merge(cd4_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
-scrna_cd4@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
-scrna_cd4@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
-
-int_cd4_subset <- subset(combined.integrated.data,
-    cells=intersect(
-      names(scrna_cd4$cell), 
-      names(combined.integrated.data$cell)))
-
-scrna_cd4[['RNA']] <- int_cd4_subset@assays$RNA
-scrna_cd4[['ADT']] <- int_cd4_subset@assays$ADT
-
-rm(int_cd4_subset)
-```
-
-
-### CD4 ALL Loading
-
-```{r}
-scrna_cd4_all <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.CD4.clean.h5Seurat')))
-
-cd4_all_metadata <- data.table(
-  scrna_cd4_all@meta.data, keep.rownames=T)[,
-    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
-      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
-
-original_metadata <- rbind(
-    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)],
-    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)])[,
-      rn := gsub('(.*)-\\d','\\1',rn_154)]
-
-sample_subtype_map <- merge(cd4_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
-
-scrna_cd4_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
-scrna_cd4_all@meta.data[,'act_clust_154'] <- factor(NA, levels=levels(sample_subtype_map$act_clusters))
-scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
-scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$act_clust_154 <- sample_subtype_map$act_clusters
-
-int_cd4_all_subset <- subset(combined.integrated.data,
-    cells=intersect(
-      names(scrna_cd4_all$cell), 
-      names(combined.integrated.data$cell)))
-
-scrna_cd4_all[['RNA']] <- int_cd4_all_subset@assays$RNA
-scrna_cd4_all[['ADT']] <- int_cd4_all_subset@assays$ADT
-
-rm(int_cd4_all_subset)
-
-#CD4 all annotated clusters
-cd4_all_cluster_annotations <- fread(text="
-seurat_clusters Subtype Activation
-0   NAIVE-CD62L  INACT
-1   NAIVE-CD62L  INACT
-2   STAT1-IRF1  MIXED
-3   STIM-OXPHOS ACT
-4   MEM-CD29   INACT
-5   STIM-GLYC   ACT
-6   NAIVE-CD62L  INACT
-7   STIM-IFNG   ACT
-8   STIM-OXPHOS ACT
-9   MEM-CD29   INACT
-10  STAT1-IRF1  MIXED
-11  NAIVE-CD62L  INACT
-12  MEM-CD29    INACT
-13  STIM-OXPHOS ACT
-14  MEM-CD29   INACT
-15  STAT1-IRF1  MIXED
-16  STAT1-IRF1  MIXED
-17  STAT1-IRF1  MIXED
-18  MEM-CD29    INACT
-19  TH2 MIXED
-20  MEM-CD29    INACT
-21  MEM-CD29    INACT
-22  STIM-IFNG   ACT
-23  REMOVE  REMOVE
-24  REMOVE  REMOVE
-25  STIM-UNTR   INACT
-26  MEM-CD29    INACT
-27  REMOVE  REMOVE
-28  REMOVE  REMOVE
-29  REMOVE  REMOVE
-30  MEM-CD29    INACT
-")
-
-cd4_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
-
-addtl_metadata <- cd4_all_cluster_annotations[
-  data.table(scrna_cd4_all@meta.data), on=c('seurat_clusters')]
-
-scrna_cd4_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
-scrna_cd4_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
-
+#CD4
 cd4_all.h5.file <- here::here(
   '..','..','scrnaseq_tcsl154',
   'rds','scrna.wnn.int.cd4.all.annotated.h5Seurat')
-SaveH5Seurat(scrna_cd4_all, cd4_all.h5.file, overwrite=T)
-```
+scrna_cd4_all <- LoadH5Seurat(cd4_all.h5.file, overwrite=T)
 
-### All T-Cells Loading
-
-```{r}
-scrna_all <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.all.clean.h5Seurat')))
-
-scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Subtype', 'Subtype')
-scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Activation', 'Activation')
-scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'seurat_clusters', 'cd8_all_clust')
-scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Subtype', 'Subtype')
-scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Activation', 'Activation')
-scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'seurat_clusters', 'cd4_all_clust')
-
-int_all_subset <- subset(combined.integrated.data,
-    cells=intersect(
-      names(scrna_all$cell), 
-      names(combined.integrated.data$cell)))
-
-scrna_all[['RNA']] <- int_all_subset@assays$RNA
-scrna_all[['ADT']] <- int_all_subset@assays$ADT
-
-rm(combined.integrated.data)
-rm(int_all_subset)
-
+#All cells
 all.h5.file <- here::here(
   '..','..','scrnaseq_tcsl154',
   'rds','scrna.wnn.int.all.annotated.h5Seurat')
-SaveH5Seurat(scrna_all, all.h5.file, overwrite=T)
+scrna_all <- LoadH5Seurat(all.h5.file, overwrite=T)
+
 ```
 
-### GSEA subsets
-
-```{r}
-gsea_subsets <- c(
-  "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
-  "KEGG_MTOR_SIGNALING_PATHWAY",
-  "HALLMARK_MTORC1_SIGNALING",
-  "GILMORE_CORE_NFKB_PATHWAY",
-  "HALLMARK_GLYCOLYSIS",
-  "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
-  "HALLMARK_IL6_JAK_STAT3_SIGNALING",
-  "HALLMARK_MYC_TARGETS_V2",
-  "GSE23321_CD8_STEM_CELL_MEMORY_VS_CENTRAL_MEMORY_CD8_TCELL_DN",
-  "GSE23321_CD8_STEM_CELL_MEMORY_VS_CENTRAL_MEMORY_CD8_TCELL_UP",
-  "GSE23321_CENTRAL_MEMORY_VS_NAIVE_CD8_TCELL_DN",
-  "GSE23321_CENTRAL_MEMORY_VS_NAIVE_CD8_TCELL_UP",
-  "GSE23321_CENTRAL_VS_EFFECTOR_MEMORY_CD8_TCELL_DN",
-  "GSE23321_CENTRAL_VS_EFFECTOR_MEMORY_CD8_TCELL_UP",
-  "BIOCARTA_CD40_PATHWAY",
-  "BIOCARTA_41BB_PATHWAY",
-  "BIOCARTA_NFKB_PATHWAY",
-  "GO_LYMPHOCYTE_COSTIMULATION",
-  "FATTY_ACID_OXIDATION",
-  "HALLMARK_HYPOXIA",
-  "GO_NEGATIVE_REGULATION_OF_TYPE_I_INTERFERON_PRODUCTION",
-  "BIOCARTA_IFNG_PATHWAY",
-  "PID_IL12_2PATHWAY",
-  "HALLMARK_APOPTOSIS",
-  "REACTOME_PD_1_SIGNALING",
-  "HALLMARK_INTERFERON_GAMMA_RESPONSE",
-  "KEGG_CELL_ADHESION_MOLECULES_CAMS",
-  "REACTOME_INTERFERON_GAMMA_SIGNALING",
-  "HALLMARK_IL2_STAT5_SIGNALING",
-  "BIOCARTA_41BB_PATHWAY",
-  "PID_CD40_PATHWAY",
-  "PID_NFAT_TFPATHWAY",
-  "GOBP_ACTIVATION_INDUCED_CELL_DEATH_OF_T_CELLS",
-  "PID_IL2_PI3K_PATHWAY",
-  "REACTOME_FASL_CD95L_SIGNALING",
-  "PID_FAS_PATHWAY",
-  "WP_TNF_ALPHA_SIGNALING_PATHWAY",
-  "BIOCARTA_IFNA_PATHWAY")
-
-scrna_cd8 <- map_geneset(scrna_cd8_all, gsea_subsets)
-scrna_all <- map_geneset(scrna_all, gsea_subsets)
-
-### Paper gene modules
-
-Sheih_et_al_IRF <- c('CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB',
-  'GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3', 'NKG7','STMN1')
-
-Nicolet_et_al_CD29core <- c('PRSS23', 'FLNA', 'SELPLG', 'YWHAQ', 'ANXA1',
-  'CX3CR1, PXN', 'FGFBP2', 'GZMH', 'TOB1', 'CD52', 'LITAF', 'FCGR3A',
-  'ITGB1', 'LGALS1', 'HOPX', 'GZMB', 'GNLY', 'PATL2')
-
-scrna_all <- AddModuleScore(scrna_all,
-  features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core')
-scrna_all <- AddModuleScore(scrna_all,
-  features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
-
-cd4_rna_subset_markers <- FindAllMarkers(
-  scrna_cd4_all[, !(
-    scrna_cd4_all[['car']] == c('CD30') |
-    scrna_cd4_all[['Subtype']] == c('REMOVE') |
-    scrna_cd4_all[['k_type']] == c('bead_stim'))],
-  assay='SCT_INT')
-```
+## UMAP Plots
 
 ```{r}
 
 umap_dt <- data.table(cbind(scrna_all@meta.data, scrna_all@reductions$wnn.umap@cell.embeddings))
 
-umap_dt <- umap_dt[Subtype != 'REMOVE' & !is.na(Subtype) & car != 'K_only']
+# invert x axis so cd4 is on left (comes first)
+umap_dt[, wnnUMAP_1 := -wnnUMAP_1]
+
+umap_dt <- umap_dt[Subtype != 'REMOVE' & !is.na(Subtype) & car != 'K_only' & Subtype != 'NA']
+
+umap_car_order <- c("CD28","4-1BB","BAFF-R","TACI","CD40","CD30","Zeta","KLRG1","Untransduced")
+
+cluster_name <- 'Subtype'
 
 labels_dt <- umap_dt[, 
   list(wnnUMAP_1=mean(wnnUMAP_1), wnnUMAP_2=mean(wnnUMAP_2)),
   by=c('Subtype','t_type')]
 
-plots$subtypes<- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
+plots$subtypes <- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
   geom_point(size=0.3) + 
   coord_fixed() +
   geom_label_repel(
@@ -455,28 +95,14 @@ plots$subtypes<- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
 
 inset_umap_point_size = 0.05
 
-# per car
-plots$per_car <- ggplot() +
-  geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2), 
-    data=umap_dt[,list(wnnUMAP_1, wnnUMAP_2)], size=0.1, color='grey80') +
-  geom_point(aes(x=wnnUMAP_1, y=wnnUMAP_2, color=k_type), data=umap_dt, size=0.2) + 
-  facet_grid(k_type~car) +
-  coord_fixed() + 
-  theme_minimal() + 
-  theme(
-    axis.text=element_blank(),
-    axis.line = element_blank(),
-    axis.title=element_blank(),
-    panel.grid=element_blank())
-
 #per phase
 plots$per_phase <- ggplot(
-    umap_dt[order(Phase)], aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Phase)) +
-  geom_point(size=inset_umap_point_size, alpha=0.75) + 
+    umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Phase)) +
+  geom_point(size=inset_umap_point_size*0.1, alpha=0.25) + 
   coord_fixed() +
   scale_color_manual(values=phase_colors) +
   theme_minimal() + 
-  guides(color = guide_legend(override.aes = list(size = 5))) +
+  guides(color = guide_legend(override.aes = list(size = 5, alpha=1))) +
   theme(
     axis.text=element_blank(),
     axis.line = element_blank(),
@@ -488,11 +114,11 @@ plots$per_phase <- ggplot(
 plots$per_donor <- ggplot(
     umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, 
       color=factor(donor, labels=c('A','B')))) +
-  geom_point(size=inset_umap_point_size, alpha=0.75) + 
+  geom_point(size=inset_umap_point_size*0.1, alpha=0.25) + 
   scale_color_discrete('Donor') +
   coord_fixed() +
   theme_minimal() + 
-  guides(color = guide_legend(override.aes = list(size = 5))) +
+  guides(color = guide_legend(override.aes = list(size = 5, alpha=1))) +
   theme(
     axis.text=element_blank(),
     axis.line = element_blank(),
@@ -519,7 +145,7 @@ plots$activation <- ggplot(
     umap_dt[cluster_stim, on=c('t_type','Subtype')][sample(.N)], 
     aes(x=wnnUMAP_1, y=wnnUMAP_2, 
       color=cd19_clust_act_l2fc)) +
-  geom_point(size=inset_umap_point_size, alpha=0.75) + 
+  geom_point(size=inset_umap_point_size*0.1, alpha=0.25) + 
   scale_color_distiller(
     'Stim:Unstim',
     palette='PuOr', direction=-1, oob=scales::squish, limits=c(-5,5),
@@ -543,9 +169,287 @@ combined_inset_umap <- plot_grid(
   plots$activation,
   ncol=1,
   rel_heights=c(1,-0.1,1,-0.1,1))
+
+# ratio = 1.8
+plots$combined_umap <- (plots$subtypes + theme(legend.position='none') | 
+    (plots$per_phase / plots$per_donor / plots$activation)) + plot_layout(widths=c(4.5,1))
+
 ```
 
-# CAR vs clusters
+## Individual CAR UMAPs
+
+```{r}
+
+car_umap_grid_dt <- umap_dt[car != 'CD30']
+bead_stim_grid_dt <- car_umap_grid_dt[
+  car == 'Untransduced' & k_type %in% c('bead_stim','baseline')][,
+    car := 'CD3/CD28 Beads'][
+      k_type == 'bead_stim', k_type := 'cd19+']
+car_umap_grid_dt <- rbind(
+  car_umap_grid_dt[!(car == 'Untransduced' & k_type %in% c('bead_stim'))],
+  bead_stim_grid_dt)
+
+car_umap_grid_dt[, k_type := factor(k_type, labels=c('Baseline','Stimulated'))]
+car_umap_grid_dt[, car := factor(car, levels=c(umap_car_order, 'CD3/CD28 Beads'))]
+
+# sample evenly from each CAR and donor
+sampling_dt <- car_umap_grid_dt[, .N, by=c('k_type', 'car','donor')][,
+  list(least_car=car[which.min(N)], least_N=min(N)), by=c('k_type','donor')]
+
+sampled_umap <- car_umap_grid_dt[
+  sampling_dt, on=c('donor','k_type')][,
+    .SD[sample(.N, least_N),], by=c('car','donor','k_type')]
+
+plots$per_car_umap <- ggplot(sampled_umap, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
+  geom_point(
+    data=copy(car_umap_grid_dt)[, c('car','k_type') := list(NULL,NULL)],
+    size=0.1, color='grey90') + 
+  geom_point(size=0.05) +
+  coord_fixed() +
+  scale_color_manual(values=all_colors) +
+  facet_grid(k_type~car, switch = "y") +
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  theme_minimal() + 
+  theme(
+    legend.position="bottom",
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    panel.border=element_rect(color='grey50', fill=NA),
+    panel.grid=element_blank())
+```
+
+## Paper Correlation UMAPs
+
+```{r}
+
+### Paper gene modules
+
+DefaultAssay(scrna_all) <- 'SCT_INT'
+
+Sheih_et_al_IRF <- c('CCL4','CCL5','CD27','CD74','FGFBP2','GNLY','GZMA','GZMB',
+  'GZMH','GZMK','HLA-DRA','HLA-DRB1','HLA-DRB5','IFNG','LAG3', 'NKG7','STMN1')
+
+Nicolet_et_al_CD29core <- c('PRSS23', 'FLNA', 'SELPLG', 'YWHAQ', 'ANXA1',
+  'CX3CR1, PXN', 'FGFBP2', 'GZMH', 'TOB1', 'CD52', 'LITAF', 'FCGR3A',
+  'ITGB1', 'LGALS1', 'HOPX', 'GZMB', 'GNLY', 'PATL2')
+
+if (!('Nicolet_et_al_CD29core1' %in% names(scrna_all@meta.data))) 
+  scrna_all <- AddModuleScore(scrna_all,
+    features=list('1'=Nicolet_et_al_CD29core),name='Nicolet_et_al_CD29core')
+if (!('Sheih_et_al_IRF1' %in% names(scrna_all@meta.data))) 
+  scrna_all <- AddModuleScore(scrna_all,
+    features=list('1'=Sheih_et_al_IRF),name='Sheih_et_al_IRF')
+
+umap_dt <- data.table(cbind(scrna_all@meta.data, scrna_all@reductions$wnn.umap@cell.embeddings))
+# invert x axis so cd4 is on left (comes first)
+umap_dt[, wnnUMAP_1 := -wnnUMAP_1]
+
+#reorder cars
+umap_dt[, car := factor(car, levels=umap_car_order)]
+
+umap_dt <- umap_dt[Subtype != 'REMOVE' & !is.na(Subtype) & car != 'K_only' & Subtype != 'NA']
+
+umap_car_order <- c("CD28","4-1BB","BAFF-R","TACI","CD40","CD30","Zeta","KLRG1","Untransduced")
+
+interpolate_score <- function(umap_data, resolution, score_name, plot=T, pal_name) {
+
+  data <- umap_data[,list(t_type, wnnUMAP_1, wnnUMAP_2, score=get(score_name))]
+  data[, scaled := score]
+  data[scaled < 0, scaled := 0]
+  data[, scaled := rescale(scaled, to=c(0,1)), by=c('t_type')]
+  
+  # remove single point outliers (mostly in dead zone between cd4/cd8)
+  data_no_outliers <- data[!(-wnnUMAP_1 > 1 & -wnnUMAP_1 < 3 & wnnUMAP_2 > -1.5)]
+  
+  grid_resolution=500
+  
+  # perform surface approximation from bivariate scattered data using B-splines
+  mba <- mba.surf(data_no_outliers[, 
+    list(wnnUMAP_1, wnnUMAP_2, scaled)], grid_resolution, grid_resolution)
+  mba_interp <- data.table(
+    as.vector(rep(mba$xyz.est$x, grid_resolution)),
+    as.vector(rep(mba$xyz.est$y, each=grid_resolution)),
+    as.vector(mba$xyz.est$z))
+  names(mba_interp) <- c('wnnUMAP_1','wnnUMAP_2','score')
+  mba_interp[is.na(score), score := min(mba_interp$score, na.rm=T)]
+  
+  if(plot) {
+    return(ggplot(data, aes(x=wnnUMAP_1, y=wnnUMAP_2)) +
+      geom_point(size=0.1, color='grey30') +
+      geom_contour_filled(data=mba_interp, aes(z=score), alpha=0.8, bins=9) +
+      scale_fill_manual(values=c('white','white',brewer.pal(9,pal_name)[3:9])) + 
+      coord_fixed() +
+      theme_minimal() +
+      theme(
+        axis.text=element_blank(),
+        axis.line = element_blank(),
+        axis.title=element_blank(),
+        panel.border=element_rect(color='grey50', fill=NA),
+        panel.grid=element_blank()))
+  } else {
+    return(mba_interp)
+  }
+}
+
+
+plots$paper_correlation_umap <- (
+  interpolate_score(umap_dt, 500, 'Sheih_et_al_IRF1', pal_name='Greys') + 
+    ggtitle('Sheih et al. 2020', 
+      subtitle='Clonotypes enriched after\nengraftment in CAR patients') | 
+  (interpolate_score(umap_dt, 500, 'Nicolet_et_al_CD29core1', pal_name='Greys') +
+    ggtitle('Nicolet et al. 2020', 
+      subtitle='CD29+ Cytotoxic signature,\npredicts survival in Melanoma'))) &
+  theme(
+    legend.position='none',
+    plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
+
+umap_dt[, t_subtype := interaction(t_type, Subtype)]
+
+umap_dt[, t_subtype := factor(t_subtype, 
+  levels=c(paste('CD4',cd4_order,sep='.'), paste('CD8',cd8_order,sep='.')))]
+
+std <- function(x) sd(x)/sqrt(length(x))
+
+# get subtype significance data
+get_sig_data <- function(subtype_dt, col_name) {
+  subtype_lm <- with(subtype_dt, lm(formula = score ~ 0 + get(col_name)))
+  ci_data <- data.table(
+    confint(subtype_lm, level=0.99), keep.rownames=T)[,
+      rn := gsub('get\\(col_name\\)','', rn)]
+  padj <- summary(subtype_lm)$coefficients[,4]
+  padj <- data.table(rn= gsub('get\\(col_name\\)','', names(padj)), padj=padj)
+  sig_data <- merge(padj, ci_data, on='rn')
+  setnames(sig_data, 'rn', col_name)
+  names(sig_data)[c(3,4)] <- c('lwr','upr')
+  return(sig_data)
+}
+
+make_minidot_plot <- function(umap_data, module_name) {
+  
+  umap_means <- umap_data[, score := get(module_name)][, 
+    list(Subtype=Subtype[1], t_type=t_type[1], score=mean(score), stdev=std(score)), 
+      by=c('t_subtype','donor')]
+  
+  sig_data <- umap_data[, get_sig_data(.SD, 'Subtype'), by=c('donor','t_type')]
+  umap_means <- merge(umap_means, sig_data, on=c('t_type','donor','Subtype'))
+  
+  umap_means[padj < 0.01, sig_lbl := '*']
+  umap_means[padj < 0.001, sig_lbl := '**']
+  umap_means[padj < 0.0001, sig_lbl := '***']
+  
+  plot <- ggplot(umap_means, aes(
+      x=t_subtype, y=score, fill=Subtype, 
+      color=Subtype, group=interaction(donor,Subtype))) +
+    geom_linerange(
+      aes(ymin=lwr, ymax=upr), size=0.5,
+      color='grey30',
+      position=position_dodge(1)) +
+    geom_point(
+       size=2,
+       position=position_dodge(1)) + 
+    # geom_text(
+    #   size=5,
+    #   aes(label=sig_lbl),
+    #   vjust=-1,
+    #   position=position_dodge(1)) +
+    facet_wrap(~t_type, scales='free_x') +
+    scale_fill_manual(values=all_colors) +
+    scale_color_manual(values=all_colors) +
+    geom_vline(xintercept = -Inf) + geom_hline(yintercept= -Inf) +
+    geom_hline(yintercept = 0, linetype=2, color='grey80') + 
+    scale_x_discrete('', labels=setNames(
+      gsub('CD\\d\\.','',levels(umap_dt$t_subtype)), levels(umap_dt$t_subtype))) +
+    theme_minimal() +
+    theme(
+      legend.position = 'none',
+      axis.title.y = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      panel.background=element_rect(fill=NA, color=NA),
+      panel.border=element_rect(fill=NA, color=NA),
+      strip.text = element_text(vjust = -1.0), 
+      panel.spacing.y = unit(-2, "lines"),
+      panel.grid = element_blank())
+  
+  return(plot)
+}
+
+make_minidot_plot_car <- function(umap_data, module_name, run_test=F) {
+  
+  # plot means
+  umap_means <- umap_data[, score := get(module_name)][, 
+    list(score=mean(score), stdev=std(score)), 
+      by=c('t_type','donor','car')]
+  
+  #significance
+  sig_data <- umap_data[, get_sig_data(.SD,'car'), by=c('donor','t_type')]
+  umap_means <- merge(umap_means, sig_data, on=c('t_type','donor','car'))
+  
+  plot <- ggplot(umap_means, aes(
+      x=car, y=score, fill=car, 
+      color=car, group=interaction(donor,car))) +
+    geom_linerange(
+      aes(ymin=lwr, ymax=upr), size=0.5,
+      color='grey30',
+      position=position_dodge(1)) +
+     geom_point(
+       size=2,
+       position=position_dodge(1)) + 
+    facet_wrap(~t_type, scales='free_x') +
+    facet_wrap(~t_type, scales='free_x') +
+    scale_fill_manual(values=car_colors_umap) +
+    scale_color_manual(values=car_colors_umap) +
+    geom_vline(xintercept = -Inf) + geom_hline(yintercept= -Inf) +
+    geom_hline(yintercept = 0, linetype=2, color='grey80') + 
+    theme_minimal() +
+    theme(
+      legend.position = 'none',
+      axis.title.y = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      panel.background=element_rect(fill=NA, color=NA),
+      panel.border=element_rect(fill=NA, color=NA),
+      strip.text = element_text(vjust = -1.0), 
+      panel.spacing.y = unit(-2, "lines"),
+      panel.grid = element_blank())
+  
+  return(plot)
+}
+
+car_colors_umap <- car_colors
+names(car_colors_umap)[1] <- '4-1BB'
+names(car_colors_umap)[8] <- 'Zeta'
+names(car_colors_umap)[7] <- 'CD30'
+car_colors_umap <- c(car_colors_umap, 'Untransduced'='grey60')
+car_colors_umap <- car_colors_umap[umap_car_order]
+
+umap_nocd30_dt <- umap_dt[car != 'CD30']
+
+cluster_zscore_plots <- (((make_minidot_plot(umap_dt, 'Sheih_et_al_IRF1') + labs(y='cluster z-score') + theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5))) | make_minidot_plot(umap_dt, 'Nicolet_et_al_CD29core1')))
+
+car_zscore_plots <- (((make_minidot_plot_car(umap_nocd30_dt, 'Sheih_et_al_IRF1') + labs(y='CAR z-score') + theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5))) | make_minidot_plot_car(umap_nocd30_dt, 'Nicolet_et_al_CD29core1')))
+
+plots$combined_paper_umap <- (
+  (plots$paper_correlation_umap & theme(plot.margin= unit(c(0, 0, 0, 0), "points"))) /
+    cluster_zscore_plots / car_zscore_plots) +
+      plot_layout(heights=c(4,1,1))
+
+# 
+# # kw/ dunn tests
+# kw_tests <- umap_dt[, dunn_test(formula = Sheih_et_al_IRF1 ~ Subtype, data=.SD), by=c('t_type','donor')]
+# ggplot(kw_tests) + geom_tile(aes(x=group1, y=group2, fill=-log(p.adj), color=p.adj < 0.05)) + facet_wrap(~t_type+donor, scales='free') + scale_fill_distiller(palette='Greens', oob=scales::oob_squish_any, limits=c(-log(0.05), -log(0.001)), direction=1) + theme(axis.text.x=element_text(angle = 90, vjust = 1, hjust=0.5))
+# 
+# kw_tests <- umap_dt[, dunn_test(formula = Nicolet_et_al_CD29core1 ~ Subtype, data=.SD), by=c('t_type','donor')]
+# ggplot(kw_tests) + geom_tile(aes(x=group1, y=group2, fill=-log(p.adj), color=p.adj < 0.05)) + facet_wrap(~t_type+donor, scales='free') + scale_fill_distiller(palette='Greens', oob=scales::oob_squish_any, limits=c(-log(0.05), -log(0.001)), direction=1) + theme(axis.text.x=element_text(angle = 90, vjust = 1, hjust=0.5))
+# 
+
+plots$combined_paper_umap
+
+```
+
+# CAR/Cluster Dotplots
 
 ```{r}
 
@@ -572,11 +476,9 @@ cd8_order <- c(
   'NAIVE-CD62L'
 )
 
-car_pct_dotplot(data.table(scrna_cd8_all@meta.data)[
-    k_type == 'cd19+' & !is.na(Subtype) & car != 'CD30' & Subtype != 'REMOVE'],
-    'cd8_order')
 
-car_pct_dotplot <- function(car_metadata, subtype_order) {
+
+car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15) {
   
   car_clust_pct_act <- data.table(car_metadata)[, .N, 
     by=c('car','Subtype')][, 
@@ -591,56 +493,115 @@ car_pct_dotplot <- function(car_metadata, subtype_order) {
   
   pct_dotplot <- ggplot(car_clust_pct_act) + 
     geom_point(aes(
-      x=factor(Subtype, levels=rev(subtype_order)),
-      y=factor(car, c("CD28","4-1BB","BAFF-R","TACI","CD40","TNR8","Zeta","KLRG1","Untransduced")),
-      color=log2_ce_trunc, size=pct_car)) + 
-    scale_color_distiller('log2\nCAR Enrichment', palette='PRGn', direction=1, 
+        x=factor(Subtype, levels=rev(subtype_order)),
+        y=factor(car, umap_car_order),
+        fill=log2_ce_trunc, size=pct_car),
+      pch=21, color='grey30') + 
+    scale_fill_distiller('log2\nCAR Enrichment', palette='PRGn', direction=1, 
       breaks=c(-1,-0.5,0,0.5,1), labels=c('< -1','-0.5','0','0.5','> 1')) + 
-    scale_size('% CAR Cells', range=c(1,15)) + 
+    scale_size('% CAR Cells', range=c(1,max_size), 
+      breaks=c(0.1, 0.25, 0.4), labels=c('10%','25%','40%')) + 
     theme_minimal() + 
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
     coord_flip() +
     labs(y='', x='')
   
-  return(pct_dotplot)
+  unique_car_v_subsets <- unique(car_clust_pct_act[, list(car, Subtype)])
+  n_lines <- unique_car_v_subsets[, length(unique(Subtype))]
+  
+  cluster_idents <- ggplot(unique_car_v_subsets) + 
+    geom_tile(aes(y=factor(Subtype, levels=rev(subtype_order)), fill=Subtype, x='a'), width=0.9, height=0.9) + 
+    #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
+    scale_x_discrete(expand=c(0,0)) + 
+    scale_y_discrete(expand=c(0,0)) +
+    scale_fill_manual(values=all_colors) +
+    theme_minimal() +
+    coord_fixed(ratio=3) +
+    theme(
+      legend.position = 'none',
+      axis.title.x= element_blank(),
+      axis.title.y=element_blank(),
+      axis.text.x=element_blank(),
+      panel.background = element_blank(),
+      panel.grid = element_blank(),
+      plot.margin = unit(c(0, 22, 5.5, 5.5), "points"))
+  
+  pct_dotplot_combined <- cluster_idents + theme(plot.margin=unit(c(5.5,5.5,5.5,-5.5), "points")) | 
+    (pct_dotplot + theme(
+      axis.text.y=element_blank(),
+      strip.text.x=element_blank(),
+      axis.title.y=element_blank(),
+      plot.margin = unit(c(5.5, -5.5, 5.5, 5.5), "points")))
+  
+  return(pct_dotplot_combined)
 }
 
+plots$cd8_dotplot <- car_pct_dotplot(
+  data.table(scrna_cd8_all@meta.data)[
+    k_type == 'cd19+' & !is.na(Subtype) &
+    car != 'CD30' & Subtype != 'REMOVE' &
+    Subtype != 'NA'], cd8_order, max_size=9)
 
-# cd4 dots
-car_clust_pct_act <- data.table(scrna_cd4_all@meta.data)[
-  k_type == 'cd19+' & !is.na(Subtype) & car != 'CD30' & Subtype != 'REMOVE', .N, 
-  by=c('car','Subtype')][, 
-    pct_car := N/sum(N), by='car'][,
-      clust_count := sum(N), by='Subtype'][,
-        log2_clust_enrich := log2(pct_car/mean(pct_car)), by='Subtype']
+plots$cd4_dotplot <- car_pct_dotplot(
+  data.table(scrna_cd4_all@meta.data)[
+    k_type == 'cd19+' & !is.na(Subtype) &
+    car != 'CD30' & Subtype != 'REMOVE' &
+    Subtype != 'NA'], cd4_order, max_size=9)
 
-car_clust_pct_act[, log2_ce_trunc := ifelse(
-  test= abs(log2_clust_enrich) > 1, 
-  yes= 1 * sign(log2_clust_enrich), 
-  no= log2_clust_enrich)]
+plots$cd8_unstim <- car_pct_dotplot(
+  data.table(scrna_cd8_all@meta.data)[
+    k_type == 'baseline' & !is.na(Subtype) & car != 'K_only' & !grepl('STIM',Subtype) &
+    car != 'CD30' & Subtype != 'REMOVE' &
+    Subtype != 'NA'], cd8_order, max_size=9)
 
-plots$cd4_stim_dots <- ggplot(car_clust_pct_act) + 
-  geom_point(aes(
-    x=factor(Subtype, levels=rev(cd4_order)),
-    y=factor(car, c("CD28","4-1BB","BAFF-R","TACI","CD40","TNR8","Zeta","KLRG1","Untransduced")),
-    color=log2_ce_trunc, size=pct_car)) + 
-  scale_color_distiller('log2\nCAR Enrichment', palette='PRGn', direction=1, 
-    breaks=c(-1,-0.5,0,0.5,1), labels=c('< -1','-0.5','0','0.5','> 1')) + 
-  scale_size('% CAR Cells', range=c(1,15), breaks=c(0.1,0.2,0.3)) + 
-  theme_minimal() + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  coord_flip() +
-  labs(y='', x='')
+plots$cd4_unstim <- car_pct_dotplot(
+  data.table(scrna_cd4_all@meta.data)[
+    k_type == 'baseline' & !is.na(Subtype) & car != 'K_only' & !grepl('STIM',Subtype) &
+    car != 'CD30' & Subtype != 'REMOVE' &
+    Subtype != 'NA'], cd4_order, max_size=9)
 
-plot_grid(
-  plots$cd4_stim_dots+theme(axis.text.x = element_blank()),
-  plots$cd8_stim_dots,
-  ncol=1,
-  rel_heights=c(0.8,1))
+plots$car_dotplot <- (
+  ((plots$cd4_dotplot + ggtitle('CD4 Stimulated') + 
+      theme(legend.position='none', axis.text.x=element_blank())) / 
+     (plots$cd8_dotplot + ggtitle('CD8 Stimulated') +
+        # color CAR names
+        theme(
+          axis.text.x=
+            element_text(color=car_colors_umap[names(car_colors_umap) != 'CD30'],
+          face='bold',
+          size=rel(1.2))))) & 
+      theme(plot.title.position="plot")
+  ) + 
+  plot_layout(guides='collect', heights=c(8,9)) & 
+  theme(plot.margin=unit(c(0,0,0,0),'points'))
+
+plots$car_dotplot_unstim <- (
+  ((plots$cd4_unstim + ggtitle('CD4 Baseline') + 
+      theme(legend.position='none', axis.text.x=element_blank())) / 
+     (plots$cd8_unstim + ggtitle('CD8 Baseline'))) & 
+      theme(plot.title.position="plot")
+  ) + 
+  plot_layout(guides='collect', heights=c(4,3)) & 
+  theme(plot.margin=unit(c(0,0,0,0),'points'))
+
+plots$car_dotplot_all <- (
+  (
+    (plots$cd4_dotplot + ggtitle('CD4 Stimulated') + 
+      theme(legend.position='none', axis.text.x=element_blank())) / 
+    (plots$cd8_dotplot + ggtitle('CD8 Stimulated') +
+      theme(legend.position='none', axis.text.x=element_blank())) /
+    (plots$cd4_unstim + ggtitle('CD4 Baseline') + 
+      theme(legend.position='none', axis.text.x=element_blank())) / 
+     (plots$cd8_unstim + ggtitle('CD8 Baseline'))
+  ) & theme(plot.title.position="plot")) + 
+  plot_layout(guides='collect', heights=c(8,9,4,3)) & 
+  theme(plot.margin=unit(c(0,0,0,0),'points'))
+
+
 
 ```
 
-
+## Gene Heatmaps
 
 ```{r}
 # find_genes_parallel <- function(seurat_obj, ident_name, 'SCT_INT', min.pct=0.25, features=NULL, test.use='wilcox') {
@@ -729,7 +690,7 @@ plot_grid(
 
 cd4_genes <- list(
   'STIM-IFNG'= c(
-    "GZMA", "GZMH", "CD2", "CD74", "HLA-DRA", "IFNG", "ITGB2",
+    "GZMA", "CD2", "CD74", "HLA-DRA", "IFNG", "ITGB2",
     "PRF1", "EOMES", "GNLY", "LAG3"),
   'STIM-GLYC'= c(
     "HILPDA", "IL2RA", "BNIP3", "PGK1", "ARG2", "CTLA4", "TNFRSF9", "TNFRSF18"),
@@ -745,14 +706,14 @@ cd4_genes <- list(
   'TH2'= c(
     "IL5", "IL13", "GATA3", "IL4"),
   'MEM-CD29'= c(
-    "S100A4", "KLRB1", "ITGB1", "ITGA4", "GZMH", "HOPX",
+    "S100A4", "KLRB1", "ITGB1", "ITGA4", "HOPX",
     "NKG7", "NEAT1", "CXCR3", "KLRG1", "CCR5"))
 
 cd8_genes <-list(
   "NAIVE-CD7"= c(
-    "IFITM2", "VIM", "STMN1", "HMGN2", "STIM1", "CD7", "IFITM1", "TCF7"),
+    "IFITM2", "VIM", "STMN1", "HMGN2", "STIM1", "CD7", "IFITM1", "TCF7","LEF1","CD27"),
   "MEM-CD29"= c(
-    "EOMES", "ITGA1", "ITGB2", "CXCR3","S100A4", "ANXA1", "KLRG1", "HOPX"),
+    "ITGA1", "ITGB2", "CXCR3","S100A4", "ANXA1", "KLRG1", "HOPX","KLRB1"),
   "STIM-IFNG"= c(
     "IFNG", "GZMH", "GZMK", "GZMB", "NKG7", "CCR5", "HLA-DQA1", "CD74",
     "CD2","CCL5","CCL3",'CCL4'),
@@ -762,8 +723,8 @@ cd8_genes <-list(
   "STIM-UNTR"= c(
     "S100A10", "CD38", "LAYN", "ENO1", "PGK1", "IGFBP2", "NEAT1", "STAT1", "CD27", "TNFAIP2"),
   "STIM-OXPHOS"= c(
-    "HMGA1", "FKBP4", "HSPD1", "HSP90AB1",
-    "IL5", "C1QBP", "EIF5A", "HSPH1", "MD-ND3", "SRM",
+    "FKBP4", "HSPD1", "HSP90AB1",
+    "C1QBP", "EIF5A", "HSPH1", "MD-ND3", "SRM",
     "IL2RA"),
   "STIM-INACT"= c(
     "CTSW", "DDX21", "CYP1B1", "BATF3", "GZMA", "TNFSF10", "PFN1"),
@@ -774,7 +735,8 @@ cd8_genes <-list(
 
 make_gene_heatmap <- function(
     seurat_obj, subtype_order, max_genes=100, label_genes=NULL, 
-    rescale=T, use_dendsort=T) {
+    rescale=T, use_dendsort=T, label_width=3.25, label_font_size=2.25,
+    label_line_width=22) {
   
   if (rescale)
     seurat_obj <- ScaleData(seurat_obj, assay='SCT_INT')
@@ -871,16 +833,18 @@ make_gene_heatmap <- function(
     scale_y_discrete(expand=c(0,0)) +
     coord_cartesian(clip = 'off') +
     geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
-    geom_segment(data=separator_table, color='black', linetype=2, 
-      y=separator_table$pos, yend=separator_table$pos, x=0.5, xend=max_x+3.25) +
-    scale_fill_distiller(palette='PuOr', oob=scales::squish, limit=c(-2, 2), type='div') +
+    geom_segment(data=separator_table[-.N], color='black', linetype=2, 
+      aes(y=pos, yend=pos), x=0.5, xend=max_x+label_width) +
+    scale_fill_distiller('Gene\nz-score',
+      palette='PuOr', oob=scales::squish, limit=c(-2, 2), type='div',
+      breaks=c(2,0,-2), labels=c('≥2','0','≤-2')) +
     geom_label(
       data=label_table,
       label.size=0,
       fill=NA,
       nudge_x=0.55,
-      size=2.25,
-      aes(x=max_x, y=pos-2.5, label=stringr::str_wrap(V1, 22), vjust=1, hjust=0)
+      size=label_font_size,
+      aes(x=max_x, y=pos-2.5, label=stringr::str_wrap(V1, label_line_width), vjust=1, hjust=0)
     ) +
     theme_minimal() +
     # geom_text_repel(
@@ -904,8 +868,9 @@ make_gene_heatmap <- function(
     scale_x_discrete(labels=row_names, expand=c(0,0)) + 
     scale_y_discrete(expand=c(0,0)) +
     geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
+    scale_fill_discrete('Donor', labels=c('A','B')) + 
     theme_minimal() +
-    coord_fixed(ratio=1/8) +
+    coord_fixed(ratio=1/3) +
     theme(
       axis.text.x=element_blank(),
       axis.text.y=element_blank(),
@@ -920,10 +885,10 @@ make_gene_heatmap <- function(
     scale_y_discrete(expand=c(0,0)) +
     scale_fill_manual(values=all_colors) +
     theme_minimal() +
-    coord_fixed(ratio=1/8) +
+    coord_fixed(ratio=1/3) +
     theme(
       legend.position = 'none',
-      axis.text.x = element_text(angle = 90, vjust = -1.5, hjust=1),
+      axis.text.x = element_text(angle = 90, vjust = -0.75, hjust=1),
       axis.title.y= element_blank(),
       axis.title.x=element_blank(),
       axis.text.y=element_blank(),
@@ -933,25 +898,60 @@ make_gene_heatmap <- function(
   return(de_gene_heatmap / donor_idents / cluster_idents)
 }
 
-# cd4_pruned <- prune_cells(scrna_cd4_all, rescale=T)
-# cd8_pruned <- prune_cells(scrna_cd8_all, rescale=T)
+if (!(exists('cd4_pruned'))) {
+  Idents(scrna_cd4_all) <- 'Subtype'
+  cd4_pruned <- prune_cells(scrna_cd4_all, rescale=T)
+}
 
-cd4_gene_heatmap <- make_gene_heatmap(cd4_pruned, cd4_order, max_genes=50, label_genes=cd4_genes, rescale=F, 
-  use_dendsort=F)
-cd8_gene_heatmap <- make_gene_heatmap(cd8_pruned, cd8_order, max_genes=50, label_genes=cd8_genes, rescale=F, 
-  use_dendsort=F)
+if (!(exists('cd8_pruned'))) {
+  Idents(scrna_cd8_all) <- 'Subtype'
+  cd8_pruned <- prune_cells(scrna_cd8_all, rescale=T)
+}
 
-cd4_gene_heatmap[[1]] <- cd4_gene_heatmap[[1]] + 
+plots$cd4_gene_heatmap <- make_gene_heatmap(
+  cd4_pruned, cd4_order, 
+  max_genes=50, label_genes=cd4_genes, rescale=F, 
+  use_dendsort=T,
+  label_width = 6.75, label_font_size=1.8, label_line_width=18)
+
+plots$cd8_gene_heatmap <- make_gene_heatmap(
+  cd8_pruned, cd8_order, max_genes=50,
+  label_genes=cd8_genes, rescale=F, 
+  use_dendsort=T,
+  label_width = 6.75, label_font_size=1.8, label_line_width=18)
+
+plots$cd4_gene_heatmap[[1]] <- plots$cd4_gene_heatmap[[1]] + 
   scale_y_discrete('Top 50 DE genes per cluster') + ggtitle('CD4') + theme(
     legend.position='none', axis.title.y=element_text(angle = 90))
-cd4_gene_heatmap[[2]] <- cd4_gene_heatmap[[2]] + theme(legend.position='none')
+plots$cd4_gene_heatmap[[2]] <- plots$cd4_gene_heatmap[[2]] + theme(legend.position='none')
 
-cd8_gene_heatmap[[1]] <- cd8_gene_heatmap[[1]] + ggtitle('CD8')
-# cd8_gene_heatmap[[2]] <- cd8_gene_heatmap[[2]] + theme(legend.position='none')
+legend <- plot_grid(
+  get_legend(
+    # create some space to the left of the legend
+    cd8_gene_heatmap[[1]] + theme(
+      legend.box.margin = margin(0, 0, 0, 12),
+      legend.justification=c(1,1), legend.position=c(1,1),
+      legend.key.width=unit(0.4, 'lines'))),
+  get_legend(
+    cd8_gene_heatmap[[2]] + theme(
+      legend.box.margin = margin(0, 0, 0, 12),
+      legend.justification=c(1,0), legend.position=c(1,0),
+      legend.key.width=unit(0.4, 'lines'))),
+  ncol=1
+)
 
-(cd4_gene_heatmap | plot_spacer() | cd8_gene_heatmap | (
-  (plot_spacer() / guide_area()) + plot_layout(heights=c(8,1)))) +
-    plot_layout(widths=c(8,0.001,9,0.1), guides='collect')
+plots$cd8_gene_heatmap[[1]] <- plots$cd8_gene_heatmap[[1]] + ggtitle('CD8')
+plots$cd8_gene_heatmap[[1]] <- plots$cd8_gene_heatmap[[1]] + theme(legend.position='none')
+plots$cd8_gene_heatmap[[2]] <- plots$cd8_gene_heatmap[[2]] + theme(legend.position='none')
+
+heatmap_ratio = 2.2
+plots$combined_gene_heatmap <- (
+  plots$cd4_gene_heatmap | plot_spacer() | plots$cd8_gene_heatmap | plot_spacer() | (
+  (plot_spacer() / legend) + plot_layout(heights=c(1,1)))) +
+    plot_layout(widths=c(8,2,9,2,3))
+
+plots$combined_gene_heatmap
+
 ```
 
 
@@ -1074,80 +1074,76 @@ make_adt_heatmap <- function(seurat_obj, adt_groups, subtype_order) {
 cd8_stim_subsets <- c('STIM-GLYC','STIM-OXPHOS','STIM-IFNG','STIM-GNLY','STIM-INACT','STIM-UNTR')
 cd4_stim_subsets <- c('STIM-GLYC','STIM-OXPHOS','STIM-IFNG','STAT1-IRF1','STIM-UNTR')
 
-scrna_cd8$Subtype <- NULL
-scrna_cd8 <- map_clusters(scrna_cd8_all, scrna_cd8, 'Subtype', 'Subtype')
-prune_cd8 <- prune_cells(scrna_cd8, subtypes= cd8_stim_subsets, k_types='cd19+')
-cd8_stim_citeseq_map <- make_adt_heatmap(prune_cd8, adt_groups, cd8_order)
+cd8_stim_prune <- prune_cells(scrna_cd8_all, subtypes= cd8_stim_subsets, k_types='cd19+')
+cd8_stim_citeseq_map <- make_adt_heatmap(cd8_stim_prune, adt_groups, cd8_order)
 
-prune_cd4 <- prune_cells(scrna_cd4_all, subtypes= cd4_stim_subsets, k_types='cd19+')
-cd4_stim_citeseq_map <- make_adt_heatmap(prune_cd4, adt_groups, cd4_order)
+cd4_stim_prune <- prune_cells(scrna_cd4_all, subtypes= cd4_stim_subsets, k_types='cd19+')
+cd4_stim_citeseq_map <- make_adt_heatmap(cd4_stim_prune, adt_groups, cd4_order)
 
-"NAIVE-CD7"=
- "IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7"
-"MEM-CD29"=
- "SELL, ZEB2, EOMES, ITGA1, ITGB2, ITGB7, ITGA4, ITGB1, PLEK, CXCR3, CD59, ID2, IGFBP3, MHC-II, PYHIN1, PRR5L, S100A4, ANXA1, CCL5, TNFSF9, BATF, CX3CR1, FGFBP2, KLRG1, NKG7, GZMK, CST7, HOPX"
-"STIM-IFNG"=
- "IFNG, GZMH, GZMK, GZMB, NKG7, CCR5, HLA-DQA1, CD74, PRDM1, CD2, LAG3, TNFRSF9, FABP5, CCL5, FAM162A, LGALS1, SRM, HLA-DRA, HLA-DQA2, ID2, GNLY, GZMB, ZBED2, ALDOC, HOPX, CTSD, ENO1, SLAMF1, DPP4, FCGR3A, PYHIN1"
-"STIM-GLYC"=
- "ARG2, BNIP3, BNIP3L, LAYN, HILPDA, MT2, MT2A, MT1E, MT1X, LDHA, DDIT3, DDIT4, FAM162A, PKM, JUNB, XCL2, MTHFD2, DUSP4, LDHA, ALDOC, SLC2A3, LTA, GADD45A, JUND, TNFAIP3"
-"STIM-UNTR"=
- "S100A10, CD38, LAYN, ENO1, PGK1, IGFBP2, NEAT1, STAT1, CD27, TNFAIP2"
-"STIM-OXPHOS"=
- "HMGA1, HSP90AA1, FKBP4 (mtor), HSPD1, MT-CO3, HSP90AB1, CXCL10, IL5, C1QBP, EIF5A, HSPH1, MYC, MD-ND3, SRM, MTHFD2, MT-ATP6, HSPE1, HSP8, IL22, IL13, IL2RA"
-"STIM-INACT"=
- "BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1"
-"NAIVE-CD62L"=
- "SELL, MAL, KLF2, TXNIP, IL7R, LRRN3"
-"MEM-CD29"=
- "CD8A, CXCR3, CD28, CD45RO, CD29, HVEM"
-"STIM-IFNG"=
- "CD2, CD49b, CD45RO, CD28"
-"STIM-GLYC"=
- "IL2RA, PD1, LAG3"
-"STIM-UNTR"=
- "CD5, CCR5, CCR7"
-"STIM-OXPHOS"=
- "ICOS, CD2, LAG3, CD80, CD30, ICOS, IL2RA"
-"STIM-INACT"=
- "Tim3, CD2, CD7, CCR6, TNFRSF18"
-
-NAIVE-CD7: IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7
-
-MEM-CD29_genes: SELL, ZEB2, EOMES, ITGA1, ITGB2, ITGB7, ITGA4, ITGB1, PLEK, CXCR3, CD59, ID2, IGFBP3, MHC-II, PYHIN1, PRR5L, S100A4, ANXA1, CCL5, TNFSF9, BATF, CX3CR1, FGFBP2, KLRG1, NKG7, GZMK, CST7, HOPX
-MEM-CD29-proteins: CD8A, CXCR3, CD28, CD45RO, CD29, HVEM
-
-STIM-IFNG-genes: PRDM1, CCR5, HLA-DQA1, CD2, LAG3, TNFRSF9, PRDM1, FABP5, CCL5, FAM162A, LGALS1, SRM, IFNG, HLA-DRA, HLA-DQA2, GZMK, ID2, GNLY, GZMB, ZBED2, ALDOC, HOPX, CTSD, ENO1, SLAMF1, DPP4, FCGR3A, PYHIN1, NKG7, CD74, GZMH, LTB, PLEK, ANXA1, KLRG1
-STIM-IFNG-proteins: CD2, CD49b, CD45RO, CD28
-
-STIM-GLYC-genes: ARG2, BNIP3, BNIP3L, LAYN, HILPDA, MT2, MT2A, MT1E, MT1X, LDHA, DDIT3, DDIT4, FAM162A, PKM, JUNB, XCL2, MTHFD2, DUSP4, LDHA, ALDOC, SLC2A3, LTA, GADD45A, JUND, TNFAIP3
-STIM-GLYC-proteins: IL2RA, PD1, LAG3
-
-STIM-UNTR-genes: S100A10, CD38, LAYN, ENO1, PGK1, IGFBP2, NEAT1, STAT1, CD27, TNFAIP2
-STIM-UNTR-proteins: CD5, CCR5, CCR7
-
-STIM-OXPHOS-genes: HMGA1, HSP90AA1, FKBP4 (mtor), HSPD1, MT-CO3, HSP90AB1, CXCL10, IL5,
-C1QBP, EIF5A, HSPH1, MYC, MD-ND3, SRM, MTHFD2, MT-ATP6, HSPE1, HSP8, IL22, IL13, IL2RA
-STIM-OXPHOS-proteins: ICOS, CD2, LAG3, CD80, CD30
-
-STIM-INACT-genes: BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1
-STIM-INACT-proteins: Tim3, CD2, CD7, CCR6, GITR
+# "NAIVE-CD7"=
+#  "IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7"
+# "MEM-CD29"=
+#  "SELL, ZEB2, EOMES, ITGA1, ITGB2, ITGB7, ITGA4, ITGB1, PLEK, CXCR3, CD59, ID2, IGFBP3, MHC-II, PYHIN1, PRR5L, S100A4, ANXA1, CCL5, TNFSF9, BATF, CX3CR1, FGFBP2, KLRG1, NKG7, GZMK, CST7, HOPX"
+# "STIM-IFNG"=
+#  "IFNG, GZMH, GZMK, GZMB, NKG7, CCR5, HLA-DQA1, CD74, PRDM1, CD2, LAG3, TNFRSF9, FABP5, CCL5, FAM162A, LGALS1, SRM, HLA-DRA, HLA-DQA2, ID2, GNLY, GZMB, ZBED2, ALDOC, HOPX, CTSD, ENO1, SLAMF1, DPP4, FCGR3A, PYHIN1"
+# "STIM-GLYC"=
+#  "ARG2, BNIP3, BNIP3L, LAYN, HILPDA, MT2, MT2A, MT1E, MT1X, LDHA, DDIT3, DDIT4, FAM162A, PKM, JUNB, XCL2, MTHFD2, DUSP4, LDHA, ALDOC, SLC2A3, LTA, GADD45A, JUND, TNFAIP3"
+# "STIM-UNTR"=
+#  "S100A10, CD38, LAYN, ENO1, PGK1, IGFBP2, NEAT1, STAT1, CD27, TNFAIP2"
+# "STIM-OXPHOS"=
+#  "HMGA1, HSP90AA1, FKBP4 (mtor), HSPD1, MT-CO3, HSP90AB1, CXCL10, IL5, C1QBP, EIF5A, HSPH1, MYC, MD-ND3, SRM, MTHFD2, MT-ATP6, HSPE1, HSP8, IL22, IL13, IL2RA"
+# "STIM-INACT"=
+#  "BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1"
+# "NAIVE-CD62L"=
+#  "SELL, MAL, KLF2, TXNIP, IL7R, LRRN3"
+# "MEM-CD29"=
+#  "CD8A, CXCR3, CD28, CD45RO, CD29, HVEM"
+# "STIM-IFNG"=
+#  "CD2, CD49b, CD45RO, CD28"
+# "STIM-GLYC"=
+#  "IL2RA, PD1, LAG3"
+# "STIM-UNTR"=
+#  "CD5, CCR5, CCR7"
+# "STIM-OXPHOS"=
+#  "ICOS, CD2, LAG3, CD80, CD30, ICOS, IL2RA"
+# "STIM-INACT"=
+#  "Tim3, CD2, CD7, CCR6, TNFRSF18"
+# 
+# NAIVE-CD7: IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7
+# 
+# MEM-CD29_genes: SELL, ZEB2, EOMES, ITGA1, ITGB2, ITGB7, ITGA4, ITGB1, PLEK, CXCR3, CD59, ID2, IGFBP3, MHC-II, PYHIN1, PRR5L, S100A4, ANXA1, CCL5, TNFSF9, BATF, CX3CR1, FGFBP2, KLRG1, NKG7, GZMK, CST7, HOPX
+# MEM-CD29-proteins: CD8A, CXCR3, CD28, CD45RO, CD29, HVEM
+# 
+# STIM-IFNG-genes: PRDM1, CCR5, HLA-DQA1, CD2, LAG3, TNFRSF9, PRDM1, FABP5, CCL5, FAM162A, LGALS1, SRM, IFNG, HLA-DRA, HLA-DQA2, GZMK, ID2, GNLY, GZMB, ZBED2, ALDOC, HOPX, CTSD, ENO1, SLAMF1, DPP4, FCGR3A, PYHIN1, NKG7, CD74, GZMH, LTB, PLEK, ANXA1, KLRG1
+# STIM-IFNG-proteins: CD2, CD49b, CD45RO, CD28
+# 
+# STIM-GLYC-genes: ARG2, BNIP3, BNIP3L, LAYN, HILPDA, MT2, MT2A, MT1E, MT1X, LDHA, DDIT3, DDIT4, FAM162A, PKM, JUNB, XCL2, MTHFD2, DUSP4, LDHA, ALDOC, SLC2A3, LTA, GADD45A, JUND, TNFAIP3
+# STIM-GLYC-proteins: IL2RA, PD1, LAG3
+# 
+# STIM-UNTR-genes: S100A10, CD38, LAYN, ENO1, PGK1, IGFBP2, NEAT1, STAT1, CD27, TNFAIP2
+# STIM-UNTR-proteins: CD5, CCR5, CCR7
+# 
+# STIM-OXPHOS-genes: HMGA1, HSP90AA1, FKBP4 (mtor), HSPD1, MT-CO3, HSP90AB1, CXCL10, IL5,
+# C1QBP, EIF5A, HSPH1, MYC, MD-ND3, SRM, MTHFD2, MT-ATP6, HSPE1, HSP8, IL22, IL13, IL2RA
+# STIM-OXPHOS-proteins: ICOS, CD2, LAG3, CD80, CD30
+# 
+# STIM-INACT-genes: BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1
+# STIM-INACT-proteins: Tim3, CD2, CD7, CCR6, GITR
 
 ```
-
-## Protein expression
-```{r}
-
-protein_data <- 
-
-FetchData(pruned_cd8
-
-
-```
-
 
 ## PATHWAYS
 
 ```{r}
+if (!(exists('cd4_pruned'))) {
+  Idents(scrna_cd4_all) <- 'Subtype'
+  cd4_pruned <- prune_cells(scrna_cd4_all, rescale=T)
+}
+
+if (!(exists('cd8_pruned'))) {
+  Idents(scrna_cd8_all) <- 'Subtype'
+  cd8_pruned <- prune_cells(scrna_cd8_all, rescale=T)
+}
 
 gsea_subsets <- c(
   "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
@@ -1203,19 +1199,8 @@ gsea_subsets <- c(
   "MOOTHA_VOXPHOS"
   )
 
-scrna_cd8_all <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.cd8.all.annotated.h5Seurat')))
-scrna_cd4_all <- LoadH5Seurat(here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds',
-  paste0('scrna.wnn.int.cd4.all.annotated.h5Seurat')))
-pruned_cd8_all <- prune_cells(scrna_cd8_all, rescale=T)
-pruned_cd4_all <- prune_cells(scrna_cd4_all, rescale=T)
-Idents(pruned_cd8_all) <- 'Subtype'
-
-cd8_gsea_scores_rna <- map_geneset_parallel(pruned_cd8_all, gsea_subsets, assay='RNA', nbin=24)
+cd8_gsea_scores_rna <- map_geneset_parallel(cd8_pruned, gsea_subsets, assay='RNA', nbin=24)
+cd8_pruned[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
 
 cd8_all_gsea_scores_rna <- map_geneset_parallel(scrna_cd8_all, gsea_subsets, assay='RNA', nbin=24)
 scrna_cd8_all[[names(cd8_all_gsea_scores_rna)]] <- cd8_all_gsea_scores_rna
@@ -1223,16 +1208,8 @@ scrna_cd8_all[[names(cd8_all_gsea_scores_rna)]] <- cd8_all_gsea_scores_rna
 cd4_all_gsea_scores_rna <- map_geneset_parallel(scrna_cd4_all, gsea_subsets, assay='RNA', nbin=24)
 scrna_cd4_all[[names(cd4_all_gsea_scores_rna)]] <- cd4_all_gsea_scores_rna
 
-
-pruned_cd8_all[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
-
-cd8_gsea_scores_rna <- map_geneset_parallel(prune_cells(scrna_cd8_all, rescale=T), gsea_subsets, assay='RNA', nbin=24)
-scrna_cd8_all[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
-
-cd4_gsea_scores_rna <- map_geneset_parallel(prune_cells(scrna_cd4_all), gsea_subsets, assay='RNA', nbin=8)
-scrna_cd4_all[[names(cd4_gsea_scores_rna)]] <- cd4_gsea_scores_rna
-
-ggplot(data.table(scrna_cd8_all@meta.data, keep.rownames=T)[melt(data.table(cd8_gsea_scores_rna, keep.rownames=T), id.vars=c('rn')), on='rn']) + geom_boxplot(aes(y=value, x=Subtype, fill=Subtype), outlier.shape = NA) + facet_wrap(~variable, scales='free', ncol=4) +coord_flip() + scale_fill_manual(values=all_colors)
+cd4_gsea_scores_rna <- map_geneset_parallel(cd4_pruned, gsea_subsets, assay='RNA', nbin=16)
+cd4_pruned[[names(cd4_gsea_scores_rna)]] <- cd4_gsea_scores_rna
 
 make_cdf <- function(seurat_obj, pathway_name, pathway_label, 
     subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS'), quant_limit=0.05, group.by='Subtype', colorlist=unlist(all_colors), return_val='cdf') {
@@ -1314,29 +1291,29 @@ pathway_list <- list(
   'IL2/PI3K'='PID_IL2_PI3K_PATHWAY'
 )
 
-plot_grid(
-  plotlist=lapply(1:length(pathway_list), function(i) {
-    make_cdf(cd4_pruned, pathway_list[[i]], pathway_label=names(pathway_list)[i])
-  }),
-  nrow=1,
-  align='hv',
-  axis='lr')
-
-plot_grid(
-  plotlist=lapply(1:length(pathway_list), function(i) {
-    make_cdf(cd8_pruned, pathway_list[[i]], pathway_label=names(pathway_list)[i])
-  }),
-  nrow=1,
-  align='hv',
-  axis='lr')
-
-plot_grid(
-  plotlist=lapply(1:length(pathway_list), function(i) {
-    make_cdf(cd8_pruned, pathway_list[[i]], pathway_label=names(pathway_list)[i], group.by='car', colorlist=car_colors)
-  }),
-  nrow=1,
-  align='hv',
-  axis='lr')
+# plot_grid(
+#   plotlist=lapply(1:length(pathway_list), function(i) {
+#     make_cdf(cd4_pruned, pathway_list[[i]], pathway_label=names(pathway_list)[i])
+#   }),
+#   nrow=1,
+#   align='hv',
+#   axis='lr')
+# 
+# plot_grid(
+#   plotlist=lapply(1:length(pathway_list), function(i) {
+#     make_cdf(cd8_pruned, pathway_list[[i]], pathway_label=names(pathway_list)[i])
+#   }),
+#   nrow=1,
+#   align='hv',
+#   axis='lr')
+# 
+# plot_grid(
+#   plotlist=lapply(1:length(pathway_list), function(i) {
+#     make_cdf(cd8_pruned, pathway_list[[i]], pathway_label=names(pathway_list)[i], group.by='car', colorlist=car_colors)
+#   }),
+#   nrow=1,
+#   align='hv',
+#   axis='lr')
 
 module_tile_grid <- function(seurat_obj, pathway_list, group.by, dots='F',
     subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS'),
@@ -1402,6 +1379,7 @@ module_tile_grid <- function(seurat_obj, pathway_list, group.by, dots='F',
       theme_minimal() +
       theme(
         panel.border=element_rect(color='black', fill=NA),
+        legend.key.width=unit(0.4, 'lines'),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
       coord_flip()
   }
@@ -1413,12 +1391,9 @@ module_tile_grid <- function(seurat_obj, pathway_list, group.by, dots='F',
 # ACTIVATED SUBSET PATHWAYS
 activated_subtypes <- c('STIM-GLYC','STIM-OXPHOS','STIM-IFNG')
 
-pruned_cd8_cars <- prune_cells(scrna_cd8_all)
-pruned_cd4_cars <- prune_cells(scrna_cd4_all)
-
-cd8_module_tiles <- module_tile_grid(pruned_cd8_cars,
+plots$cd8_module_tiles <- module_tile_grid(cd8_pruned,
     pathway_list, group.by='Subtype', dots=F, subtypes=activated_subtypes)
-cd4_module_tiles <- module_tile_grid(pruned_cd4_cars, pathway_list, group.by='Subtype', dots=F, 
+plots$cd4_module_tiles <- module_tile_grid(cd4_pruned, pathway_list, group.by='Subtype', dots=F, 
   subtypes=activated_subtypes,
   override_pathway_order = cd8_module_tiles$pathway_order,
   override_group_order = cd8_module_tiles$group_order)
@@ -1429,11 +1404,11 @@ combined_tile_data <- rbind(
   data.table(cd8_module_tiles$data)[, t_type := 'CD8'],
   data.table(cd4_module_tiles$data[, t_type := 'CD4']))
 
-combined_tile_plot <- ggplot(combined_tile_data) +
+plots$combined_tile_plot <- ggplot(combined_tile_data) +
       geom_tile(aes(
         y=group,
         x=pathway_name, fill=mean)) +
-      scale_fill_distiller('Module z-score',
+      scale_fill_distiller('Module\nz-score',
         palette='PuOr', oob=scales::squish, limit=c(-1, 1), type='div',
         breaks=c(1, 0, -1), labels=c('>1','0','< -1')) + 
       scale_x_discrete('Gene Modules', expand=c(0,0)) +
@@ -1442,6 +1417,103 @@ combined_tile_plot <- ggplot(combined_tile_data) +
       theme_minimal() +
       theme(
         panel.border=element_rect(color='black', fill=NA),
+        legend.key.width=unit(0.4, 'lines'),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
       coord_flip()
+```
+## Supplemental per donor CAR plot
+
+```{r}
+
+cd8_barplot_data <- get_cluster_enrich_plot(
+  prune_cells(scrna_cd8_all),
+   'Subtype', hide='K_only',
+  facet_formula=formula(k_type~car), bar_position='dodge',
+  by_vars=c('car','CD4v8','k_type','donor'))
+
+cd4_barplot_data <- get_cluster_enrich_plot(
+  prune_cells(scrna_cd4_all),
+   'Subtype', hide='K_only',
+  facet_formula=formula(k_type~car), bar_position='dodge',
+  by_vars=c('car','CD4v8','k_type','donor'))
+
+donor_barplot <- function(data, subtype_order) {
+  
+  data[, mean_donor_frac := mean(frac), by=c('k_type','t_type','cluster','car')]
+  data[, mean_rel_frac := log2(mean_donor_frac/mean(mean_donor_frac)), by=c('k_type','t_type','cluster')]
+  
+  max_log2_enrich <- log2(3)
+  
+  disp_data <- data[mean_frac > 0.01][, 
+    car := factor(car, levels=umap_car_order)][,
+     cluster := factor(cluster, levels=subtype_order)]
+  
+  ggplot(disp_data) + 
+      geom_bar(aes(
+        x=cluster,
+        y=mean_donor_frac,
+        fill=mean_rel_frac),
+      stat='identity',
+      position='dodge',
+      color=NA,
+      width=1) +
+    geom_point(aes(
+      x=cluster,
+      y=frac,
+      color=donor)) + 
+      facet_grid(formula(k_type~car), space='free', scales='free_y') + 
+      labs(x='Enrichment vs mean car') +
+      scale_y_continuous('Fraction of CAR in cluster',
+        oob=scales::oob_squish, labels=label_percent(1)) +
+      scale_fill_distiller('Log2 Enrichment\nvs mean CAR', palette='PRGn', direction=1,
+        limits=c(-max_log2_enrich, max_log2_enrich), oob=scales::squish,
+        breaks=c(-max_log2_enrich, 0, max_log2_enrich), labels=c('1/3x', '1x', '3x')) +
+      theme_minimal() +
+      coord_flip() +
+      theme(
+        panel.grid=element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0, hjust=1),
+        panel.border=element_rect(color='grey70', fill=NA), 
+        legend.key.width=unit(0.4, 'lines'))
+}
+
+cd8_pct_barplots <- (
+  (donor_barplot(cd8_barplot_data$data[k_type == 'cd19+'], rev(cd8_order)) + 
+    theme(axis.title=element_blank())) / 
+  (donor_barplot(cd8_barplot_data$data[k_type == 'baseline'], rev(cd8_order)) +
+     theme(strip.text.x = element_blank()))
+) + 
+  plot_layout(heights=c(10, 4), guides='collect') & 
+  theme(
+    legend.position = 'bottom',
+    legend.key.height=unit(0.4, 'lines'),
+    legend.key.width=unit(2, 'lines'))
+
+cd4_pct_barplots <- (
+  (donor_barplot(cd4_barplot_data$data[k_type == 'cd19+'], rev(cd4_order)) + 
+    theme(axis.title=element_blank())) / 
+  (donor_barplot(cd4_barplot_data$data[k_type == 'baseline'], rev(cd4_order)) +
+     theme(strip.text.x = element_blank()))
+) + 
+  plot_layout(heights=c(6, 8), guides='collect') & 
+  theme(
+    legend.position = 'bottom',
+    legend.key.height=unit(0.4, 'lines'),
+    legend.key.width=unit(2, 'lines'))
+
+```
+
+### Main Text Panel Assembly
+
+```{r}
+
+fig_A <- plots$combined_umap
+fig_B <- plots$combined_gene_heatmap
+fig_C <- plots$car_dotplot
+fig_D <- plots$combined_tile_plot
+fig_E <- plots$combined_paper_umap
+
+plots$fig_assembled <- plot_grid(plot_grid(fig_A, plot_grid(fig_C, fig_E, ncol=2, labels=c('C','D')), ncol=1, rel_heights=c(1,1.5), labels=c('A','')), plot_grid(fig_B, fig_D+coord_fixed() +theme(legend.position='bottom',
+    legend.key.height=unit(0.4, 'lines'),
+    legend.key.width=unit(2, 'lines')), ncol=1, rel_heights=c(1.7,1), labels=c('B','E')), ncol=2, rel_widths=c(2,1))
 ```

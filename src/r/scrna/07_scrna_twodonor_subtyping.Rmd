@@ -1,0 +1,361 @@
+---
+title: "Two Donor scRNAseq"
+output:
+  html_document:
+    df_print: paged
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here('..','html'))})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(tidyr)
+library(Seurat)
+library(patchwork)
+library(cluster)
+library(parallelDist)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+library(future)
+library(SeuratDisk)
+library(BiocParallel)
+
+reload_data=F
+source(here::here('r','fig_colors.R'))
+source(here::here('r','scrna','HTOdemux.R'))
+source(here::here('r','scrna','scrna_analysis_fxns.R'))
+
+options(future.globals.maxSize = 14000 * 1024^2)
+plan("sequential")
+plan()
+```
+
+## CD8 ACT Loading
+
+```{r}
+## CD8 ACT
+
+#load combined integrated if not already loaded
+if (!('combined.integrated.data' %in% ls())) {
+  combined.integrated.data <- readRDS(here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','combined.integrated.umap.data.rds'))
+}
+
+scrna_cd8 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD8.act_clust.clean.h5Seurat')))
+
+combined.integrated.data <- readRDS(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','combined.integrated.umap.data.rds'))
+
+int_cd8_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd8$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd8[['RNA']] <- int_cd8_subset@assays$RNA
+scrna_cd8[['ADT']] <- int_cd8_subset@assays$ADT
+
+cd8_metadata <- data.table(
+  scrna_cd8@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+scrna.wnn.cd4_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd4_all_metadata.rds")
+scrna.wnn.cd8_all_metadata <- readRDS("~/scrnaseq_tcsl154/rds/scrna.wnn.cd8_all_metadata.rds")
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd8_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+scrna_cd8@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd8@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+#CD8 act annotated clusters
+cd8_act_cluster_annotations <- fread(text="
+seurat_clusters   Activation    Subtype
+0         ACT         STIM-GLYC
+1         ACT         STIM-GNLY
+2         ACT         STIM-OXPHOS
+3         ACT         STIM-OXPHOS
+4         ACT         STIM-IFNG
+5         INACT       INACT
+6         INACT       INACT
+7         ACT         STIM-GLYC
+8         INACT       INACT
+9         INACT       INACT
+10        ACT         STIM-OXPHOS
+11        ACT         STIM-IFNG
+12        INACT       INACT
+13        ACT         STIM-OXPHOS
+14        ACT         STIM-OXPHOS
+")
+
+cd8_act_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+addtl_metadata <- cd8_act_cluster_annotations[data.table(scrna_cd8@meta.data),
+  on=c('seurat_clusters')]
+
+scrna_cd8@meta.data$Activation <- addtl_metadata$Activation
+scrna_cd8@meta.data$Subtype <- addtl_metadata$Subtype
+scrna_cd8@meta.data$Subtype <- factor(scrna_cd8@meta.data$Subtype)
+```
+
+### CD8 ALL Loading
+
+```{r}
+scrna_cd8_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD8.all.clean.h5Seurat')))
+
+cd8_all_metadata <- data.table(
+  scrna_cd8_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+sample_subtype_map <- merge(cd8_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd8_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd8_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Subtype', 'Subtype')
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'Activation', 'Activation')
+scrna_cd8_all <- map_clusters(scrna_cd8, scrna_cd8_all, 'seurat_clusters', 'cd8_act_clust')
+
+int_cd8_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd8_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd8_all[['RNA']] <- int_cd8_all_subset@assays$RNA
+scrna_cd8_all[['ADT']] <- int_cd8_all_subset@assays$ADT
+rm(int_cd8_all_subset)
+
+#CD8 all annotated cluters
+cd8_all_cluster_annotations <- fread(text="
+seurat_clusters Subtype Activation
+0   NAIVE-CD62L   INACT
+1   STIM-OXPHOS  ACT
+2   NAIVE-CD7   INACT
+3   STIM-GLYC    ACT
+4   NAIVE-CD7   INACT
+5   MEM-CD29    INACT
+6   STIM-GNLY    ACT
+7   MEM-CD29    ACT
+8   NAIVE-CD7   INACT
+9   STIM-UNTR    ACT
+10  STIM-INACT    INACT
+11  STIM-INACT    INACT
+12  MEM-CD29    INACT
+13  NAIVE-CD62L   INACT
+14  MEM-CD29   INACT
+15  MEM-CD29   INACT
+16  REMOVE  REMOVE
+17  STIM-UNTR    INACT
+18  NAIVE-CD7   INACT
+19  MEM-CD29    INACT
+20  NAIVE-CD62L   INACT
+21  NAIVE-CD62L   INACT
+22  MEM-CD29    INACT
+23  NAIVE-CD7  INACT
+24  MEM-CD29    INACT
+25  REMOVE  REMOVE
+27  REMOVE  REMOVE
+28  MEM-CD29    INACT
+29  REMOVE  REMOVE
+30  REMOVE  REMOVE
+31  REMOVE  REMOVE
+")
+
+cd8_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+
+addtl_metadata <- cd8_all_cluster_annotations[
+  data.table(scrna_cd8_all@meta.data), on=c('seurat_clusters')]
+
+setnames(addtl_metadata,
+  c('i.Activation','Activation','i.Subtype','Subtype'),
+  c('Activation.act','Activation.inact','Subtype.act','Subtype.inact'))
+
+# save inact subtypes and activation status to start
+addtl_metadata[, Subtype := Subtype.inact]
+addtl_metadata[, Activation := Activation.inact]
+
+# if old subtype is missing or old subtype is 'INACT', then use new subtype
+addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
+  Subtype := Subtype.act]
+addtl_metadata[!is.na(Subtype.act) | Subtype.act != 'INACT',
+  Activation := Activation.act]
+addtl_metadata[Subtype.act == 'INACT',
+  Subtype := Subtype.inact]
+
+
+scrna_cd8_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
+scrna_cd8_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
+
+
+cd8_all.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.cd8.all.annotated.h5Seurat')
+SaveH5Seurat(scrna_cd8_all, cd8_all.h5.file, overwrite=T)
+```
+
+
+### CD4 ACT Loading
+
+```{r}
+
+scrna_cd4 <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.act_clust.clean.h5Seurat')))
+
+cd4_metadata <- data.table(
+  scrna_cd4@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+scrna_cd4@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+
+int_cd4_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4[['RNA']] <- int_cd4_subset@assays$RNA
+scrna_cd4[['ADT']] <- int_cd4_subset@assays$ADT
+
+rm(int_cd4_subset)
+```
+
+
+### CD4 ALL Loading
+
+```{r}
+scrna_cd4_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.CD4.clean.h5Seurat')))
+
+cd4_all_metadata <- data.table(
+  scrna_cd4_all@meta.data, keep.rownames=T)[,
+    list(rn_orig=rn, sample, donor, orig_t_type=t_type)][
+      donor == 'TCSL154', rn := gsub('(.*)-\\d_\\d','\\1',rn_orig)]
+
+original_metadata <- rbind(
+    data.table(scrna.wnn.cd4_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)],
+    data.table(scrna.wnn.cd8_all_metadata, keep.rownames=T)[, list(rn_154=rn, sample, t_type, Subtype, act_clusters)])[,
+      rn := gsub('(.*)-\\d','\\1',rn_154)]
+
+sample_subtype_map <- merge(cd4_all_metadata, original_metadata, by='rn', all=T)[!is.na(Subtype) & !is.na(rn_orig)]
+
+scrna_cd4_all@meta.data[,'subtype_154'] <- factor(NA, levels=levels(sample_subtype_map$Subtype))
+scrna_cd4_all@meta.data[,'act_clust_154'] <- factor(NA, levels=levels(sample_subtype_map$act_clusters))
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$subtype_154 <- sample_subtype_map$Subtype
+scrna_cd4_all@meta.data[sample_subtype_map$rn_orig,]$act_clust_154 <- sample_subtype_map$act_clusters
+
+int_cd4_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_cd4_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_cd4_all[['RNA']] <- int_cd4_all_subset@assays$RNA
+scrna_cd4_all[['ADT']] <- int_cd4_all_subset@assays$ADT
+
+rm(int_cd4_all_subset)
+
+#CD4 all annotated clusters
+cd4_all_cluster_annotations <- fread(text="
+seurat_clusters Subtype Activation
+0   NAIVE-CD62L  INACT
+1   NAIVE-CD62L  INACT
+2   STAT1-IRF1  MIXED
+3   STIM-OXPHOS ACT
+4   MEM-CD29   INACT
+5   STIM-GLYC   ACT
+6   NAIVE-CD62L  INACT
+7   STIM-IFNG   ACT
+8   STIM-OXPHOS ACT
+9   MEM-CD29   INACT
+10  STAT1-IRF1  MIXED
+11  NAIVE-CD62L  INACT
+12  MEM-CD29    INACT
+13  STIM-OXPHOS ACT
+14  MEM-CD29   INACT
+15  STAT1-IRF1  MIXED
+16  STAT1-IRF1  MIXED
+17  STAT1-IRF1  MIXED
+18  MEM-CD29    INACT
+19  TH2 MIXED
+20  MEM-CD29    INACT
+21  MEM-CD29    INACT
+22  STIM-IFNG   ACT
+23  REMOVE  REMOVE
+24  REMOVE  REMOVE
+25  STIM-UNTR   INACT
+26  MEM-CD29    INACT
+27  REMOVE  REMOVE
+28  REMOVE  REMOVE
+29  REMOVE  REMOVE
+30  MEM-CD29    INACT
+")
+
+cd4_all_cluster_annotations[, seurat_clusters := factor(seurat_clusters)]
+
+addtl_metadata <- cd4_all_cluster_annotations[
+  data.table(scrna_cd4_all@meta.data), on=c('seurat_clusters')]
+
+scrna_cd4_all@meta.data$Activation <- as.character(addtl_metadata$Activation)
+scrna_cd4_all@meta.data$Subtype <- as.character(addtl_metadata$Subtype)
+
+cd4_all.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.cd4.all.annotated.h5Seurat')
+SaveH5Seurat(scrna_cd4_all, cd4_all.h5.file, overwrite=T)
+```
+
+### All T-Cells Loading
+
+```{r}
+scrna_all <- LoadH5Seurat(here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds',
+  paste0('scrna.wnn.int.all.clean.h5Seurat')))
+
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Subtype', 'Subtype')
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'Activation', 'Activation')
+scrna_all <- map_clusters(scrna_cd8_all, scrna_all, 'seurat_clusters', 'cd8_all_clust')
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Subtype', 'Subtype')
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'Activation', 'Activation')
+scrna_all <- map_clusters(scrna_cd4_all, scrna_all, 'seurat_clusters', 'cd4_all_clust')
+
+int_all_subset <- subset(combined.integrated.data,
+    cells=intersect(
+      names(scrna_all$cell), 
+      names(combined.integrated.data$cell)))
+
+scrna_all[['RNA']] <- int_all_subset@assays$RNA
+scrna_all[['ADT']] <- int_all_subset@assays$ADT
+
+rm(combined.integrated.data)
+rm(int_all_subset)
+
+all.h5.file <- here::here(
+  '..','..','scrnaseq_tcsl154',
+  'rds','scrna.wnn.int.all.annotated.h5Seurat')
+SaveH5Seurat(scrna_all, all.h5.file, overwrite=T)
+```
