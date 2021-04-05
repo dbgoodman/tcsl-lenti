@@ -478,7 +478,7 @@ cd8_order <- c(
 
 
 
-car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15) {
+car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
   
   car_clust_pct_act <- data.table(car_metadata)[, .N, 
     by=c('car','Subtype')][, 
@@ -503,35 +503,70 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15) {
       breaks=c(0.1, 0.25, 0.4), labels=c('10%','25%','40%')) + 
     theme_minimal() + 
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
-    coord_flip() +
     labs(y='', x='')
+  
+  if (flip)
+    pct_dotplot <- pct_dotplot + coord_flip()
   
   unique_car_v_subsets <- unique(car_clust_pct_act[, list(car, Subtype)])
   n_lines <- unique_car_v_subsets[, length(unique(Subtype))]
   
-  cluster_idents <- ggplot(unique_car_v_subsets) + 
-    geom_tile(aes(y=factor(Subtype, levels=rev(subtype_order)), fill=Subtype, x='a'), width=0.9, height=0.9) + 
-    #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
-    scale_x_discrete(expand=c(0,0)) + 
-    scale_y_discrete(expand=c(0,0)) +
-    scale_fill_manual(values=all_colors) +
-    theme_minimal() +
-    coord_fixed(ratio=3) +
-    theme(
-      legend.position = 'none',
-      axis.title.x= element_blank(),
-      axis.title.y=element_blank(),
-      axis.text.x=element_blank(),
-      panel.background = element_blank(),
-      panel.grid = element_blank(),
-      plot.margin = unit(c(0, 22, 5.5, 5.5), "points"))
+  if (flip) {
+    cluster_idents <- ggplot(unique_car_v_subsets) + 
+      geom_tile(aes(y=factor(Subtype, levels=rev(subtype_order)), fill=Subtype, x='a'), width=0.9, height=0.9) + 
+      #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
+      scale_x_discrete(expand=c(0,0)) + 
+      scale_y_discrete(expand=c(0,0)) +
+      scale_fill_manual(values=all_colors) +
+      theme_minimal() +
+      coord_fixed(ratio=3) +
+      theme(
+        legend.position = 'none',
+        axis.title.x= element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x=element_blank(),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        plot.margin = unit(c(0, 22, 5.5, 5.5), "points"))
   
-  pct_dotplot_combined <- cluster_idents + theme(plot.margin=unit(c(5.5,5.5,5.5,-5.5), "points")) | 
-    (pct_dotplot + theme(
-      axis.text.y=element_blank(),
-      strip.text.x=element_blank(),
-      axis.title.y=element_blank(),
-      plot.margin = unit(c(5.5, -5.5, 5.5, 5.5), "points")))
+    pct_dotplot_combined <- cluster_idents + theme(plot.margin=unit(c(5.5,5.5,5.5,-5.5), "points")) | 
+      (pct_dotplot + theme(
+        axis.text.y=element_blank(),
+        strip.text.x=element_blank(),
+        axis.title.y=element_blank(),
+        plot.margin = unit(c(5.5, -5.5, 5.5, 5.5), "points")))
+  } else {
+    cluster_idents <- ggplot(unique_car_v_subsets) + 
+      geom_tile(aes(x=factor(Subtype, levels=rev(subtype_order)), fill=Subtype, y='a'), width=0.9, height=0.9) + 
+      #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
+      scale_x_discrete(expand=c(0,0)) + 
+      scale_y_discrete(expand=c(0,0)) +
+      scale_fill_manual(values=all_colors) +
+      theme_minimal() +
+      coord_fixed(ratio=1/3) +
+      theme(
+        legend.position = 'none',
+        axis.title.y= element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        plot.margin = unit(c(0, 5.5, 22, 5.5), "points"))
+    
+    pct_dotplot_combined <- (
+      pct_dotplot + theme(
+        axis.text.x=element_blank(),
+        strip.text.x=element_blank(),
+        # color CAR names
+        axis.text.y=
+          element_text(color=car_colors_umap[names(car_colors_umap) != 'CD30'],
+        face='bold',
+        size=rel(1.2)),
+        axis.title.y=element_blank(),
+        plot.margin = unit(c(5.5, 5.5, -5.5, 5.5), "points"))) /
+      cluster_idents + theme(plot.margin=unit(c(-5.5,5.5,5.5,5.5), "points"))
+  }
   
   return(pct_dotplot_combined)
 }
@@ -569,7 +604,7 @@ plots$car_dotplot <- (
           axis.text.x=
             element_text(color=car_colors_umap[names(car_colors_umap) != 'CD30'],
           face='bold',
-          size=rel(1.2))))) & 
+          size=rel(1))))) & 
       theme(plot.title.position="plot")
   ) + 
   plot_layout(guides='collect', heights=c(8,9)) & 
@@ -597,7 +632,18 @@ plots$car_dotplot_all <- (
   plot_layout(guides='collect', heights=c(8,9,4,3)) & 
   theme(plot.margin=unit(c(0,0,0,0),'points'))
 
-
+plots$car_dotplot_horiz <- (
+  car_pct_dotplot(
+    data.table(scrna_cd4_all@meta.data)[
+      k_type == 'cd19+' & !is.na(Subtype) &
+      car != 'CD30' & Subtype != 'REMOVE' &
+      Subtype != 'NA'], cd4_order, max_size=9, flip=F) | (car_pct_dotplot(
+    data.table(scrna_cd8_all@meta.data)[
+      k_type == 'cd19+' & !is.na(Subtype) &
+      car != 'CD30' & Subtype != 'REMOVE' &
+      Subtype != 'NA'], rev(cd8_order), max_size=9, flip=F) & theme(
+        legend.position='none', axis.text.y=element_blank()))) + 
+  plot_layout(guides='collect')
 
 ```
 
@@ -1508,12 +1554,17 @@ cd4_pct_barplots <- (
 ```{r}
 
 fig_A <- plots$combined_umap
-fig_B <- plots$combined_gene_heatmap
-fig_C <- plots$car_dotplot
+#fig_B <- plots$combined_gene_heatmap
+fig_B <- plots$car_dotplot_horiz
 fig_D <- plots$combined_tile_plot
 fig_E <- plots$combined_paper_umap
 
 plots$fig_assembled <- plot_grid(plot_grid(fig_A, plot_grid(fig_C, fig_E, ncol=2, labels=c('C','D')), ncol=1, rel_heights=c(1,1.5), labels=c('A','')), plot_grid(fig_B, fig_D+coord_fixed() +theme(legend.position='bottom',
     legend.key.height=unit(0.4, 'lines'),
     legend.key.width=unit(2, 'lines')), ncol=1, rel_heights=c(1.7,1), labels=c('B','E')), ncol=2, rel_widths=c(2,1))
+
+plots$fig_assembled_2 <- plot_grid(plot_grid(fig_A, plot_grid(fig_, fig_E, ncol=2, labels=c('C','D')), ncol=1, rel_heights=c(1,1.5), labels=c('A','')), plot_grid(fig_B, fig_D+coord_fixed() +theme(legend.position='bottom',
+    legend.key.height=unit(0.4, 'lines'),
+    legend.key.width=unit(2, 'lines')), ncol=1, rel_heights=c(1.7,1), labels=c('B','E')), ncol=2, rel_widths=c(2,1))
+
 ```

@@ -1343,7 +1343,7 @@ reassign_t_type <- function(scrna, n_clust=6, plot_obj) {
 get_ident_avg <- function(seurat_obj, ident='seurat_clusters', assays=c('SCT_ADT','SCT')) {
   Idents(seurat_obj) <- ident
   av.exp <- AverageExpression(seurat_obj, assays=assays, use.scale=T)
-  return(rbindlist(av.exp))
+  return(rbindlist(lapply(av.exp,as.data.table)))
 }
 
 make_dendroheatmap <- function(
@@ -1608,7 +1608,7 @@ map_geneset_parallel <- function(seurat_obj, geneset_list, assay='RNA', nbin=24,
 
 
 #remove bead stim, cd30, censored clusters, DP cells, etc
-prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, rescale=F) {
+prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, rescale=F, t_types=NULL) {
   no_cd30 <- seurat_obj$car != 'CD30' & seurat_obj$car != 'K_only'
   no_beadstim <- seurat_obj$k_type != 'bead_stim'
   no_rmclust <- seurat_obj$Subtype != 'REMOVE' &
@@ -1634,7 +1634,13 @@ prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, resc
     k_types <- rep(T,length(seurat_obj$k_type))
   }
   
-  new_obj <- seurat_obj[, no_cd30 & no_beadstim & no_rmclust & cars & k_types & subtypes]
+  if (length(t_types)) {
+    t_types <- seurat_obj$t_type %in% t_types
+  } else {
+    t_types <- rep(T,length(seurat_obj$t_type))
+  }
+  
+  new_obj <- seurat_obj[, no_cd30 & no_beadstim & no_rmclust & cars & k_types & subtypes & t_types]
   if (rescale) {
     new_obj <- ScaleData(new_obj, assay='SCT_INT')
     new_obj <- ScaleData(new_obj,assay= 'SCT_ADT_INT')
