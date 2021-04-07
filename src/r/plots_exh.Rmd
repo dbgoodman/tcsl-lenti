@@ -26,6 +26,24 @@ map_day_0 <- function(df) {
     df[k562=='none'][, k562 := 'cd19-']
   ))
 }
+
+# some replicates appear to be incorrect - possibly due to evaporation or error in measurement.
+# we will identify which wells are way off of the median value for the set of 3 replicates:
+exh_means <- exh_dt[grep('_t',variable) & !is.na(donor), list(
+  mean_val=mean(value, na.rm=T)),
+  by=c('well','plate','day','variable','donor','row','col','k562','car','t_type')]
+
+exh_means[, c('med_val','med_diff') := list(median(mean_val), (mean_val-median(mean_val))/median(mean_val)),
+  by=c('day','car','k562','variable','donor','t_type')]
+
+replicate_issue_plot <- ggplot(map_day_0(exh_means)) + geom_histogram(aes(x=abs(med_diff), fill=factor(col %% 3), y=..density..)) + facet_grid(donor + day ~ variable + t_type + k562) + labs(x='% Difference of each replicate from median', y='Measurements') + scale_fill_discrete('replicate #') + scale_x_continuous(labels=label_percent(), oob=scales::oob_squish, limits=c(0,0.33), breaks=c(0,0.30)) + theme_minimal() + theme(panel.grid=element_blank(), panel.border = element_rect(fill=NA, color='grey50')) + geom_vline(xintercept=0.25, linetype=2, color='grey50')
+
+exh_means[, oob := abs(med_diff) >= 0.25]
+
+outlier_wells <- unique(exh_means[n_oob == 1, list(donor,k562,day,t_type,car,well,plate)])
+
+exh_dt <- outlier_wells[, outlier_well := T][exh_dt, on=.(donor,k562,day,t_type,car,well,plate)]
+exh_dt[is.na(outlier_well), outlier_well := F]
 ```
 
 ## Assess Marker Thresholds
@@ -46,7 +64,7 @@ marker_thresholds <- rbind(
 blue_shades <- brewer.pal(7, "YlGnBu")[3:7]
 
 # assess marker thresholds
-ggplot(exh_dt[k562 %in% c('cd19+','cd19-') & variable != 'zombie_t' & 
+ggplot(map_day_0(exh_dt)[k562 %in% c('cd19+','cd19-') & variable != 'zombie_t' & 
     variable %in% names(exh_opt_cd4$marker_thresholds)]) + 
     geom_density(aes(x=value, color=factor(day))) + 
     scale_x_continuous(limits=c(-1000,5000)) + 
@@ -162,6 +180,89 @@ ggplot(marker_freq[k562 != 'none' & n_pos_marker != 7 & k562 == 'cd19+']) +
   geom_vline(xintercept=0:7-0.5) +
   geom_hline(yintercept=c(0,1)) +
   labs(x="CAR", y='Fraction of Cells')
+```
+
+## pct marker positive per car
+
+```{r}
+
+#% GFP positive
+# ggplot(exh_dt[car != '' & variable == 'gfp_t', sum(gt_thresh)/.N, by=c('well','plate','day','car','donor','k562','t_type')]) + geom_point(aes(x=car, y=V1, shape=factor(donor), color=car)) + facet_grid(k562~t_type + day) + scale_color_manual(values=c(car_colors, 'untrans'='grey')
+
+marker_ct <- exh_dt[!outlier_well & variable %in% c('tim3_t','lag3_t','cd39_t', 'pd1_t'),
+  list(n_pos_marker= sum(gt_thresh)),
+  by=c('well','plate','day','Time','car','donor','k562','t_type')]
+
+# gfp_pos <- exh_dt[car != '' & variable == 'gfp_t' & gt_thresh == T, list(
+#     well,plate,day,event_id)]
+
+marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
+
+marker_ct <- map_day_0(marker_ct)
+
+marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:4))), 
+  by=c('well','plate','day','car','donor','k562','t_type')]
+names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
+
+marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
+  by=c('well','plate','day','car','donor','k562','t_type')]
+
+# marker_freq <- marker_freq[,
+#   list(mean_pct= mean(pct, na.rm=T)),
+#   by=c('day','car','donor','k562', 'n_pos_marker','t_type')]
+
+make_day_plot <- function(plot_day) {
+
+  day_dt <- marker_freq[car %in% c('41BB','CD28','BAFF-R') & day %in% plot_day & k562 == 'cd19+'][, 
+      c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
+      by=c('n_pos_marker','t_type','donor','day','k562','car')]
+  
+  stat.test <- day_dt %>%
+    group_by(n_pos_marker, t_type, donor, day) %>%
+    t_test(pct ~ car)
+  
+  stat.test <- stat.test %>% filter(p.adj.signif != 'ns') %>%
+    add_xy_position(x = "n_pos_marker", dodge = 0.8)
+  
+  day_plot <- ggplot(day_dt) + 
+    geom_errorbar(aes(x=n_pos_marker, ymin=mean_pct-sd_pct, ymax=mean_pct+sd_pct, group=car), 
+      color='black', position=position_dodge(0.8)) +
+    geom_bar(aes(x=n_pos_marker, y=mean_pct, color=car, fill=car), 
+      position=position_dodge(0.8), stat='identity') +
+    facet_grid(day + donor ~ t_type + k562) +
+    scale_fill_manual(values=car_colors) +
+    scale_color_manual(values=car_colors) +
+    scale_y_continuous(labels=scales::label_percent()) +
+    stat_pvalue_manual(
+      stat.test, label = "p.adj.signif", tip.length = 0.01) +
+    theme_minimal() +
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    theme(panel.grid=element_blank())
+
+  return(day_plot)
+}
+  
+
+
+#bar verison
+# ggplot(
+#   marker_freq[car %in% c('41BB','CD28','BAFF-R','KLRG1','zeta','CD4O','untrans') & day == 15 & k562 == 'cd19+'][, 
+#     c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
+#     by=c('n_pos_marker','t_type','donor','day','k562','car')]) + 
+#   geom_linerange(aes(x=n_pos_marker, ymin=mean_pct-sd_pct, ymax=mean_pct+sd_pct, group=car, color=car)) +
+#   geom_line(aes(x=n_pos_marker, y=mean_pct, color=car, fill=car, group=car), stat='identity') +
+#   facet_grid(day + donor ~ t_type + k562) +
+#   scale_fill_manual(values=c(car_colors, 'untrans'='grey')) +
+#   scale_color_manual(values=c(car_colors, 'untrans'='grey')) +
+#   scale_y_continuous(labels=scales::label_percent()) +
+#   theme_minimal() +
+#   geom_vline(xintercept=-Inf) + 
+#   geom_hline(yintercept=-Inf) +
+#   theme(panel.grid=element_blank())
+
+(d6_markers | d15_markers) | plot_layout(guides='collect')
+
 ```
 
 ```{r fig.height=4.5, fig.width=11.5, units="inches"}

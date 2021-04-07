@@ -14,12 +14,17 @@ library(scales)
 library(RColorBrewer)
 library(ggridges)
 library(tidyverse)
+library(patchwork)
 
 output_dir <- file.path(here::here('..','figs'))
+
+# load colors
+source(here::here('r','fig_colors.R'))
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'exh.sampled.Rdata'))
 exh_dt <- fread(file.path(data_dir, 'exh.sampled.csv.gz'))
+exh_dt[, car := factor(car, levels=c(car_order,'untrans'))]
 
 cd4_marker_pos_threshold <- list(
   tim3_t= 666,
@@ -66,7 +71,7 @@ exh_cast_dt <- dcast(exh_dt[!is.na(car) & !is.na(donor) & !is.na(event_id)],
 
 ###PD1 plot K99
 
-ggplot(
+pd1_line_plot <- ggplot(
     map_day_0(exh_dt)[variable=='pd1_t' & k562 == 'cd19+' & day < 33 & car %in% c('BAFF-R','CD28','CD40','41BB') & 
         value > censor_negative_min][,
             list(pct= sum(gt_thresh)/.N),
@@ -84,14 +89,45 @@ ggplot(
     labs(y='PD1 % Positive', x='Days in culture')
 
 ggsave(paste0(output_dir, '/exh_pd1_line_plot_subset.pdf'),
-       cd27_ridges, width = 3, height = 9,
+       pd1_line_plot, width = 3, height = 9,
        units = 'in', dpi = 300)
 
+ridge_plot <- function(data_dt, variable_name, x_limits=c(400, 2500)) {
 
+  plot <- ggplot(
+    map_day_0(data_dt[variable == variable_name])) + 
+    geom_density_ridges(aes(x=value, y=car, fill=car, color=car,
+      height =..ndensity..), alpha=0.8) +
+    scale_fill_manual(values=c(car_colors, untrans='grey', zeta='black')) +
+    scale_color_manual(values=c(car_colors, untrans='grey', zeta='black')) +
+    facet_grid(day~t_type+donor, scales='free') + 
+    scale_x_continuous(limits=x_limits) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) + geom_vline(xintercept=1500)
+  
+  return(plot)
+}
+
+plot_exh_combo <- function(data_dt, variable_name, limits=c()) {
+  
+  plot_group <- (
+    ridge_plot(data_dt[k562 == 'cd19+' & t_type == 'cd4'], variable_name, x_limits=c(400, 3000)) | 
+    ridge_plot(data_dt[k562 == 'cd19+' & t_type == 'cd8'], variable_name) + 
+      theme(axis.text.y=element_blank())) + 
+    plot_layout(guides='collect')
+  
+  return(plot_group)
+}
+
+
+ridge_plot(exh_dt[k562 == 'cd19+' & t_type == 'cd8' &
+        value > -500 & day < 33], 'pd1_t')
+  
 cd8_pd1_diff_ridges <- ggplot(
     map_day_0(exh_dt)[variable=='pd1_t' & k562 == 'cd19+' & t_type == 'cd8' &
         value > -500 & day < 33]) + 
-    geom_density_ridges(aes(x=value, y=car, fill=car, 
+    geom_density_ridges(aes(x=value, y=car, fill=car, alpha=0.8, color=car,
       height =..ndensity..)) +
     scale_fill_manual(values=c(car_colors, untrans='grey', zeta='black')) +
     facet_grid(day~t_type+donor, scales='free') + 
@@ -103,7 +139,7 @@ cd8_pd1_diff_ridges <- ggplot(
 cd4_pd1_diff_ridges <- ggplot(
     map_day_0(exh_dt)[variable=='pd1_t' & k562 == 'cd19+' & t_type == 'cd4' &
         value > -500 & day < 33]) + 
-    geom_density_ridges(aes(x=value, y=car, fill=car, 
+    geom_density_ridges(aes(x=value, y=car, fill=car, alpha=0.8,
       height =..ndensity..)) +
     scale_fill_manual(values=c(car_colors, untrans='grey', zeta='black')) +
     facet_grid(day~t_type+donor, scales='free') + 
@@ -162,7 +198,7 @@ xy_hist_plot <- function(df, x_var, y_var, t_type) {
 
 plot_grid(
   xy_hist_plot(
-    df=map_day_0(diff_cast_dt)[k562 == 'cd19+' & t_type == 'cd4' & donor == 1],
+    df=map_day_0(exh_cast_dt)[k562 == 'cd19+' & t_type == 'cd4' & donor == 1],
     x_var='cd45ra_t',
     y_var='cd27_t',
     t_type='cd4'),

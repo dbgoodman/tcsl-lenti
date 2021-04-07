@@ -32,30 +32,37 @@ options(future.globals.maxSize = 14000 * 1024^2)
 plan("sequential")
 plan()
 
-plots <- list()
+reload_h5_data <- F
+rerun_geneset_scores <- F
+
 ```
 
 ## Load annotated subtypes
 
 ```{r}
 
-#CD8
-cd8_all.h5.file <- here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds','scrna.wnn.int.cd8.all.annotated.h5Seurat')
-scrna_cd8_all <- LoadH5Seurat(cd8_all.h5.file, overwrite=T)
+plots <- list()
 
-#CD4
-cd4_all.h5.file <- here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds','scrna.wnn.int.cd4.all.annotated.h5Seurat')
-scrna_cd4_all <- LoadH5Seurat(cd4_all.h5.file, overwrite=T)
+if (reload_h5_data) {
 
-#All cells
-all.h5.file <- here::here(
-  '..','..','scrnaseq_tcsl154',
-  'rds','scrna.wnn.int.all.annotated.h5Seurat')
-scrna_all <- LoadH5Seurat(all.h5.file, overwrite=T)
+  #CD8
+  cd8_all.h5.file <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.wnn.int.cd8.all.annotated.h5Seurat')
+  scrna_cd8_all <- LoadH5Seurat(cd8_all.h5.file, overwrite=T)
+  
+  #CD4
+  cd4_all.h5.file <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.wnn.int.cd4.all.annotated.h5Seurat')
+  scrna_cd4_all <- LoadH5Seurat(cd4_all.h5.file, overwrite=T)
+  
+  #All cells
+  all.h5.file <- here::here(
+    '..','..','scrnaseq_tcsl154',
+    'rds','scrna.wnn.int.all.annotated.h5Seurat')
+  scrna_all <- LoadH5Seurat(all.h5.file, overwrite=T)
+}
 
 ```
 
@@ -736,53 +743,60 @@ plots$car_dotplot_horiz <- (
 
 cd4_genes <- list(
   'STIM-IFNG'= c(
-    "GZMA", "CD2", "CD74", "HLA-DRA", "IFNG", "ITGB2",
-    "PRF1", "EOMES", "GNLY", "LAG3"),
+    "IFNG","GZMA", "PRF1", "HLA-DRA", 
+    "CD74", "CD2", "ITGB2", "EOMES", "GNLY", "LAG3"),
   'STIM-GLYC'= c(
-    "HILPDA", "IL2RA", "BNIP3", "PGK1", "ARG2", "CTLA4", "TNFRSF9", "TNFRSF18"),
+    "IL2RA", "PGK1", "ARG2","TNFRSF18",
+    "HILPDA", "BNIP3", "CTLA4", "TNFRSF9", "GAPDH"),
   'STIM-OXPHOS'= c(
-    "HSPE1", "MT-CO3", "MT-CO2", "HSP90AA1", "FABP5",
-    "MKI67", "SRM", "C1QBP", "MT-ND1", "MT-ATP6"),
+    "MT-CO3", "MT-CO2", "SRM", "C1QBP",
+    "HSP90AA1", "FABP5", "HSPE1", 
+    "MKI67", "MT-ND1", "MT-ATP6"),
   'STAT1-IRF1'= c(
-    "STAT1", "STMN1", "IFITM1", "IFITM2", "IFITM3", "IRF1", "CALM2", "ID3"),
+    "STAT1", "IRF1","CALM2", "ID3", "IFITM1", "IFITM2", "IFITM3","STMN1"),
   'NAIVE-CD62L'= c(
     "SELL", "LRRN3", "SOCS2", "FAM13A"),
   'STIM-UNTR'= c(
-    "CCR7", "CD7", "CD69", "CD27", "MAL"),
+    "CCR7", "CD7", "MAL", "CD27", "CD69"),
   'TH2'= c(
     "IL5", "IL13", "GATA3", "IL4"),
   'MEM-CD29'= c(
-    "S100A4", "KLRB1", "ITGB1", "ITGA4", "HOPX",
-    "NKG7", "NEAT1", "CXCR3", "KLRG1", "CCR5"))
+    "S100A4", "KLRB1", "ITGB1", "CXCR3",
+    "CCR5","ITGA4", "HOPX","NKG7", "NEAT1", "KLRG1"))
 
 cd8_genes <-list(
   "NAIVE-CD7"= c(
-    "IFITM2", "VIM", "STMN1", "HMGN2", "STIM1", "CD7", "IFITM1", "TCF7","LEF1","CD27"),
+    "CD7","TCF7","LEF1","CD27",
+     "IFITM1", "IFITM2", "VIM", "STMN1", "HMGN2", "STIM1"),
   "MEM-CD29"= c(
-    "ITGA1", "ITGB2", "CXCR3","S100A4", "ANXA1", "KLRG1", "HOPX","KLRB1"),
+    "S100A4", "KLRB1", "ITGB1", "CXCR3",
+    "ANXA1", "KLRG1", "HOPX","ITGA1"),
   "STIM-IFNG"= c(
-    "IFNG", "GZMH", "GZMK", "GZMB", "NKG7", "CCR5", "HLA-DQA1", "CD74",
+    "IFNG", "GZMH", "GZMB", "HLA-DRA",
+    "GZMK",
+    "NKG7", "CCR5", "HLA-DQA1", "CD74",
     "CD2","CCL5","CCL3",'CCL4'),
   "STIM-GLYC"= c(
-    "ARG2", "BNIP3", "BNIP3L", "LAYN", "HILPDA", "MT2",
+    "ARG2", "HILPDA", "BNIP3", "LAYN",
+    "BNIP3L", "MT2",
     "LDHA", "FAM162A", "JUNB"),
   "STIM-UNTR"= c(
-    "S100A10", "CD38", "LAYN", "ENO1", "PGK1", "IGFBP2", "NEAT1", "STAT1", "CD27", "TNFAIP2"),
+    "ENO1", "PGK1", "STAT1", "CD27", "S100A10", "CD38", "IGFBP2", "NEAT1", "TNFAIP2"),
   "STIM-OXPHOS"= c(
-    "FKBP4", "HSPD1", "HSP90AB1",
-    "C1QBP", "EIF5A", "HSPH1", "MD-ND3", "SRM",
+    "C1QBP","SRM","FKBP4", "HSPD1",
+    "HSP90AB1","EIF5A", "HSPH1", 
     "IL2RA"),
   "STIM-INACT"= c(
-    "CTSW", "DDX21", "CYP1B1", "BATF3", "GZMA", "TNFSF10", "PFN1"),
+    "GZMA", "TIMP1", "TNFSF10", "PFN1"),
   "STIM-GNLY"= c(
-    "GNLY", "LAYN", "TNFRSF18", "RUNX3", "CTSW", "CBLB", "LGALS3"),
+    "GNLY", "LAYN", "TNFRSF18", "RUNX3", "CBLB", "CTSW", "LGALS3"),
   "NAIVE-CD62L"= c(
-    "SELL", "MAL", "KLF2", "TXNIP", "IL7R", "LRRN3"))
+    "SELL", "IL7R", "LRRN3", "MAL", "KLF2", "TXNIP"))
 
 make_gene_heatmap <- function(
     seurat_obj, subtype_order, max_genes=100, label_genes=NULL, 
     rescale=T, use_dendsort=T, label_width=3.25, label_font_size=2.25,
-    label_line_width=22) {
+    label_line_width=22, boxed=F, return_data=F) {
   
   if (rescale)
     seurat_obj <- ScaleData(seurat_obj, assay='SCT_INT')
@@ -839,8 +853,15 @@ make_gene_heatmap <- function(
         list(subtype, mean_zscore), by='gene'])[order(-mean_zscore),
           gene[1:max_genes], by='subtype']$V1
   
+  # best genes per cluster
   label_gene_list <- unique(unlist(label_genes, use.names=F))
   best_genes <- unique(c(best_genes, label_gene_list))
+  
+  #first 4 genes chosen per cluster
+  glist <- list()
+  for (i in 1:length(label_genes)) 
+    glist[[i]] <- data.table(subtype=names(label_genes[i]), genes=label_genes[[i]][1:4])
+  gene_top4 <- rbindlist(glist)
   
   # for annotation
   best_per_subtype <-unique(
@@ -868,12 +889,17 @@ make_gene_heatmap <- function(
       subtype == best_subtype & donor == donor[1], list(n_genes= as.double(.N)), by='subtype']
       
   separator_table[rev(subtype_order), on='subtype', pos := cumsum(n_genes)+0.5]
+  separator_table[, x_pos := (n_lines-rank(pos))*2 + 0.5]
   
   label_table <- display_genes[,
     paste(na.omit(label), collapse=', '), by='subtype'][
       separator_table, on='subtype']
   
-  de_gene_heatmap <- ggplot(display_genes) + 
+  top4_table <- gene_top4[,
+    paste(na.omit(genes), collapse='\n'), by='subtype'][
+      separator_table, on='subtype']
+  
+  de_gene_heatmap <-  de_gene_heatmap <- ggplot(display_genes) + 
     geom_tile(aes(x=interaction(donor,subtype), y=gene, fill=zscore)) +
     scale_x_discrete(expand=c(0,0)) + 
     scale_y_discrete(expand=c(0,0)) +
@@ -893,14 +919,37 @@ make_gene_heatmap <- function(
       aes(x=max_x, y=pos-2.5, label=stringr::str_wrap(V1, label_line_width), vjust=1, hjust=0)
     ) +
     theme_minimal() +
-    # geom_text_repel(
-    #   force        = 0.5,
-    #   nudge_x      = 0.15,
-    #   hjust        = 0,
-    #   segment.size = 0.2,
-    #   size=2,
-    #   xlim=c(max_x+0.5, max_x+0.5),
-    #   aes(x=max_x+0.5, y=gene, label=label)) +
+    theme(
+      axis.text.x=element_blank(),
+      strip.text.y=element_blank(),
+      axis.text.y=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank(),
+      plot.margin = unit(c(5.5, 22, 0, 5.5), "points"))
+  
+  de_gene_heatmap_boxed <- ggplot(display_genes) + 
+    geom_tile(aes(x=interaction(donor,subtype), y=gene, fill=zscore)) +
+    scale_x_discrete(expand=c(0,0)) + 
+    scale_y_discrete(expand=c(0,0)) +
+    geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
+    geom_rect(data=separator_table,
+      aes(ymax=pos-0.25, ymin=pos-n_genes+0.25, xmin=x_pos, color=subtype),
+      xmax=max_x+label_width, fill=NA, size=0.6) +
+    geom_rect(data=separator_table,
+      aes(ymax=pos-0.25, ymin=pos-n_genes+0.25, xmin=x_pos, xmax=x_pos+2, color=subtype), fill=NA, size=0.6) +
+    scale_color_manual(guide='none', values=unlist(all_colors)) +
+    scale_fill_distiller('Gene\nz-score',
+      palette='PuOr', oob=scales::squish, limit=c(-2, 2), type='div',
+      breaks=c(2,0,-2), labels=c('≥2','0','≤-2')) +
+    geom_label(
+      data=top4_table,
+      label.size=0,
+      fill=NA,
+      nudge_x=0.55,
+      size=label_font_size*1.8,
+      aes(x=max_x, y=pos-2.5, label=V1, vjust=1, hjust=0)) +
+    coord_cartesian(clip = 'off') +
+    theme_minimal() +
     theme(
       axis.text.x=element_blank(),
       strip.text.y=element_blank(),
@@ -916,7 +965,7 @@ make_gene_heatmap <- function(
     geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
     scale_fill_discrete('Donor', labels=c('A','B')) + 
     theme_minimal() +
-    coord_fixed(ratio=1/3) +
+    coord_fixed(ratio=1) +
     theme(
       axis.text.x=element_blank(),
       axis.text.y=element_blank(),
@@ -931,7 +980,7 @@ make_gene_heatmap <- function(
     scale_y_discrete(expand=c(0,0)) +
     scale_fill_manual(values=all_colors) +
     theme_minimal() +
-    coord_fixed(ratio=1/3) +
+    coord_fixed(ratio=1) +
     theme(
       legend.position = 'none',
       axis.text.x = element_text(angle = 90, vjust = -0.75, hjust=1),
@@ -940,8 +989,13 @@ make_gene_heatmap <- function(
       axis.text.y=element_blank(),
       panel.background = element_blank(),
       plot.margin = unit(c(0, 22, 5.5, 5.5), "points"))
-
-  return(de_gene_heatmap / donor_idents / cluster_idents)
+  
+  if (return_data)
+    melted_genes
+  else if (boxed)
+    return(de_gene_heatmap_boxed / donor_idents / cluster_idents)
+  else
+    return(de_gene_heatmap / donor_idents / cluster_idents)
 }
 
 if (!(exists('cd4_pruned'))) {
@@ -954,6 +1008,7 @@ if (!(exists('cd8_pruned'))) {
   cd8_pruned <- prune_cells(scrna_cd8_all, rescale=T)
 }
 
+# orig versions
 plots$cd4_gene_heatmap <- make_gene_heatmap(
   cd4_pruned, cd4_order, 
   max_genes=50, label_genes=cd4_genes, rescale=F, 
@@ -997,6 +1052,34 @@ plots$combined_gene_heatmap <- (
     plot_layout(widths=c(8,2,9,2,3))
 
 plots$combined_gene_heatmap
+
+# combined boxed
+
+plots$cd4_gene_heatmap_boxed <- make_gene_heatmap(
+  cd4_pruned, cd4_order, 
+  max_genes=50, label_genes=cd4_genes, rescale=F, 
+  use_dendsort=T, boxed=T,
+  label_width = 7.25, label_font_size=1.5, label_line_width=18)
+
+plots$cd8_gene_heatmap_boxed <- make_gene_heatmap(
+  cd8_pruned, cd8_order, max_genes=50,
+  label_genes=cd8_genes, rescale=F, 
+  use_dendsort=T, boxed=T,
+  label_width = 7.25, label_font_size=1.5, label_line_width=18)
+
+plots$cd4_gene_heatmap_boxed[[1]] <- plots$cd4_gene_heatmap_boxed[[1]] + 
+  scale_y_discrete('Top 50 DE genes per cluster') + ggtitle('CD4') + theme(
+    legend.position='none', axis.title.y=element_text(angle = 90))
+plots$cd4_gene_heatmap_boxed[[2]] <- plots$cd4_gene_heatmap_boxed[[2]] + theme(legend.position='none')
+
+plots$cd8_gene_heatmap_boxed[[1]] <- plots$cd8_gene_heatmap_boxed[[1]] + ggtitle('CD8')
+plots$cd8_gene_heatmap_boxed[[1]] <- plots$cd8_gene_heatmap_boxed[[1]] + theme(legend.position='none')
+plots$cd8_gene_heatmap_boxed[[2]] <- plots$cd8_gene_heatmap_boxed[[2]] + theme(legend.position='none')
+
+plots$combined_gene_heatmap_boxed <- (
+  plots$cd4_gene_heatmap_boxed | plot_spacer() | plots$cd8_gene_heatmap_boxed | plot_spacer() | (
+  (plot_spacer() / legend) + plot_layout(heights=c(1,1)))) +
+    plot_layout(widths=c(8,2,9,2,3))
 
 ```
 
@@ -1245,17 +1328,19 @@ gsea_subsets <- c(
   "MOOTHA_VOXPHOS"
   )
 
-cd8_gsea_scores_rna <- map_geneset_parallel(cd8_pruned, gsea_subsets, assay='RNA', nbin=24)
-cd8_pruned[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
-
-cd8_all_gsea_scores_rna <- map_geneset_parallel(scrna_cd8_all, gsea_subsets, assay='RNA', nbin=24)
-scrna_cd8_all[[names(cd8_all_gsea_scores_rna)]] <- cd8_all_gsea_scores_rna
-
-cd4_all_gsea_scores_rna <- map_geneset_parallel(scrna_cd4_all, gsea_subsets, assay='RNA', nbin=24)
-scrna_cd4_all[[names(cd4_all_gsea_scores_rna)]] <- cd4_all_gsea_scores_rna
-
-cd4_gsea_scores_rna <- map_geneset_parallel(cd4_pruned, gsea_subsets, assay='RNA', nbin=16)
-cd4_pruned[[names(cd4_gsea_scores_rna)]] <- cd4_gsea_scores_rna
+if (rerun_geneset_scores) {
+  cd8_gsea_scores_rna <- map_geneset_parallel(cd8_pruned, gsea_subsets, assay='RNA', nbin=24)
+  cd8_pruned[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
+  
+  cd8_all_gsea_scores_rna <- map_geneset_parallel(scrna_cd8_all, gsea_subsets, assay='RNA', nbin=24)
+  scrna_cd8_all[[names(cd8_all_gsea_scores_rna)]] <- cd8_all_gsea_scores_rna
+  
+  cd4_all_gsea_scores_rna <- map_geneset_parallel(scrna_cd4_all, gsea_subsets, assay='RNA', nbin=24)
+  scrna_cd4_all[[names(cd4_all_gsea_scores_rna)]] <- cd4_all_gsea_scores_rna
+  
+  cd4_gsea_scores_rna <- map_geneset_parallel(cd4_pruned, gsea_subsets, assay='RNA', nbin=16)
+  cd4_pruned[[names(cd4_gsea_scores_rna)]] <- cd4_gsea_scores_rna
+}
 
 make_cdf <- function(seurat_obj, pathway_name, pathway_label, 
     subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS'), quant_limit=0.05, group.by='Subtype', colorlist=unlist(all_colors), return_val='cdf') {
@@ -1553,18 +1638,41 @@ cd4_pct_barplots <- (
 
 ```{r}
 
-fig_A <- plots$combined_umap
-#fig_B <- plots$combined_gene_heatmap
-fig_B <- plots$car_dotplot_horiz
-fig_D <- plots$combined_tile_plot
-fig_E <- plots$combined_paper_umap
+# fig_A <- plots$combined_umap
+# #fig_B <- plots$combined_gene_heatmap
+# fig_B <- plots$car_dotplot_horiz
+# fig_D <- plots$combined_tile_plot
+# fig_E <- plots$combined_paper_umap
 
-plots$fig_assembled <- plot_grid(plot_grid(fig_A, plot_grid(fig_C, fig_E, ncol=2, labels=c('C','D')), ncol=1, rel_heights=c(1,1.5), labels=c('A','')), plot_grid(fig_B, fig_D+coord_fixed() +theme(legend.position='bottom',
-    legend.key.height=unit(0.4, 'lines'),
-    legend.key.width=unit(2, 'lines')), ncol=1, rel_heights=c(1.7,1), labels=c('B','E')), ncol=2, rel_widths=c(2,1))
+plots$fig_assembled <- plot_grid(
+  plot_grid(plots$combined_umap, 
+    plot_grid(plots$car_dotplot, plots$combined_paper_umap, ncol=2, labels=c('C','D')),
+    ncol=1, rel_heights=c(1,1.5), labels=c('A','')), 
+  plot_grid(
+    plots$combined_gene_heatmap,
+    plots$combined_tile_plot+coord_fixed()+theme(
+      legend.position='bottom',
+      legend.key.height=unit(0.4, 'lines'),
+      legend.key.width=unit(2, 'lines')), 
+    ncol=1, rel_heights=c(1.7,1), labels=c('B','E')),
+  ncol=2, rel_widths=c(2,1))
 
-plots$fig_assembled_2 <- plot_grid(plot_grid(fig_A, plot_grid(fig_, fig_E, ncol=2, labels=c('C','D')), ncol=1, rel_heights=c(1,1.5), labels=c('A','')), plot_grid(fig_B, fig_D+coord_fixed() +theme(legend.position='bottom',
-    legend.key.height=unit(0.4, 'lines'),
-    legend.key.width=unit(2, 'lines')), ncol=1, rel_heights=c(1.7,1), labels=c('B','E')), ncol=2, rel_widths=c(2,1))
+#width=1312&height=886&scale=1
+plots$fig_assembled_2 <- plot_grid(
+  plot_grid(plots$combined_umap, plots$car_dotplot_horiz,
+    ncol=1, rel_heights=c(1.2,1), labels=c('A','C')), 
+  plot_grid(plots$combined_paper_umap, plots$combined_tile_plot,
+    ncol=1, rel_heights = c(1.2,1), labels=c('B','D')),
+  rel_widths=c(2,1))
 
+#width=1841&height=885&scale=1
+plots$fig_assembled_3 <- plot_grid(
+  plot_grid(plots$combined_umap, plots$car_dotplot_horiz,
+    ncol=1, rel_heights=c(1.2,1), labels=c('A','B')), 
+  plot_grid(plots$combined_paper_umap, plots$combined_tile_plot,
+    ncol=1, rel_heights = c(1.2,1), labels=c('C','D')),
+  plots$combined_gene_heatmap,
+  ncol=3,
+  labels=c('','','E'),
+  rel_widths=c(1.6,1,1.2))
 ```
