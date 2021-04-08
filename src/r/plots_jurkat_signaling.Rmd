@@ -20,7 +20,6 @@ library(cowplot)
 
 output_dir <- file.path(here::here('..','figs'))
 
-
 #paste into terminal tab until Dan fixes this
 #s3fs roybal-tcsl ~/s3-roybal-tcsl/ -o passwd_file=${HOME}/.passwd-s3fs
 

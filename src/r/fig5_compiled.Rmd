@@ -1,0 +1,550 @@
+---
+title: "Figure 5 Compiled"
+output:
+  html_document:
+    code_folding: hide
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, 
+  output_dir = here::here('..','html'))})
+---
+
+## Setup
+
+```{r}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(ggpubr)
+library(grid)
+library(gtable)
+library(cowplot)
+library(ggridges)
+library(tidyverse)
+
+car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
+
+# load colors
+source(here::here('r','fig_colors.R'))
+
+# map day 0 to both plus and minus
+map_day_0 <- function(df) {
+  return(rbind(
+    df[k562!='none'],
+    df[k562=='none'][, k562 := 'cd19+'],
+    df[k562=='none'][, k562 := 'cd19-']
+  ))
+}
+```
+
+## Load Exhaustion Data 
+```{r}
+data_dir <- here::here('..','data')
+load(file.path(data_dir, 'exh.Rdata'))
+exh_dt[, car := factor(car, levels=c(car_order,'untrans'))]
+
+# some replicates appear to be incorrect - possibly due to evaporation or error in measurement.
+# we will identify which wells are way off of the median value for the set of 3 replicates:
+exh_means <- exh_dt[grep('_t',variable) & !is.na(donor), list(
+  mean_val=mean(value, na.rm=T)),
+  by=c('well','plate','day','variable','donor','row','col','k562','car','t_type')]
+
+exh_means[, c('med_val','med_diff') := list(
+  median(mean_val),
+  (mean_val-median(mean_val))/median(mean_val)),
+  by=c('day','car','k562','variable','donor','t_type')]
+
+exh_means[, oob := abs(med_diff) >= 0.25]
+exh_means[, n_oob := sum(oob), list(donor,k562,day,t_type,car,well,plate,variable)]
+
+outlier_wells <- unique(exh_means[n_oob == 1, list(donor,k562,day,t_type,car,well,plate)])
+
+exh_dt <- outlier_wells[, outlier_well := T][exh_dt, on=.(donor,k562,day,t_type,car,well,plate)]
+exh_dt[is.na(outlier_well), outlier_well := F]
+
+plots <- list()
+
+cd4_marker_pos_threshold <- list(
+  tim3_t= 666,
+  gfp_t=1250,
+  zombie_t=750,
+  myc_t=1400,
+  lag3_t= 950, 
+  pd1_t= 1400,
+  cd39_t= 1100)
+
+cd8_marker_pos_threshold <- list(
+  tim3_t= 666,
+  gfp_t=1500,
+  zombie_t=750,
+  myc_t=1400,
+  lag3_t= 800, 
+  pd1_t= 1400,
+  cd39_t= 1250)
+
+censor_negative_min = -1500
+```
+
+## Overall Increase in Exhaustion Markers, Thresholds (supplement)
+```{r}
+
+# table of thresholds chosen
+marker_thresholds <- rbind(
+    c(exh_opt_cd4$marker_thresholds, t_type='cd4'),
+    c(exh_opt_cd8$marker_thresholds, t_type='cd8'))
+marker_thresholds <- melt(
+    data.table(marker_thresholds), id.vars=c('t_type'))
+marker_thresholds[, value := unlist(value)]
+marker_thresholds[, t_type := unlist(t_type)]
+marker_thresholds <- rbind(
+    copy(marker_thresholds[, k562 := 'cd19+']), 
+    copy(marker_thresholds[, k562 := 'cd19-']))
+
+blue_shades <- brewer.pal(7, "YlGnBu")[3:7]
+
+# assess marker thresholds
+all_marker_data <- map_day_0(exh_dt)[k562 %in% c('cd19+','cd19-') & variable != 'zombie_t' & 
+    variable %in% names(exh_opt_cd4$marker_thresholds) & !outlier_well]
+
+#marker limits
+marker_limits <- all_marker_data[, {
+    limits=quantile(value,c(.01,.999), na.rm=T);
+    list(min=limits[1], max=limits[2])}, by=.(variable)]
+
+# remove values < 1% or > 99.9%
+all_marker_data <- all_marker_data[marker_limits, on='variable'][
+  value > min & value < max]
+
+marker_display_data <- rbind(
+    all_marker_data[car %in% c('41BB','CD28','zeta','BAFF-R','TACI','CD40','TNR8')][
+      , day_lbl := as.character(day)],
+    all_marker_data[day == 0 & car == 'untrans'][, day_lbl := 'Untransduced'])[
+      k562 == 'cd19+']
+
+marker_display_data[, t_type := toupper(t_type)]
+
+marker_thresh_disp <- marker_thresholds[
+    variable %in% c('cd39_t','lag3_t','pd1_t','tim3_t')][,
+      variable_lbl := toupper(gsub('_t','',variable))][, t_type := toupper(t_type)]
+
+plots$marker_thresholds <- ggplot(
+  marker_display_data[variable %in% c('cd39_t','lag3_t','pd1_t','tim3_t')][,
+    variable_lbl := toupper(gsub('_t','',variable))]) + 
+  geom_density(aes(x=value, color=factor(day_lbl, levels=c('Untransduced',0,6,15,24,33)))) + 
+  theme_minimal() +
+  geom_vline(data=marker_thresh_disp, 
+    aes(xintercept=value), alpha=0.3, linetype=3) +
+  facet_grid(t_type~variable_lbl, scale='free') + 
+  scale_color_manual('Days in Culture',values=c('grey50',blue_shades)) +
+  geom_vline(xintercept=-Inf) + 
+  geom_hline(yintercept=-Inf) +
+  theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      strip.background = element_blank())
+
+plots$marker_thresholds
+```
+
+## Increase in PD1 in CD28 vs BB/BAFFR
+
+```{r}
+
+plots$pd1_line_plot <- ggplot(
+    map_day_0(exh_dt[outlier_well==F])[
+      variable=='pd1_t' & k562 == 'cd19+' & day < 33 & car %in% c('BAFF-R','CD28','41BB','TACI') & 
+        value > censor_negative_min][,
+            list(pct= sum(gt_thresh)/.N),
+          by=.(car, day, donor, variable, t_type)][,
+            list(mean_pct=mean(pct), sd_pct=sd(pct)), 
+          by=.(car, day,variable, t_type)], 
+    aes(x=day, y=mean_pct, ymin=mean_pct-sd_pct/sqrt(2), ymax=mean_pct+sd_pct/sqrt(2), color=car, group=car)) + 
+    facet_grid(~t_type) +
+    geom_line() +
+    geom_point() + 
+    geom_linerange() +
+    scale_x_continuous(breaks=c(0,6,15,24,33)) + 
+    scale_y_continuous(labels=scales::percent) +
+    scale_color_manual(values=c(car_colors, untrans='grey80', zeta='black'), ) +
+    theme_minimal() + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='PD1 % Positive', x='Days in culture') +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank())
+
+plots$pd1_line_plot
+```
+
+```{R}
+
+ridge_data <- map_day_0(exh_dt[outlier_well==F & day < 33])[
+  marker_limits, on='variable'][value > min & value < max][k562 == 'cd19+']
+
+ridge_plot <- function(data_dt, variable_name) {
+  
+  plot <- ggplot(
+    map_day_0(data_dt[variable == variable_name][, t_type := toupper(t_type)])) + 
+    geom_density_ridges(aes(x=value, y=car, fill=car, color=car,
+      height =..ndensity..), alpha=0.8) +
+    scale_fill_manual('',values=c(car_colors, untrans='grey', zeta='black')) +
+    scale_color_manual('',values=c(car_colors, untrans='grey', zeta='black')) +
+    facet_grid(day~t_type+donor, scales='free') + 
+    theme_minimal() + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) + 
+    geom_vline(data=marker_thresholds[variable == variable_name &
+        t_type %in% data_dt$t_type & variable %in% data_dt$variable][, t_type := toupper(t_type)],
+      aes(xintercept=value), linetype=3, color='grey50') +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank())
+  
+  return(plot)
+}
+
+
+plot_exh_combo <- function(data_dt, variable_name) {
+  
+  plot_group <- (
+    ridge_plot(data_dt[k562 == 'cd19+' & t_type == 'cd4'], variable_name) | 
+    ridge_plot(data_dt[k562 == 'cd19+' & t_type == 'cd8'], variable_name) + 
+      theme(axis.text.y=element_blank())) + 
+    plot_layout(guides='collect')
+  
+  return(plot_group)
+}
+
+plots$pd1_ridge <- plot_exh_combo(ridge_data, 'pd1_t') + plot_annotation(title='PD1 Expression per CAR')
+plots$lag3_ridge <- plot_exh_combo(ridge_data, 'lag3_t') + plot_annotation(title='LAG3 Expression per CAR')
+plots$tim3_ridge <- plot_exh_combo(ridge_data, 'tim3_t') + plot_annotation(title='TIM3 Expression per CAR')
+plots$cd39_ridge <- plot_exh_combo(ridge_data, 'cd39_t') + plot_annotation(title='CD39 Expression per CAR')
+
+plots$pd1_ridge
+plots$lag3_ridge
+plots$tim3_ridge
+plots$cd39_ridge
+```
+
+
+## pct marker positive per car
+
+```{r}
+
+marker_ct <- exh_dt[!outlier_well & variable %in% c('tim3_t','lag3_t','cd39_t', 'pd1_t'),
+  list(n_pos_marker= sum(gt_thresh)),
+  by=c('well','plate','day','Time','car','donor','k562','t_type')]
+
+marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
+
+marker_ct <- map_day_0(marker_ct)
+
+marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:4))), 
+  by=c('well','plate','day','car','donor','k562','t_type')]
+names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
+
+marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
+  by=c('well','plate','day','car','donor','k562','t_type')]
+
+make_day_plot <- function(plot_day) {
+
+  day_dt <- marker_freq[car %in% c('41BB','CD28','BAFF-R') & day %in% plot_day & k562 == 'cd19+'][, 
+      c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
+      by=c('n_pos_marker','t_type','donor','day','k562','car')][,
+        t_type := toupper(t_type)]
+  
+  stat.test <- day_dt %>%
+    group_by(n_pos_marker, t_type, donor, day) %>%
+    t_test(pct ~ car)
+  
+  stat.test <- stat.test %>% filter(p.adj.signif != 'ns') %>%
+    add_xy_position(x = "n_pos_marker", dodge = 0.8)
+  
+  day_plot <- ggplot(day_dt) + 
+    geom_errorbar(aes(x=n_pos_marker, ymin=mean_pct-sd_pct, ymax=mean_pct+sd_pct, group=car), 
+      color='black', position=position_dodge(0.8)) +
+    geom_bar(aes(x=n_pos_marker, y=mean_pct, color=car, fill=car), 
+      position=position_dodge(0.8), stat='identity') +
+    facet_grid(day + donor ~ t_type) +
+    scale_fill_manual(values=car_colors) +
+    scale_color_manual(values=car_colors) +
+    scale_y_continuous(labels=scales::label_percent()) +
+    stat_pvalue_manual(
+      stat.test, label = "p.adj.signif", tip.length = 0.01) +
+    theme_minimal() +
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf)  +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank())
+
+  return(day_plot)
+}
+
+plots$n_exhaust <- make_day_plot(c(6,15)) + labs(
+  x='Number of exhaustion markers per cell', y='% of cells')
+
+plots$n_exhaust
+```
+
+## jurkat signaling
+
+```{r}
+#to make a data table with my csv 
+signaling.dt <- fread(paste0(
+  '/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/',
+  'tcsl148.csv'))
+
+#to make 0 hours no stimulation bar copy onto all of the stimulation types 
+# (even though it did not get + or - stim)
+map_day_0_sig <- function(df) {
+    return(rbind(
+        df,
+        df[Stimulation=='none' & Hours == 0][, Stimulation := '+'],
+        df[Stimulation=='none' & Hours == 0][, Stimulation := '-']
+    ))}
+
+# make labels that are easier to interpret
+signaling.dt[, 
+  line_lab := factor(as.character(Line), 
+    levels=c('4045','4046', '4047'), 
+    labels=c('AP1', 'NFAT', 'NFkB'))]
+
+#this is to normalize the data to untransduced from the same day
+signaling.dt[, 
+    combo_mcherry_pct_v_unt := 
+        # within each group, subtract each CAR pct from the untransduced
+        combo_mcherry_percent - combo_mcherry_percent[CAR=='Unt'], 
+    by=c('Hours','Line','Stimulation')]
+
+signaling.dt[, 
+    combo_mcherry_mfi_v_unt := 
+        # within each group, subtract each CAR mfi from the untransduced
+        combo_mcherry_mfi / combo_mcherry_mfi[CAR=='Unt'], 
+    by=c('Hours','Line','Stimulation')]
+
+car_colors_orig <- car_colors
+
+car_labels <- c('41BB','BAFF-R','BAFF-R H159Y', 'CD28', 'CD40', 'KLRG1', 
+                 'TACI', 'TNR8', 'Untransduced', 'Zeta')
+car_names <- c('41BB','Baffr','Baffr mut', 'CD28', 'CD40', 'KLRG1', 
+                'TACI', 'TNR8', 'Unt', 'Zeta')
+
+car_colors_signaling <- c(car_colors_orig[c(1:2,2,3:8,8)])
+names(car_colors_signaling) <- car_labels
+
+car_linetypes <- c(1,1,3,1,1,1,1,1,3,1)
+names(car_linetypes) <- car_labels
+
+plot.signaling.dt <- map_day_0_sig(signaling.dt)
+
+plot.signaling.dt[, car_lab := factor(CAR, levels=car_names, labels=car_labels)]
+plot.signaling.dt[, stim_lab := factor(Stimulation, 
+  levels=c('+','-','none'), labels=c('CD19+','CD19-','none'))]
+
+plots$combined_sig_plot <- ggplot(plot.signaling.dt[CAR != 'none' & stim_lab != 'none'], 
+      aes(x=Hours, y=combo_mcherry_pct_v_unt, color=car_lab, linetype=car_lab)) + 
+    facet_grid(line_lab ~ stim_lab, scales='free', drop=T) +
+    geom_line() + 
+    geom_point() +
+    theme_cowplot() +
+    scale_color_manual('', values=car_colors_signaling) +
+    scale_linetype_manual('', values=car_linetypes) +
+    scale_x_continuous(breaks=c(0,8,24,48), limits=c(0,48), label=label_percent()) +
+    theme(axis.text.x = element_text(hjust = .5), 
+      legend.title.align=0.5, 
+      plot.title = element_text(hjust = 0.5)) +
+    labs(x='Hours of Stimulation', y='Rel. Reporter Activity vs Untransduced') +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank())
+
+plots$combined_sig_plot_nomut <- ggplot(plot.signaling.dt[
+        !(CAR %in% c('Baffr mut','Unt','none')) & stim_lab != 'none'], 
+      aes(x=Hours, y=combo_mcherry_pct_v_unt, color=car_lab, linetype=car_lab)) + 
+    facet_grid(line_lab ~ stim_lab, scales='free', drop=T) +
+    geom_line(size=1) + 
+    geom_point(size=2) +
+    theme_cowplot() +
+    scale_color_manual('', values=setNames(car_colors_signaling, car_labels)) +
+    scale_linetype_manual('', values=setNames(car_linetypes, car_labels)) +
+    scale_x_continuous(breaks=c(0,8,24,48), limits=c(0,48)) +
+    theme(axis.text.x = element_text(hjust = .5), 
+      legend.title.align=0.5, 
+      plot.title = element_text(hjust = 0.5)) +
+    geom_hline(aes(yintercept=0), color='black', linetype=3) +
+    labs(x='Hours of Stimulation', y='Rel. Reporter Activity vs Untransduced') +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank())
+
+plots$combined_sig_plot_nomut_pos <- ggplot(plot.signaling.dt[
+        !(CAR %in% c('Baffr mut','Unt','none')) & stim_lab == 'CD19+'], 
+      aes(x=Hours, y=combo_mcherry_pct_v_unt/100, color=car_lab, linetype=car_lab)) + 
+    facet_wrap(~line_lab, scales='free', drop=T) +
+    geom_line() + 
+    geom_point() +
+    theme_minimal() +
+    scale_color_manual('', values=setNames(car_colors_signaling, car_labels)) +
+    scale_linetype_manual('', values=setNames(car_linetypes, car_labels)) +
+    scale_x_continuous(breaks=c(0,8,24,48), limits=c(0,48)) +
+    theme(axis.text.x = element_text(hjust = .5), 
+      legend.title.align=0.5, 
+      plot.title = element_text(hjust = 0.5)) +
+    geom_hline(aes(yintercept=0), color='black', linetype=3) +
+    scale_y_continuous(labels=label_percent(accuracy=1)) +
+    labs(x='Hours of Stimulation', y='Δ % Reporter Activity vs Untransduced') +
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank())
+
+plots$combined_sig_plot_nomut
+plots$combined_sig_plot_nomut_pos
+```
+
+# Load Differentiation Data 
+```{r}
+data_dir <- here::here('..','data')
+load(file.path(data_dir, 'diff.sampled.Rdata'))
+diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
+
+# some replicates appear to be incorrect - possibly due to evaporation or error in measurement.
+# we will identify which wells are way off of the median value for the set of 3 replicates:
+diff_means <- diff_dt[grep('_t',variable) & !is.na(donor), list(
+  mean_val=mean(value, na.rm=T)),
+  by=c('well','plate','day','variable','donor','row','col','k562','car','t_type')]
+
+diff_means[, c('med_val','med_diff') := list(median(mean_val), (mean_val-median(mean_val))/median(mean_val)),
+  by=c('day','car','k562','variable','donor','t_type')]
+
+replicate_issue_plot <- ggplot(map_day_0(diff_means)) + geom_histogram(aes(x=abs(med_diff), fill=factor(col %% 3), y=..density..)) + facet_grid(donor + day ~ variable + t_type + k562) + labs(x='% Difference of each replicate from median', y='Measurements') + scale_fill_discrete('replicate #') + scale_x_continuous(labels=label_percent(), oob=scales::oob_squish, limits=c(0,0.33), breaks=c(0,0.30)) + theme_minimal() + theme(panel.grid=element_blank(), panel.border = element_rect(fill=NA, color='grey50')) + geom_vline(xintercept=0.25, linetype=2, color='grey50')
+
+diff_means[, oob := abs(med_diff) >= 0.15]
+diff_means[, n_oob := sum(oob), list(donor,k562,day,t_type,car,well,plate,variable)]
+
+outlier_wells <- unique(diff_means[n_oob == 1, list(donor,k562,day,t_type,car,well,plate)])
+
+diff_dt <- outlier_wells[, outlier_well := T][diff_dt, on=.(donor,k562,day,t_type,car,well,plate)]
+diff_dt[is.na(outlier_well), outlier_well := F]
+
+diff_dt <- diff_dt[outlier_well == F]
+
+```
+
+# CD27 Expression 
+
+```{r}
+plots$cd27_lines <- ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min & t_type == 'cd8'][,
+            list(val_sd= sd(value), val_mean= mean(value)),
+        by=.(car, day, donor, variable, t_type)][
+            car %in% c('BAFF-R','41BB','CD28','TACI','untrans') & 
+                (donor == 2 | (donor == 1 & day < 33))][, donor := paste('Donor',donor)], 
+    aes(x=day, y=val_mean/1000, 
+        ymin=(val_mean-val_sd)/1000, 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car, linetype=car)) + 
+    geom_point() + 
+    geom_line() + 
+    facet_grid(~ donor, scale='free_x') + 
+    scale_x_continuous(breaks=c(0,6,15,24,33)) +
+    scale_y_continuous(limits=c(1.25,2.4)) +
+    scale_color_manual(
+        values=c(car_colors,'untrans'='grey30')) +
+    scale_linetype_manual(
+      values=c(setNames(rep(1, length(car_colors)),names(car_colors)), 'untrans'=3)) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+plots$cd27_lines_expanded <- ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min][,
+            list(val_sd= sd(value)/sqrt(.N), val_mean= mean(value)),
+        by=.(car, day, donor, variable, t_type, k562)][
+                (donor == 2 | (donor == 1 & day < 33))][, donor := paste('Donor',donor)], 
+    aes(x=day, y=val_mean/1000, 
+        ymin=(val_mean-val_sd)/1000, 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car, linetype=car)) + 
+    geom_point() + 
+    geom_line() + 
+    geom_linerange() +
+    facet_grid(t_type ~ donor, scale='free') + 
+    scale_color_manual(
+        values=c(car_colors,grey)) +
+    scale_linetype_manual(
+        values=c(1,1,1,1,1,1,1,3,1)) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+plots$cd27_lines
+plots$cd27_lines_expanded
+```
+
+# CAR expression
+
+```{r}
+
+map_day_0_diff <- function(df) {
+  return(rbind(
+    df[k562!='none'],
+    df[k562=='none'],
+    df[k562=='none' & day == 0][, k562 := 'cd19+'],
+    df[k562=='none' & day == 0][, k562 := 'cd19-']
+  ))
+}
+
+diff_cast_dt <- dcast(diff_dt[!is.na(value)],
+  t_type + donor + k562 + day + car + well + plate + event_id + col + row ~ variable,
+  value.var='value')
+
+mfi_myc_summ <- melt(diff_cast_dt[!is.na(car) & car != 'untrans', list(
+  myc_to_gfp=mean(myc_t/gfp_t),
+  gfp=mean(gfp_t),
+  myc=mean(myc_t)),
+  by=c('car','donor','day','k562','t_type')], id.vars=c('car','donor','day','k562','t_type'))[,
+    value_norm := value/mean(value), by=c('variable')]
+
+myc_average_exp <- map_day_0_diff(mfi_myc_summ)[,
+  list(car, value_norm_day= value/mean(value)), 
+  by=c('variable','day','donor','k562','t_type')][,
+    list(car, value_avg= value_norm_day/mean(value_norm_day)),
+  by=c('variable','k562','t_type')][,
+    car := factor(car, levels=car_order)][variable == 'myc']
+
+plots$myc_average <- ggplot(myc_average_exp[,
+    k562 := factor(k562, levels=levels(factor(k562)), labels=c('CD19+ K562s','CD19- K562s','No K562s'))
+    ],
+    aes(
+      x=car, fill=car, y=value_avg, color=car, group=(interaction(car,k562)))) + 
+  geom_boxplot(alpha=0.5) +
+  scale_y_continuous(label=label_percent(accuracy=1)) +
+  scale_color_manual('', values=car_colors) +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  scale_fill_manual('', values=car_colors) +
+  facet_grid( ~  k562, scale='free') +
+      theme_minimal() +
+geom_vline(xintercept=-Inf) + 
+geom_hline(yintercept=-Inf)  +
+theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank()) +
+  labs(y='Rel. change from mean',
+       x='CAR', title='CAR expression differences') +
+  geom_hline(yintercept=1, linetype=3, color='grey50')
+
+plots$myc_average
+```

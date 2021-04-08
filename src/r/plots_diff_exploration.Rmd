@@ -18,7 +18,7 @@ library(tidyverse)
 output_dir <- file.path(here::here('..','figs'))
 
 data_dir <- here::here('..','data')
-load(file.path(data_dir, 'diff.sampled.Rdata'))s
+load(file.path(data_dir, 'diff.sampled.Rdata'))
 diff_dt <- fread(file.path(data_dir, 'diff.sampled.csv.gz'))
 
 censor_negative_min = -1500
@@ -36,22 +36,46 @@ map_day_0 <- function(df) {
     df[k562=='none'][, k562 := 'cd19-']
   ))
 }
+
+source(here::here('r','fig_colors.R'))
+
+# some replicates appear to be incorrect - possibly due to evaporation or error in measurement.
+# we will identify which wells are way off of the median value for the set of 3 replicates:
+diff_means <- diff_dt[grep('_t',variable) & !is.na(donor), list(
+  mean_val=mean(value, na.rm=T)),
+  by=c('well','plate','day','variable','donor','row','col','k562','car','t_type')]
+
+diff_means[, c('med_val','med_diff') := list(median(mean_val), (mean_val-median(mean_val))/median(mean_val)),
+  by=c('day','car','k562','variable','donor','t_type')]
+
+replicate_issue_plot <- ggplot(map_day_0(diff_means)) + geom_histogram(aes(x=abs(med_diff), fill=factor(col %% 3), y=..density..)) + facet_grid(donor + day ~ variable + t_type + k562) + labs(x='% Difference of each replicate from median', y='Measurements') + scale_fill_discrete('replicate #') + scale_x_continuous(labels=label_percent(), oob=scales::oob_squish, limits=c(0,0.33), breaks=c(0,0.30)) + theme_minimal() + theme(panel.grid=element_blank(), panel.border = element_rect(fill=NA, color='grey50')) + geom_vline(xintercept=0.25, linetype=2, color='grey50')
+
+diff_means[, oob := abs(med_diff) >= 0.15]
+diff_means[, n_oob := sum(oob), list(donor,k562,day,t_type,car,well,plate,variable)]
+
+outlier_wells <- unique(diff_means[n_oob == 1, list(donor,k562,day,t_type,car,well,plate)])
+
+diff_dt <- outlier_wells[, outlier_well := T][diff_dt, on=.(donor,k562,day,t_type,car,well,plate)]
+diff_dt[is.na(outlier_well), outlier_well := F]
+
+diff_dt <- diff_dt[outlier_well == F]
+
 ```
 
 ### CD27 expression in CD8s is maintined in BAFF-R
 
 ```{r}
 
-#display all colors: display.brewer.all(type="seq")
-blues <- brewer.pal(9,'Blues')[c(5,8)] #41bb, cd28
-greens <- brewer.pal(9,'Greens')[c(5,8)] #baffr, taci
-oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
-red <- brewer.pal(9,'PuRd')[c(7)] #klrg1
-purple <- brewer.pal(9,'Purples')[c(7)] #zeta
-grey <- 'grey30' #unt
-car_colors <- c(
-  blues[1], greens[1], greens[1], blues[2], oranges[1], 
-  red, greens[2], oranges[2], grey, purple)
+# #display all colors: display.brewer.all(type="seq")
+# blues <- brewer.pal(9,'Blues')[c(5,8)] #41bb, cd28
+# greens <- brewer.pal(9,'Greens')[c(5,8)] #baffr, taci
+# oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
+# red <- brewer.pal(9,'PuRd')[c(7)] #klrg1
+# purple <- brewer.pal(9,'Purples')[c(7)] #zeta
+# grey <- 'grey30' #unt
+# car_colors <- c(
+#   blues[1], greens[1], greens[1], blues[2], oranges[1], 
+#   red, greens[2], oranges[2], grey, purple)
 car_linetypes <- c(1,1,3,1,1,1,1,1,1,1)
 
 ggplot(map_day_0(diff_dt)[
@@ -68,7 +92,7 @@ ggplot(map_day_0(diff_dt)[
     scale_fill_manual(values=brewer.pal(9,'Greens')[rev(c(4,5,6,7,8))]) + scale_y_continuous(limits=c(1000,3000)) +
     facet_grid(t_type + donor ~ car)
 
-cd27_lines <- ggplot(
+plots$cd27_lines <- ggplot(
     map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
         value > censor_negative_min & t_type == 'cd8'][,
             list(val_sd= sd(value), val_mean= mean(value)),
@@ -77,14 +101,16 @@ cd27_lines <- ggplot(
                 (donor == 2 | (donor == 1 & day < 33))], 
     aes(x=day, y=val_mean/1000, 
         ymin=(val_mean-val_sd)/1000, 
-        ymax=(val_mean+val_sd)/1000, color=car, group=car)) + 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car, linetype=car)) + 
     geom_point() + 
     geom_line() + 
     facet_grid(~ donor, scale='free_x') + 
     scale_x_continuous(breaks=c(0,6,15,24,33)) +
     scale_y_continuous(limits=c(1.25,2.4)) +
     scale_color_manual(
-        values=c(blues[1], greens[1], blues[2], greens[2], grey)) +
+        values=c(car_colors,'untrans'='grey30')) +
+    scale_linetype_manual(
+      values=c(setNames(rep(1, length(car_colors)),names(car_colors)), 'untrans'=3)) +
     theme_minimal(base_size=9) + 
     geom_vline(xintercept=-Inf) + 
     geom_hline(yintercept=-Inf) +
@@ -142,5 +168,28 @@ ggplot(
     geom_vline(xintercept=-Inf) + 
     geom_hline(yintercept=-Inf) +
     labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+plots$cd27_expanded <- ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min][,
+            list(val_sd= sd(value)/sqrt(.N), val_mean= mean(value)),
+        by=.(car, day, donor, variable, t_type, k562)][
+                (donor == 2 | (donor == 1 & day < 33))], 
+    aes(x=day, y=val_mean/1000, 
+        ymin=(val_mean-val_sd)/1000, 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car, linetype=car)) + 
+    geom_point() + 
+    geom_line() + 
+    geom_linerange() +
+    facet_grid(t_type ~ donor, scale='free') + 
+    scale_color_manual(
+        values=c(car_colors,grey)) +
+    scale_linetype_manual(
+        values=c(1,1,1,1,1,1,1,3,1)) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(y='CD27 log MFI (AU)', x='Days in culture')
+```
 
 

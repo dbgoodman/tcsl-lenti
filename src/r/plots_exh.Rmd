@@ -39,6 +39,7 @@ exh_means[, c('med_val','med_diff') := list(median(mean_val), (mean_val-median(m
 replicate_issue_plot <- ggplot(map_day_0(exh_means)) + geom_histogram(aes(x=abs(med_diff), fill=factor(col %% 3), y=..density..)) + facet_grid(donor + day ~ variable + t_type + k562) + labs(x='% Difference of each replicate from median', y='Measurements') + scale_fill_discrete('replicate #') + scale_x_continuous(labels=label_percent(), oob=scales::oob_squish, limits=c(0,0.33), breaks=c(0,0.30)) + theme_minimal() + theme(panel.grid=element_blank(), panel.border = element_rect(fill=NA, color='grey50')) + geom_vline(xintercept=0.25, linetype=2, color='grey50')
 
 exh_means[, oob := abs(med_diff) >= 0.25]
+exh_means[, n_oob := sum(oob), list(donor,k562,day,t_type,car,well,plate,variable)]
 
 outlier_wells <- unique(exh_means[n_oob == 1, list(donor,k562,day,t_type,car,well,plate)])
 
@@ -64,14 +65,30 @@ marker_thresholds <- rbind(
 blue_shades <- brewer.pal(7, "YlGnBu")[3:7]
 
 # assess marker thresholds
-ggplot(map_day_0(exh_dt)[k562 %in% c('cd19+','cd19-') & variable != 'zombie_t' & 
-    variable %in% names(exh_opt_cd4$marker_thresholds)]) + 
-    geom_density(aes(x=value, color=factor(day))) + 
-    scale_x_continuous(limits=c(-1000,5000)) + 
+all_marker_data <- map_day_0(exh_dt)[k562 %in% c('cd19+','cd19-') & variable != 'zombie_t' & 
+    variable %in% names(exh_opt_cd4$marker_thresholds)]
+
+# remove values < 1% or > 99.9%
+all_marker_data <- all_marker_data[
+  all_marker_data[, {
+    limits=quantile(value,c(.01,.999), na.rm=T);
+    list(min=limits[1], max=limits[2])}, by=.(variable)], on='variable'][
+  value > min & value < max]
+
+marker_display_data <- rbind(
+    all_marker_data[car %in% c('41BB','CD28','zeta','BAFF-R','TACI','CD40','TNR8')][
+      , day_lbl := as.character(day)],
+    all_marker_data[day == 0 & car == 'untrans'][, day_lbl := 'Untransduced'])[
+      k562 == 'cd19+']
+
+ggplot(marker_display_data[variable %in% c('cd39_t','lag3_t','pd1_t','tim3_t')][, variable_lbl := toupper(gsub('_t','',variable))]) + 
+    geom_density(aes(x=value, color=factor(day_lbl, levels=c('Untransduced',0,6,15,24,33)))) + 
     theme_minimal() +
-    geom_vline(data=marker_thresholds[variable != 'zombie_t'], aes(xintercept=value)) +
-    facet_grid(t_type+k562~variable, scale='free') + 
-    scale_color_manual(values=blue_shades)
+    geom_vline(data=marker_thresholds[variable %in% c('cd39_t','lag3_t','pd1_t','tim3_t')][, variable_lbl := toupper(gsub('_t','',variable))], aes(xintercept=value), alpha=0.3, linetype=2) +
+    facet_grid(t_type~variable_lbl, scale='free') + 
+    scale_color_manual('Day',values=c('grey50',blue_shades)) +
+    geom_vline(xintercept=-Inf) + geom_hline(yintercept=-Inf)
+
 ```
 
 ## Summary Stats by MFI, % Positive, and % Positive MFI
@@ -245,7 +262,7 @@ make_day_plot <- function(plot_day) {
   
 
 
-#bar verison
+#line verison
 # ggplot(
 #   marker_freq[car %in% c('41BB','CD28','BAFF-R','KLRG1','zeta','CD4O','untrans') & day == 15 & k562 == 'cd19+'][, 
 #     c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
