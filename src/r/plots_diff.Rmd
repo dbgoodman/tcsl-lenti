@@ -80,19 +80,13 @@ theme(
 
 ## First, set the cutoffs for each channel
 
-# melt a sampled fcs set
-fcs_melt_sample_dt <- melt(
-  fcs_dt[, .SD[sample(.N, min(.N, 1000))], 
-    by=c('well', 'plate', 'day')], 
-  measure.vars=melt_cols)
-
 # choose thresholds visually (plotted below)
 marker_pos_threshold <- list(
-  cd62l=flowJoTrans(inverse=T)(1750),
+  cd62l=flowJoTrans(inverse=T)(1800),
   cd27=flowJoTrans(inverse=T)(1800),
   ccr7=flowJoTrans(inverse=T)(1050),
-  cd45ro=flowJoTrans(inverse=T)(800),
-  cd45ra=flowJoTrans(inverse=T)(900),
+  cd45ro=flowJoTrans(inverse=T)(1100),
+  cd45ra=flowJoTrans(inverse=T)(1100),
   cd95=flowJoTrans(inverse=T)(2100))
 
 marker_thresh_dt <- data.table(
@@ -100,11 +94,11 @@ marker_thresh_dt <- data.table(
   threshold= flowJoTrans()(unlist(marker_pos_threshold)))
 
 # assess marker thresholds
-ggplot(fcs_melt_sample_dt[
+ggplot(diff_dt[
     variable %in% paste0(names(channel_map),'_t')]) + 
   geom_density(aes(x=value, color=factor(day), linetype=k562)) + 
   scale_x_continuous(limits=c(-1000,5000)) +
-  facet_grid(k562~variable, scale='free') + 
+  facet_grid(k562+donor+t_type~variable, scale='free') + 
   scale_color_manual(values=brewer.pal(7, "YlGnBu")[3:7]) +
   geom_vline(data=marker_thresh_dt, aes(xintercept=threshold))
 ```
@@ -112,10 +106,7 @@ ggplot(fcs_melt_sample_dt[
 ## Examine pairs of markers
 ```{r, fig.width=18, fig.height=7}
 
-fcs_melt_sample_dt <- melt(
-  fcs_dt[, .SD[sample(.N, min(.N, 1000))], 
-    by=c('well', 'plate', 'day')], 
-  measure.vars=melt_cols)
+fcs_melt_sample_dt <- diff_dt
 
 # this function assigned 'none' k562 group to baseline day 0
 map_day_0 <- function(df) {
@@ -135,7 +126,7 @@ cast_vars <- function(df, cast_vars) {
 
 plot_2d_density_vars <- function(df, x_var, y_var) {
 
-  cast_dt <- cast_vars(df, cast_vars=c(x_var, y_var))
+  cast_dt <- data.table(cast_vars(df, cast_vars=c(x_var, y_var)))
   
   x_threshold <- marker_thresh_dt[variable==x_var, threshold]
   y_threshold <- marker_thresh_dt[variable==y_var, threshold]
@@ -157,7 +148,7 @@ plot_2d_density_vars <- function(df, x_var, y_var) {
   )
   
   thresh_dt <- thresh_dt[quadrant_labels, on=c('x_thresh','y_thresh')]
-  thresh_dt[, pct := percent(frac)]
+  thresh_dt[, pct := percent(round(frac,2))]
   
   plot <- ggplot(cast_dt) + 
     geom_density2d(aes(y=get(y_var), x=get(x_var)), n=200) + 
@@ -171,9 +162,9 @@ plot_2d_density_vars <- function(df, x_var, y_var) {
   return(plot)
 }
 
-plot_2d_density_vars_split_donor <- function(df, x_var, y_var) {
+plot_2d_density_vars_split_donor <- function(df, x_var, y_var, tile=F) {
 
-  cast_dt <- cast_vars(df, cast_vars=c(x_var, y_var))
+  cast_dt <- data.table(cast_vars(df, cast_vars=c(x_var, y_var)))
   
   x_threshold <- marker_thresh_dt[variable==x_var, threshold]
   y_threshold <- marker_thresh_dt[variable==y_var, threshold]
@@ -184,7 +175,8 @@ plot_2d_density_vars_split_donor <- function(df, x_var, y_var) {
     by=c('k562','car','donor')]
   
   thresh_dt[, frac := value/sum(value), by=c('k562','car','donor')]
-  
+  thresh_dt[, pct := percent(frac,accuracy=1)]
+
   quadrant_labels <- data.table(
     x=c(Inf,Inf,-Inf,-Inf),
     y=c(Inf,-Inf,Inf,-Inf),
@@ -195,18 +187,31 @@ plot_2d_density_vars_split_donor <- function(df, x_var, y_var) {
   )
   
   thresh_dt <- thresh_dt[quadrant_labels, on=c('x_thresh','y_thresh')]
-  thresh_dt[, pct := percent(frac)]
   
-  plot <- ggplot(cast_dt) + 
-    geom_density2d(aes(y=get(y_var), x=get(x_var)), n=200) + 
-    facet_grid(k562+donor~car) + 
-    scale_x_continuous(limits=c(-1000,4000)) + 
-    scale_y_continuous(limits=c(-1000,4000)) + 
-    geom_vline(xintercept=x_threshold) + 
-    geom_hline(yintercept=y_threshold) +
-    geom_text(data=thresh_dt, aes(x=x, y=y, label=pct, hjust=hjust, vjust=vjust))
+  if (tile) {
   
-  return(plot)
+    tile_plot <- ggplot(thresh_dt, aes(y=y_thresh, x=x_thresh)) + 
+      geom_tile(aes(fill=frac)) + 
+      facet_grid(k562+donor~car) + 
+      scale_fill_distiller(palette='Greens', direction=1) + 
+      geom_text(aes(label=pct), size=3) +
+      scale_x_discrete(x_var, labels=c('-','+')) +
+      scale_y_discrete(y_var, labels=c('-','+')) +
+      theme_minimal()
+    
+    return(tile_plot)
+  } else {
+    plot <- ggplot(cast_dt) + 
+      geom_density2d(aes(y=get(y_var), x=get(x_var)), n=200) + 
+      facet_grid(k562+donor~car) + 
+      scale_x_continuous(x_var, limits=c(-1000,4000)) + 
+      scale_y_continuous(y_var, limits=c(-1000,4000)) + 
+      geom_vline(xintercept=x_threshold) + 
+      geom_hline(yintercept=y_threshold) +
+      geom_text(data=thresh_dt, aes(x=x, y=y, label=pct, hjust=hjust, vjust=vjust))
+    
+    return(plot)
+  }
 }
 
 
@@ -265,6 +270,24 @@ diff_marker_dt <- melt.data.table(
         'cd62_cd45ra_diff', 'cd45ro_ccr7_diff', 'cd45ra_ccr7_diff',
         'cd45ro_cd27_diff', 'cd62_cd27_diff',
         'cd62l', 'cd27', 'ccr7', 'cd45ro', 'cd45ra', 'cd95'))
+
+tile_set <- function(df, exh_x, exh_y, days=c(0,6,15,24,33)) {
+  plot_grid(
+    plot_grid(plotlist=lapply(days, function(day_i) 
+      plot_2d_density_vars_split_donor(
+        df[t_type == 'cd4' & day==day_i], 
+        y_var=exh_x, x_var=exh_y, tile=F) + 
+        ggtitle(paste('CD4 Day', day_i))), ncol=1),
+    plot_grid(plotlist=lapply(days, function(day_i) 
+      plot_2d_density_vars_split_donor(
+        df[t_type == 'cd8' & day==day_i], 
+        y_var=exh_x, x_var=exh_y, tile=F) + 
+        ggtitle(paste('CD8 Day', day_i))), ncol=1)
+  )
+}
+
+
+# plot_grid(plot_grid(plotlist=lapply(c(0,6,15), function(day_i) plot_2d_density_vars_split_donor(diff_mdz_dt[k562 == 'cd19-' & t_type == 'cd4' & day==day_i & car %in% c('41BB','BAFF-R','CD28')], y_var='ccr7_t', x_var='cd62l_t', tile=F) + ggtitle(paste('CD4 Day', day_i))), ncol=1),plot_grid(plotlist=lapply(c(0,6,15), function(day_i) plot_2d_density_vars_split_donor(diff_mdz_dt[k562 == 'cd19-' & t_type == 'cd8' & day==day_i & car %in% c('41BB','BAFF-R','CD28')], y_var='ccr7_t', x_var='cd62l_t', tile=F) + ggtitle(paste('CD8 Day', day_i))), ncol=1))
 
 ```
 

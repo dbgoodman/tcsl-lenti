@@ -234,33 +234,40 @@ plots$cd39_ridge
 
 ```{r}
 
-marker_ct <- exh_dt[!outlier_well & variable %in% c('tim3_t','lag3_t','cd39_t', 'pd1_t'),
-  list(n_pos_marker= sum(gt_thresh)),
-  by=c('well','plate','day','Time','car','donor','k562','t_type')]
+get_marker_counts <- function(exh_dt, exh_vars=c('tim3_t','lag3_t', 'pd1_t','cd39_t')) {
+  marker_ct <- exh_dt[!outlier_well & variable %in% exh_vars,
+    list(n_pos_marker= sum(gt_thresh)),
+    by=c('well','plate','day','Time','car','donor','k562','t_type')]
+  
+  marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
+  
+  marker_ct <- map_day_0(marker_ct)
+  
+  marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:length(exh_vars)))), 
+    by=c('well','plate','day','car','donor','k562','t_type')]
+  names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
+  
+  marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
+    by=c('well','plate','day','car','donor','k562','t_type')]
+  
+  return(marker_freq)
+}
 
-marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
-
-marker_ct <- map_day_0(marker_ct)
-
-marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:4))), 
-  by=c('well','plate','day','car','donor','k562','t_type')]
-names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
-
-marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
-  by=c('well','plate','day','car','donor','k562','t_type')]
-
-make_day_plot <- function(plot_day) {
+make_day_plot <- function(marker_freq, plot_day) {
 
   day_dt <- marker_freq[car %in% c('41BB','CD28','BAFF-R') & day %in% plot_day & k562 == 'cd19+'][, 
       c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
       by=c('n_pos_marker','t_type','donor','day','k562','car')][,
         t_type := toupper(t_type)]
   
+  day_dt[, car := factor(car)]
+  day_dt[, pct := as.numeric(pct)]
+  
   stat.test <- day_dt %>%
     group_by(n_pos_marker, t_type, donor, day) %>%
     t_test(pct ~ car)
   
-  stat.test <- stat.test %>% filter(p.adj.signif != 'ns') %>%
+  stat.test <- stat.test %>% dplyr::filter(p.adj.signif != 'ns') %>%
     add_xy_position(x = "n_pos_marker", dodge = 0.8)
   
   day_plot <- ggplot(day_dt) + 
@@ -285,9 +292,14 @@ make_day_plot <- function(plot_day) {
   return(day_plot)
 }
 
-plots$n_exhaust <- make_day_plot(c(6,15)) + labs(
+plots$n_exhaust <- make_day_plot(get_marker_counts(exh_dt), c(6,15)) + labs(
   x='Number of exhaustion markers per cell', y='% of cells')
 
+plots$n_exhaust_3 <- make_day_plot(
+  get_marker_counts(exh_dt, exh_vars=c('tim3_t','lag3_t', 'pd1_t')),
+  c(6,15)) + labs(x='Number of exhaustion markers per cell', y='% of cells')
+
+  
 plots$n_exhaust
 ```
 
@@ -488,6 +500,26 @@ plots$cd27_lines_expanded <- ggplot(
     geom_vline(xintercept=-Inf) + 
     geom_hline(yintercept=-Inf) +
     labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+plots$cd27_ridges <- ggplot(map_day_0(diff_dt)[
+    variable=='cd27_t' & k562 == 'cd19+' & value > -500 & t_type == 'cd8'][
+        car %in% c('BAFF-R','41BB','CD28','TACI','untrans') & 
+            (day < 33)][, donor := paste('Donor',donor)]) + 
+    geom_density_ridges(aes(x=value, y=factor(day),
+      height =..ndensity..), fill='white', size=0) +
+    geom_density_ridges(aes(x=value, y=factor(day), alpha=factor(day), fill=car,
+      height =..ndensity..), size=0) +
+    geom_density_ridges(aes(x=value, y=factor(day), alpha=factor(day),
+      height =..ndensity..), color='black', alpha=0) +
+    scale_alpha_discrete(guide='none') +
+    scale_fill_manual(guide='none',values=c(car_colors,'untrans'='grey30')) +
+    facet_grid(car~donor, scales='free') + 
+    scale_x_continuous(limits=c(-500, 3000)) +
+    scale_y_discrete(expand=c(0,0), limits=rev) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(x='CD27 log MFI (AU)', y='Days in culture')
 
 plots$cd27_lines
 plots$cd27_lines_expanded

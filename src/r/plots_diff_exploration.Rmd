@@ -131,6 +131,21 @@ cd27_ridges <- ggplot(map_day_0(diff_dt)[
     geom_hline(yintercept=-Inf) +
     labs(x='CD27 log MFI (AU)', y='Days in culture')
 
+cd27_ridges_colored <- ggplot(map_day_0(diff_dt)[
+    variable=='cd27_t' & k562 == 'cd19+' & value > -500 & t_type == 'cd8'][
+        car %in% c('BAFF-R','41BB','CD28','untrans') & 
+            (donor == 2 | (donor == 1 & day < 33))]) + 
+    geom_density_ridges(aes(x=value, y=factor(day), alpha=factor(day), fill=car,
+      height =..ndensity..)) +
+    scale_fill_manual(values=car_colors) +
+    facet_grid(car~donor, scales='free') + 
+    scale_x_continuous(limits=c(-500, 3000)) +
+    scale_y_discrete(expand=c(0,0), limits= rev(levels(factor(diff_dt$day)))) +
+    theme_minimal(base_size=9) + 
+    geom_vline(xintercept=-Inf) + 
+    geom_hline(yintercept=-Inf) +
+    labs(x='CD27 log MFI (AU)', y='Days in culture')
+
 cd27_ridges
 cd27_lines
 

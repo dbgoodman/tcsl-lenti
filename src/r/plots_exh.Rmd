@@ -52,12 +52,10 @@ exh_dt[is.na(outlier_well), outlier_well := F]
 ```{r fig.width=14, fig.height=8}
 # table of thresholds chosen
 marker_thresholds <- rbind(
-    c(exh_opt_cd4$marker_thresholds, t_type='cd4'),
-    c(exh_opt_cd8$marker_thresholds, t_type='cd8'))
-marker_thresholds <- melt(
-    data.table(marker_thresholds), id.vars=c('t_type'))
-marker_thresholds[, value := unlist(value)]
-marker_thresholds[, t_type := unlist(t_type)]
+    c(setNames(unlist(exh_opt_cd4$marker_thresholds), names(exh_opt_cd4$marker_thresholds)), t_type='cd4'),
+    c(setNames(unlist(exh_opt_cd8$marker_thresholds), names(exh_opt_cd8$marker_thresholds)), t_type='cd8'))
+marker_thresholds <- data.table(melt(
+    data.table(marker_thresholds), id.vars=c('t_type')))
 marker_thresholds <- rbind(
     copy(marker_thresholds[, k562 := 'cd19+']), 
     copy(marker_thresholds[, k562 := 'cd19-']))
@@ -88,6 +86,94 @@ ggplot(marker_display_data[variable %in% c('cd39_t','lag3_t','pd1_t','tim3_t')][
     facet_grid(t_type~variable_lbl, scale='free') + 
     scale_color_manual('Day',values=c('grey50',blue_shades)) +
     geom_vline(xintercept=-Inf) + geom_hline(yintercept=-Inf)
+
+```
+
+## Two Marker Contour Plots
+
+```{r}
+
+cast_vars <- function(df, cast_vars) {
+  return(
+    dcast(map_day_0(df[variable %in% cast_vars]), 
+      well + plate + day + car + k562 + donor + event_id + t_type ~ variable,
+      value.var='value'))
+}
+
+plot_2d_density_vars_split_donor <- function(df, x_var, y_var, tile=F) {
+
+  cast_dt <- data.table(cast_vars(df, cast_vars=c(x_var, y_var)))
+  
+  x_thresholds <- marker_thresholds[variable==x_var][, list(x_thresh=value), by=c('t_type','k562')]
+  y_thresholds <- marker_thresholds[variable==y_var][, list(y_thresh=value), by=c('t_type','k562')]
+  
+  thresholds <- merge(x_thresholds, y_thresholds, on=c('t_type','k562'))
+  
+  thresh_dt <- thresholds[cast_dt, on=c('t_type','k562')][, melt(table(
+    x_thresh= (get(x_var) > x_thresh),
+    y_thresh= (get(y_var) > y_thresh))),
+    by=c('k562','car','donor')]
+  
+  thresh_line_dt <- unique(
+    thresholds[cast_dt, on=c('t_type','k562')][, list(x_thresh, y_thresh, k562,t_type)])
+  
+  thresh_dt[, frac := value/sum(value), by=c('k562','car','donor')]
+  thresh_dt[, pct := percent(frac,accuracy=1)]
+
+  quadrant_labels <- data.table(
+    x=c(Inf,Inf,-Inf,-Inf),
+    y=c(Inf,-Inf,Inf,-Inf),
+    x_thresh=c(T, T, F, F),
+    y_thresh=c(T, F, T, F),
+    hjust=c(1,1,0,0),
+    vjust=c(1,0,1,0)
+  )
+  
+  thresh_dt <- thresh_dt[quadrant_labels, on=c('x_thresh','y_thresh')]
+  
+  if (tile) {
+  
+    tile_plot <- ggplot(thresh_dt, aes(y=y_thresh, x=x_thresh)) + 
+      geom_tile(aes(fill=frac)) + 
+      facet_grid(k562+donor~car) + 
+      scale_fill_distiller(palette='Greens', direction=1) + 
+      geom_text(aes(label=pct), size=3) +
+      scale_x_discrete(x_var, labels=c('-','+')) +
+      scale_y_discrete(y_var, labels=c('-','+')) +
+      theme_minimal()
+    
+    return(tile_plot)
+  } else {
+    plot <- ggplot(cast_dt) + 
+      geom_density2d(aes(y=get(y_var), x=get(x_var)), n=200) + 
+      facet_grid(k562+donor~car) + 
+      scale_x_continuous(x_var, limits=c(-1000,4000)) + 
+      scale_y_continuous(y_var, limits=c(-1000,4000)) + 
+      geom_vline(data=thresh_line_dt, aes(xintercept=as.numeric(x_thresh))) + 
+      geom_hline(data=thresh_line_dt, aes(yintercept=as.numeric(y_thresh))) + 
+      geom_text(data=thresh_dt, aes(x=x, y=y, label=pct, hjust=hjust, vjust=vjust))
+    
+    return(plot)
+  }
+}
+
+tile_set <- function(df, exh_x, exh_y, days=c(6,15,24,33)) {
+  plot_grid(
+    plot_grid(plotlist=lapply(days, function(day_i) 
+      plot_2d_density_vars_split_donor(
+        df[t_type == 'cd4' & day==day_i], 
+        y_var=exh_x, x_var=exh_y, tile=T) + 
+        ggtitle(paste('CD4 Day', day_i))), ncol=1),
+    plot_grid(plotlist=lapply(days, function(day_i) 
+      plot_2d_density_vars_split_donor(
+        df[t_type == 'cd8' & day==day_i], 
+        y_var=exh_x, x_var=exh_y, tile=T) + 
+        ggtitle(paste('CD8 Day', day_i))), ncol=1)
+  )
+}
+
+tile_set(df=map_day_0(exh_dt)[k562 == 'cd19+' & car %in% c('41BB','BAFF-R','CD28')], 'pd1_t','lag3_t', days=c(0, 6,15,24,33))
+
 
 ```
 

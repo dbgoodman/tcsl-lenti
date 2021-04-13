@@ -261,7 +261,6 @@ color_plots <- function(umap_df) {
 color_plots(umap_cd4_fcs_dt)
 color_plots(umap_cd8_fcs_dt)
 
-
 ```
 
 ```{r, fig.width=15, fig.height=8}

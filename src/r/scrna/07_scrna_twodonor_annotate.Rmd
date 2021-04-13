@@ -1,3 +1,4 @@
+
 ---
 title: "Two Donor scRNAseq"
 output:
@@ -9,6 +10,8 @@ knit: (function(inputFile, encoding) {
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(hdf5r)
+library(SeuratDisk)
 library(dplyr)
 library(tidyr)
 library(tidyr)
@@ -20,8 +23,11 @@ library(ggplot2)
 library(data.table)
 library(cowplot)
 library(future)
-library(SeuratDisk)
 library(BiocParallel)
+library(ggrepel)
+library(scales)
+library(MBA)
+library(dendsort)
 
 reload_data=F
 source(here::here('r','fig_colors.R'))
@@ -34,6 +40,14 @@ plan()
 
 reload_h5_data <- F
 rerun_geneset_scores <- F
+
+car_colors_umap <- car_colors
+names(car_colors_umap)[1] <- '4-1BB'
+names(car_colors_umap)[8] <- 'Zeta'
+names(car_colors_umap)[7] <- 'CD30'
+car_colors_umap <- c(car_colors_umap, 'Untransduced'='grey60')
+umap_car_order <- c("CD28","4-1BB","BAFF-R","TACI","CD40","CD30","Zeta","KLRG1","Untransduced")
+car_colors_umap <- car_colors_umap[umap_car_order]
 
 ```
 
@@ -63,6 +77,19 @@ if (reload_h5_data) {
     'rds','scrna.wnn.int.all.annotated.h5Seurat')
   scrna_all <- LoadH5Seurat(all.h5.file, overwrite=T)
 }
+
+# new annotations
+
+# STIM-GLYC - Glycolysis
+# STIM-OXPHOS - OXPHOS
+# STIM-IFNG - IFNG
+# STIM-INACT - Cytokine-low
+# MEM-CD29 - Memory
+# Naive-CD62L - Naive-CD62L
+# Naive-CD7 - Naive-CD7
+# TH2 - Th2
+# STIM-UNTR - Untransduced-Stim
+# 
 
 ```
 
@@ -425,13 +452,6 @@ make_minidot_plot_car <- function(umap_data, module_name, run_test=F) {
   return(plot)
 }
 
-car_colors_umap <- car_colors
-names(car_colors_umap)[1] <- '4-1BB'
-names(car_colors_umap)[8] <- 'Zeta'
-names(car_colors_umap)[7] <- 'CD30'
-car_colors_umap <- c(car_colors_umap, 'Untransduced'='grey60')
-car_colors_umap <- car_colors_umap[umap_car_order]
-
 umap_nocd30_dt <- umap_dt[car != 'CD30']
 
 cluster_zscore_plots <- (((make_minidot_plot(umap_dt, 'Sheih_et_al_IRF1') + labs(y='cluster z-score') + theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5))) | make_minidot_plot(umap_dt, 'Nicolet_et_al_CD29core1')))
@@ -657,86 +677,172 @@ plots$car_dotplot_horiz <- (
 ## Gene Heatmaps
 
 ```{r}
-# find_genes_parallel <- function(seurat_obj, ident_name, 'SCT_INT', min.pct=0.25, features=NULL, test.use='wilcox') {
-#   
-#   idents=unique(seurat_obj[[ident_name]])[[1]]
-#   
-#   FindMarker.wrapper <- function(x) {
-#   
-#     message(paste0('Starting FindMarkers for: ',idents[x]))
-#     
-#     markers_dt <- data.table(
-#       FindMarkers(seurat_obj,
-#         ident.1=idents[x],
-#         only.pos = TRUE, min.pct=min.pct,
-#         features=features,
-#         assay=assay, test.use=test.use),
-#       keep.rownames=T)
-#   
-#     markers_dt$ident <- idents[x]
-#     
-#     message(paste0('Completed FindMarkers for: ',idents[x]))
-#     
-#     return(markers_dt)
-#   }
-#   gc()
-#   subset_markers <- bplapply(
-#     1:length(idents),
-#     FindMarker.wrapper,BPPARAM=MulticoreParam(12, log=T))
-#   
-#   subset_markers <- rbindlist(subset_markers)
-#   return(subset_markers)
-# }
-# 
-# cd8_rna_mast_markers <- find_genes_parallel(scrna_cd8_all, 'Subtype', assay='RNA', min.pct=0.20, test.use='MAST')
-# 
-# cd8_rna_mast_markers <- find_genes_parallel(scrna_cd8_all, 'Subtype', assay='RNA', min.pct=0.20, test.use='MAST', features=scrna_cd8_all@assays$SCT_INT@var.features)
-# 
-# cd4_marker_genes.rds.file <- here::here(
-#      '..','..','scrnaseq_tcsl154',
-#      'rds',
-#      paste0('cd4_marker_genes_.rds'))
-# 
-# cd8_marker_genes.rds.file <- here::here(
-#      '..','..','scrnaseq_tcsl154',
-#      'rds',
-#      paste0('cd8_marker_genes_all.rds'))
-# 
-# saveRDS(cd8_rna_mast_markers, cd8_marker_genes.rds.file)
-# saveRDS(cd8_rna_subset_markers, cd8_marker_genes.rds.file)
-# 
-# cd8_cast_markers <- dcast(cd8_rna_subset_markers, rn ~ Subtype, value.var='avg_log2FC', fill=0)
-# rownames(cd8_cast_markers) <- cd8_cast_markers$rn
-# 
-# #cd8_rna_mast_markers <- readRDS(cd8_marker_genes.rds.file)
-# 
-# Idents(scrna_cd8_all) <- 'Subtype'
-# all_genes <- AverageExpression(
-#   prune_cells(scrna_cd8_all, rescale=T),
-#   assays = 'SCT_INT',
-#   features = cd8_rna_mast_markers$rn,
-#   return.seurat = FALSE,
-#   group.by = "Subtype",
-#   add.ident="donor",
-#   slot = "scale.data"
-# )
-# 
-# melted_genes <- reshape2::melt(all_genes[[1]])
-# melted_genes <- data.table(melted_genes)
-# names(melted_genes) <- c('gene','subtype','zscore')
-# melted_genes[, donor := gsub('.*_(.*)','\\1', subtype)]
-# melted_genes[, subtype := gsub('(.*)_(.*)','\\1', subtype)]
-# melted_genes[, subtype := factor(subtype, levels=cd8_order)]
-# #melted_genes[, gene := factor(gene, row_dend$labels)]
-# melted_genes[, best_subtype := subtype[which.max(zscore)], by=gene]
-# melted_genes[, zdiff := zscore[which.max(zscore)] - mean(zscore), by=gene]
-# gene_order <- unique(melted_genes[subtype == best_subtype, gene[order(zdiff)]])
-# melted_genes[, gene := factor(gene, levels=gene_order)]
-# 
-# 
-# 
-# cd8_rna_subset_markers[p_val_adj < 0.05, best_subtype := Subtype[which.max(avg_log2FC)], by=rn]
-# ggplot(cd8_rna_subset_markers) + geom_raster(aes(x=Subtype, y=rn, fill=avg_log2FC)) + facet_grid(best_subtype~., scales='free', space='free') + scale_fill_distiller(palette='PuOr', oob=scales::squish, limit=max(abs(melted_genes$zscore)) * c(-1, 1), type='div')
+find_genes_parallel <- function(seurat_obj, ident_name, assay='SCT_INT', min.pct=0.25, features=NULL, test.use='wilcox') {
+
+  Idents(seurat_obj) <- ident_name
+  idents=unique(seurat_obj[[ident_name]])[[1]]
+
+  FindMarker.wrapper <- function(x) {
+
+    message(paste0('Starting FindMarkers for: ',idents[x]))
+
+    markers_dt <- data.table(
+      FindMarkers(seurat_obj,
+        ident.1=idents[x],
+        only.pos = TRUE, min.pct=min.pct,
+        features=features,
+        assay=assay, test.use=test.use),
+      keep.rownames=T)
+
+    markers_dt$ident <- idents[x]
+
+    message(paste0('Completed FindMarkers for: ',idents[x]))
+
+    return(markers_dt)
+  }
+  gc()
+  subset_markers <- bplapply(
+    1:length(idents),
+    FindMarker.wrapper,BPPARAM=MulticoreParam(12, log=T))
+
+  subset_markers <- rbindlist(subset_markers)
+  return(subset_markers)
+}
+
+# find DE genes in SCT_INT for each cluster, this takes a ton of memory/time,
+# so doing it once manually in a clean environment for each subset
+rerun_find_markers <- F
+cd8_marker_genes.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('cd8_marker_genes_sct.rds'))
+cd4_marker_genes.rds.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('cd4_marker_genes_sct.rds'))
+
+if (rerun_find_markers) {
+  #CD8
+  pruned_cd8 <- prune_cells(scrna_cd8_all)
+  rm(scrna_cd8_all)
+  cd8_rna_mast_markers <- find_genes_parallel(
+    pruned_cd8, 'Subtype', assay='SCT_INT', min.pct=0.20, test.use='MAST')
+  saveRDS(cd8_rna_mast_markers, cd8_marker_genes.rds.file)
+  
+  #CD4
+  pruned_cd4 <- prune_cells(scrna_cd4_all)
+  rm(scrna_cd4_all)
+  cd4_rna_mast_markers <- find_genes_parallel(
+    pruned_cd4, 'Subtype', assay='SCT_INT', min.pct=0.20, test.use='MAST')
+  saveRDS(cd4_rna_mast_markers, cd4_marker_genes.rds.file)
+  
+} else {
+  # load the already made DE gene sets
+  cd4_rna_mast_markers <- loadRDS(cd4_marker_genes.rds.file)
+  cd8_rna_mast_markers <- loadRDS(cd8_marker_genes.rds.file)
+}
+
+combined_de_markers <- rbind(
+  cd4_rna_mast_markers[, t_type := 'CD4'],
+  cd8_rna_mast_markers[, t_type := 'CD8'])
+combined_de_markers[, t_subtype := paste(t_type, ident, sep='.')]
+combined_de_markers[p_val_adj < 0.05, ident_rank := rank(-abs(avg_log2FC)), by=t_subtype]
+
+# also tried ranking by p-value
+#combined_de_markers[p_val_adj < 0.05, ident_rank := rank(-log10(p_val_adj)), by=t_subtype]
+
+pairs <- combn(unique(combined_de_markers$t_subtype),2)
+
+top_n <- 100
+
+diff_genes <- rbindlist(
+  apply(pairs, 2, function(i) 
+    combined_de_markers[t_subtype %in% i & p_val_adj < 0.05 & ident_rank <= top_n,
+      list(
+        ident_1= i[1],
+        ident_2= i[2],
+        subtype_1=ident[t_subtype == i[1]],
+        subtype_2=ident[t_subtype == i[2]],
+        shared=(.N == 2 && (all(sign(avg_log2FC)) | all(sign(-avg_log2FC))))),
+    by='rn'][shared == T]))
+
+diff_gene_n <- diff_genes[
+  grepl('CD4', ident_1) & grepl('CD8', ident_2)][,
+    list(N=.N, subtype_1=subtype_1[1], subtype_2=subtype_2[1]), 
+    by=.(ident_1, ident_2)][order(-N)]
+
+make_paired_factor <- function(bool,flip=F) {
+  if (flip)
+    factor(bool, levels=c(F,T), labels=c('non-matched','matched'))
+  else
+    factor(bool, levels=c(T,F), labels=c('matched','non-matched'))
+}
+
+shared_subtypes <- diff_gene_n[subtype_1 != 'STIM-UNTR', intersect(
+    unique(subtype_1), unique(subtype_2))]
+
+diff_gene_n[, 
+  paired_1 := make_paired_factor(subtype_1 %in% shared_subtypes, flip=F)]
+diff_gene_n[, 
+  paired_2 := make_paired_factor(subtype_2 %in% shared_subtypes, flip=T)]
+
+pairs <- combn(unique(combined_de_markers$t_subtype),2)
+
+top_n <- 100
+
+diff_genes <- rbindlist(
+  apply(pairs, 2, function(i) 
+    combined_de_markers[t_subtype %in% i & p_val_adj < 0.05 & ident_rank <= top_n,
+      list(
+        ident_1= i[1],
+        ident_2= i[2],
+        subtype_1=ident[t_subtype == i[1]],
+        subtype_2=ident[t_subtype == i[2]],
+        shared=(.N == 2 && (all(sign(avg_log2FC)) | all(sign(-avg_log2FC))))),
+    by='rn'][shared == T]))
+
+diff_gene_n <- diff_genes[
+  grepl('CD4', ident_1) & grepl('CD8', ident_2)][,
+    list(N=.N, subtype_1=subtype_1[1], subtype_2=subtype_2[1]), 
+    by=.(ident_1, ident_2)][order(-N)]
+
+make_paired_factor <- function(bool,flip=F) {
+  if (flip)
+    factor(bool, levels=c(F,T), labels=c('non-matched','matched'))
+  else
+    factor(bool, levels=c(T,F), labels=c('matched','non-matched'))
+}
+
+shared_subtypes <- diff_gene_n[subtype_1 != 'STIM-UNTR', intersect(
+    unique(subtype_1), unique(subtype_2))]
+
+diff_gene_n[, 
+  paired_1 := make_paired_factor(subtype_1 %in% shared_subtypes, flip=F)]
+diff_gene_n[, 
+  paired_2 := make_paired_factor(subtype_2 %in% shared_subtypes, flip=T)]
+
+plots$matched_clusters <- ggplot(diff_gene_n) + 
+  geom_tile(aes(
+    x=factor(subtype_1, levels=cd4_order), 
+    y=factor(subtype_2, levels=cd8_order), 
+    fill=N/top_n)) + 
+  geom_tile(aes(
+    x=factor(subtype_1, levels=cd4_order), 
+    y=factor(subtype_2, levels=cd8_order),
+    color=(subtype_1 == subtype_2 & subtype_1 != 'STIM-UNTR')), fill=NA, size=0.5) + 
+  scale_fill_gradientn(
+    '% overlap of\ntop 100\nDE genes',
+    colors=c('white',brewer.pal(9,'Greens')),  label=label_percent()) + 
+  theme_minimal() + 
+  scale_color_manual('', guide='none', values=c(NA,'grey50')) +
+  facet_grid(paired_2~paired_1, space='free', scale='free', switch='both') +
+  scale_x_discrete('CD4 Clusters', guide = guide_axis(angle = 90), expand=c(0,0)) +
+  scale_y_discrete('CD8 Clusters', expand=c(0,0)) + 
+  theme(
+    panel.grid=element_blank(),
+    strip.placement = "outside",
+    panel.border = element_rect(fill=NA, color='grey50'))
+
 ```
 
 ```{r}
@@ -1029,12 +1135,12 @@ plots$cd4_gene_heatmap[[2]] <- plots$cd4_gene_heatmap[[2]] + theme(legend.positi
 legend <- plot_grid(
   get_legend(
     # create some space to the left of the legend
-    cd8_gene_heatmap[[1]] + theme(
+    plots$cd8_gene_heatmap[[1]] + theme(
       legend.box.margin = margin(0, 0, 0, 12),
       legend.justification=c(1,1), legend.position=c(1,1),
       legend.key.width=unit(0.4, 'lines'))),
   get_legend(
-    cd8_gene_heatmap[[2]] + theme(
+    plots$cd8_gene_heatmap[[2]] + theme(
       legend.box.margin = margin(0, 0, 0, 12),
       legend.justification=c(1,0), legend.position=c(1,0),
       legend.key.width=unit(0.4, 'lines'))),
@@ -1328,6 +1434,9 @@ gsea_subsets <- c(
   "MOOTHA_VOXPHOS"
   )
 
+# look at DE genes in each pathway:
+#combined_de_markers[rn %in% get_geneset('MOOTHA_FFA_OXYDATION')][order(avg_log2FC)]
+
 if (rerun_geneset_scores) {
   cd8_gsea_scores_rna <- map_geneset_parallel(cd8_pruned, gsea_subsets, assay='RNA', nbin=24)
   cd8_pruned[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
@@ -1446,7 +1555,7 @@ pathway_list <- list(
 #   align='hv',
 #   axis='lr')
 
-module_tile_grid <- function(seurat_obj, pathway_list, group.by, dots='F',
+module_tile_grid <- function(seurat_obj, pathway_list, group.by, dots=F,
     subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS'),
     override_pathway_order=NULL, override_group_order=NULL) {
   
@@ -1526,14 +1635,14 @@ plots$cd8_module_tiles <- module_tile_grid(cd8_pruned,
     pathway_list, group.by='Subtype', dots=F, subtypes=activated_subtypes)
 plots$cd4_module_tiles <- module_tile_grid(cd4_pruned, pathway_list, group.by='Subtype', dots=F, 
   subtypes=activated_subtypes,
-  override_pathway_order = cd8_module_tiles$pathway_order,
-  override_group_order = cd8_module_tiles$group_order)
+  override_pathway_order = plots$cd8_module_tiles$pathway_order,
+  override_group_order = plots$cd8_module_tiles$group_order)
 
 #combined cd4/cd8 plot:
 
 combined_tile_data <- rbind(
-  data.table(cd8_module_tiles$data)[, t_type := 'CD8'],
-  data.table(cd4_module_tiles$data[, t_type := 'CD4']))
+  data.table(plots$cd8_module_tiles$data)[, t_type := 'CD8'],
+  data.table(plots$cd4_module_tiles$data[, t_type := 'CD4']))
 
 plots$combined_tile_plot <- ggplot(combined_tile_data) +
       geom_tile(aes(
@@ -1551,6 +1660,10 @@ plots$combined_tile_plot <- ggplot(combined_tile_data) +
         legend.key.width=unit(0.4, 'lines'),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
       coord_flip()
+
+plots$cd8_expanded_modules <- module_tile_grid(scrna_cd8_all, pathway_list=setNames(gsea_subsets,gsea_subsets), subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS','STIM-UNTR','STIM-INACT','STIM-GNLY'), group.by='Subtype', dots=T)
+
+plots$cd4_expanded_modules <- module_tile_grid(scrna_cd4_all, pathway_list=setNames(gsea_subsets,gsea_subsets), subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS','STIM-UNTR','STAT1-IRF1'), group.by='Subtype', dots=T)
 ```
 ## Supplemental per donor CAR plot
 
@@ -1671,8 +1784,19 @@ plots$fig_assembled_3 <- plot_grid(
     ncol=1, rel_heights=c(1.2,1), labels=c('A','B')), 
   plot_grid(plots$combined_paper_umap, plots$combined_tile_plot,
     ncol=1, rel_heights = c(1.2,1), labels=c('C','D')),
-  plots$combined_gene_heatmap,
+  plots$combined_gene_heatmap_boxed,
   ncol=3,
   labels=c('','','E'),
   rel_widths=c(1.6,1,1.2))
+```
+
+## Supp fig, proliferation per subset
+
+```{r}
+ggplot(
+  umap_dt[, list(n_phase = .N), by=.(t_type, Subtype, Phase)][, list(Phase=Phase, pct_phase=n_phase/sum(n_phase)), by=.(t_type, Subtype)]) + 
+  geom_bar(
+    aes(x=t_subtype, fill=Phase, y=pct_phase, group=interaction(t_subtype, Phase)),
+    stat='identity') + 
+  coord_flip()
 ```
