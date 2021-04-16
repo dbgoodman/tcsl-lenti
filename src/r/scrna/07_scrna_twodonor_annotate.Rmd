@@ -31,7 +31,6 @@ library(dendsort)
 
 reload_data=F
 source(here::here('r','fig_colors.R'))
-source(here::here('r','scrna','HTOdemux.R'))
 source(here::here('r','scrna','scrna_analysis_fxns.R'))
 
 options(future.globals.maxSize = 14000 * 1024^2)
@@ -80,7 +79,7 @@ if (reload_h5_data) {
 
 # new annotations
 
-# STIM-GLYC - Glycolysis
+# STIM-GLYC - Glycolytic
 # STIM-OXPHOS - OXPHOS
 # STIM-IFNG - IFNG
 # STIM-INACT - Cytokine-low
@@ -88,8 +87,63 @@ if (reload_h5_data) {
 # Naive-CD62L - Naive-CD62L
 # Naive-CD7 - Naive-CD7
 # TH2 - Th2
-# STIM-UNTR - Untransduced-Stim
-# 
+# STIM-UNTR - Baseline
+
+# mapping from original to new cluster names
+cluster_name_map <- list(
+  'STIM-GLYC'='Glycolytic',
+  'STIM-OXPHOS'='OXPHOS',
+  'STIM-IFNG'='IFNG',
+  'STIM-GNLY'='Granulysin',
+  'STIM-INACT'='Cytokine-low',
+  'STAT1-IRF1'='STAT1-IRF1',
+  'MEM-CD29'='Memory',
+  'NAIVE-CD62L'='Naive/CD62L',
+  'NAIVE-CD7'='Naive/CD7',
+  'TH2'='Th2',
+  'STIM-UNTR'='Baseline'
+)
+
+# make dt mapping old names, new names, colors
+cluster_name_dt <- data.table(Subtype=names(cluster_name_map), subtype_lbl=unlist(cluster_name_map))
+cluster_name_dt <- data.table(Subtype=names(all_colors), color=unlist(all_colors))[
+  cluster_name_dt, on='Subtype']
+
+cd4_order <- c(
+  'STIM-GLYC',
+  'STIM-OXPHOS',
+  'STIM-IFNG',
+  'STAT1-IRF1',
+  'TH2',
+  'STIM-UNTR',
+  'MEM-CD29',
+  'NAIVE-CD62L'
+)
+
+cd8_order <- c(
+  'STIM-GLYC',
+  'STIM-OXPHOS',
+  'STIM-IFNG',
+  'STIM-GNLY',
+  'STIM-INACT',
+  'STIM-UNTR',
+  'MEM-CD29',
+  'NAIVE-CD7',
+  'NAIVE-CD62L'
+)
+
+comb_order <- c(
+  "STIM-GLYC",
+  "STIM-OXPHOS",
+  "STIM-IFNG",
+  "STIM-GNLY",
+  "STIM-INACT",
+  "STIM-UNTR",
+  "STAT1-IRF1",
+  "TH2",
+  "MEM-CD29",
+  "NAIVE-CD7",
+  "NAIVE-CD62L")
 
 ```
 
@@ -98,6 +152,10 @@ if (reload_h5_data) {
 ```{r}
 
 umap_dt <- data.table(cbind(scrna_all@meta.data, scrna_all@reductions$wnn.umap@cell.embeddings))
+
+# add cluster labels
+umap_dt <- umap_dt[, subtype_lbl := NULL][cluster_name_dt, on='Subtype']
+umap_dt[, subtype_lbl := paste(t_type, subtype_lbl, sep='-')]
 
 # invert x axis so cd4 is on left (comes first)
 umap_dt[, wnnUMAP_1 := -wnnUMAP_1]
@@ -110,14 +168,14 @@ cluster_name <- 'Subtype'
 
 labels_dt <- umap_dt[, 
   list(wnnUMAP_1=mean(wnnUMAP_1), wnnUMAP_2=mean(wnnUMAP_2)),
-  by=c('Subtype','t_type')]
+  by=c('subtype_lbl','t_type','Subtype')]
 
 plots$subtypes <- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
   geom_point(size=0.3) + 
   coord_fixed() +
   geom_label_repel(
     data=labels_dt,
-    aes(x=wnnUMAP_1, y=wnnUMAP_2, label=Subtype),
+    aes(x=wnnUMAP_1, y=wnnUMAP_2, label=subtype_lbl),
     fill= alpha(c("white"),0.9), force=0.5) + 
   scale_color_manual(values=all_colors) +
   theme_minimal() + 
@@ -223,7 +281,7 @@ car_umap_grid_dt <- rbind(
   car_umap_grid_dt[!(car == 'Untransduced' & k_type %in% c('bead_stim'))],
   bead_stim_grid_dt)
 
-car_umap_grid_dt[, k_type := factor(k_type, labels=c('Baseline','Stimulated'))]
+car_umap_grid_dt[, k_type := factor(k_type, labels=c('Unstimulated','Stimulated'))]
 car_umap_grid_dt[, car := factor(car, levels=c(umap_car_order, 'CD3/CD28 Beads'))]
 
 # sample evenly from each CAR and donor
@@ -234,13 +292,16 @@ sampled_umap <- car_umap_grid_dt[
   sampling_dt, on=c('donor','k_type')][,
     .SD[sample(.N, least_N),], by=c('car','donor','k_type')]
 
-plots$per_car_umap <- ggplot(sampled_umap, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
+plots$per_car_umap <- ggplot(sampled_umap, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=
+    factor(Subtype,
+      levels=cluster_name_dt[comb_order, on='Subtype']$Subtype,
+      labels=cluster_name_dt[comb_order, on='Subtype']$subtype_lbl))) +
   geom_point(
     data=copy(car_umap_grid_dt)[, c('car','k_type') := list(NULL,NULL)],
     size=0.1, color='grey90') + 
   geom_point(size=0.05) +
   coord_fixed() +
-  scale_color_manual(values=all_colors) +
+  scale_color_manual('Cluster', values= cluster_name_dt[, setNames(color, subtype_lbl)]) +
   facet_grid(k_type~car, switch = "y") +
   guides(color = guide_legend(override.aes = list(size = 5))) +
   theme_minimal() + 
@@ -479,32 +540,6 @@ plots$combined_paper_umap
 # CAR/Cluster Dotplots
 
 ```{r}
-
-cd4_order <- c(
-  'STIM-GLYC',
-  'STIM-OXPHOS',
-  'STIM-IFNG',
-  'STAT1-IRF1',
-  'TH2',
-  'STIM-UNTR',
-  'MEM-CD29',
-  'NAIVE-CD62L'
-)
-
-cd8_order <- c(
-  'STIM-GLYC',
-  'STIM-OXPHOS',
-  'STIM-IFNG',
-  'STIM-GNLY',
-  'STIM-INACT',
-  'STIM-UNTR',
-  'MEM-CD29',
-  'NAIVE-CD7',
-  'NAIVE-CD62L'
-)
-
-
-
 car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
   
   car_clust_pct_act <- data.table(car_metadata)[, .N, 
@@ -520,7 +555,9 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
   
   pct_dotplot <- ggplot(car_clust_pct_act) + 
     geom_point(aes(
-        x=factor(Subtype, levels=rev(subtype_order)),
+        x= factor(Subtype,
+          levels=cluster_name_dt[rev(subtype_order), on='Subtype']$Subtype,
+          labels=cluster_name_dt[rev(subtype_order), on='Subtype']$subtype_lbl),
         y=factor(car, umap_car_order),
         fill=log2_ce_trunc, size=pct_car),
       pch=21, color='grey30') + 
@@ -540,11 +577,15 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
   
   if (flip) {
     cluster_idents <- ggplot(unique_car_v_subsets) + 
-      geom_tile(aes(y=factor(Subtype, levels=rev(subtype_order)), fill=Subtype, x='a'), width=0.9, height=0.9) + 
+      geom_tile(aes(
+        y=factor(Subtype,
+          levels=cluster_name_dt[rev(subtype_order), on='Subtype']$Subtype,
+          labels=cluster_name_dt[rev(subtype_order), on='Subtype']$subtype_lbl),
+        fill=Subtype, x='a'), width=0.9, height=0.9) + 
       #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
       scale_x_discrete(expand=c(0,0)) + 
       scale_y_discrete(expand=c(0,0)) +
-      scale_fill_manual(values=all_colors) +
+      scale_fill_manual(values=cluster_name_dt[, setNames(color, subtype_lbl)]) +
       theme_minimal() +
       coord_fixed(ratio=3) +
       theme(
@@ -564,11 +605,19 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
         plot.margin = unit(c(5.5, -5.5, 5.5, 5.5), "points")))
   } else {
     cluster_idents <- ggplot(unique_car_v_subsets) + 
-      geom_tile(aes(x=factor(Subtype, levels=rev(subtype_order)), fill=Subtype, y='a'), width=0.9, height=0.9) + 
+      geom_tile(aes(
+        x=factor(Subtype,
+          levels=cluster_name_dt[rev(subtype_order), on='Subtype']$Subtype,
+          labels=cluster_name_dt[rev(subtype_order), on='Subtype']$subtype_lbl),
+        fill=factor(Subtype,
+          levels=cluster_name_dt[rev(subtype_order), on='Subtype']$Subtype,
+          labels=cluster_name_dt[rev(subtype_order), on='Subtype']$subtype_lbl),
+        y='a'),
+        width=0.9, height=0.9) + 
       #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
       scale_x_discrete(expand=c(0,0)) + 
       scale_y_discrete(expand=c(0,0)) +
-      scale_fill_manual(values=all_colors) +
+      scale_fill_manual(values=cluster_name_dt[, setNames(color, subtype_lbl)]) +
       theme_minimal() +
       coord_fixed(ratio=1/3) +
       theme(
@@ -738,8 +787,8 @@ if (rerun_find_markers) {
   
 } else {
   # load the already made DE gene sets
-  cd4_rna_mast_markers <- loadRDS(cd4_marker_genes.rds.file)
-  cd8_rna_mast_markers <- loadRDS(cd8_marker_genes.rds.file)
+  cd4_rna_mast_markers <- readRDS(cd4_marker_genes.rds.file)
+  cd8_rna_mast_markers <- readRDS(cd8_marker_genes.rds.file)
 }
 
 combined_de_markers <- rbind(
@@ -821,14 +870,23 @@ diff_gene_n[,
 diff_gene_n[, 
   paired_2 := make_paired_factor(subtype_2 %in% shared_subtypes, flip=T)]
 
-plots$matched_clusters <- ggplot(diff_gene_n) + 
+diff_gene_n[, subtype_1 := 
+
+diff_gene_n[, subtype_2 := factor(subtype_2,
+      levels=cluster_name_dt[cd8_order, on='Subtype']$Subtype,
+      labels=cluster_name_dt[cd8_order, on='Subtype']$subtype_lbl)]
+
+plots$matched_clusters <- ggplot(diff_gene_n,
+    aes(
+      x=factor(subtype_1,
+        levels=cluster_name_dt[cd4_order, on='Subtype']$Subtype,
+        labels=cluster_name_dt[cd4_order, on='Subtype']$subtype_lbl), 
+      y=factor(subtype_2,
+        levels=cluster_name_dt[cd8_order, on='Subtype']$Subtype,
+        labels=cluster_name_dt[cd8_order, on='Subtype']$subtype_lbl))) + 
   geom_tile(aes(
-    x=factor(subtype_1, levels=cd4_order), 
-    y=factor(subtype_2, levels=cd8_order), 
     fill=N/top_n)) + 
   geom_tile(aes(
-    x=factor(subtype_1, levels=cd4_order), 
-    y=factor(subtype_2, levels=cd8_order),
     color=(subtype_1 == subtype_2 & subtype_1 != 'STIM-UNTR')), fill=NA, size=0.5) + 
   scale_fill_gradientn(
     '% overlap of\ntop 100\nDE genes',
@@ -1104,6 +1162,180 @@ make_gene_heatmap <- function(
     return(de_gene_heatmap / donor_idents / cluster_idents)
 }
 
+make_gene_heatmap_horiz <- function(
+    seurat_obj, subtype_order, max_genes=100, label_genes=NULL, 
+    rescale=T, use_dendsort=T, label_width=5, label_font_size=2.25,
+    boxed=F, return_data=F) {
+  
+  if (rescale)
+    seurat_obj <- ScaleData(seurat_obj, assay='SCT_INT')
+  
+  all_genes <- AverageExpression(
+    seurat_obj,
+    assays = 'SCT_INT',
+    features = NULL,
+    return.seurat = FALSE,
+    group.by = "Subtype",
+    add.ident="donor",
+    slot = "scale.data"
+  )
+
+  # melt, clean
+  melted_genes <- reshape2::melt(all_genes[[1]])
+  melted_genes <- data.table(melted_genes)
+  names(melted_genes) <- c('gene','subtype','zscore')
+  melted_genes[, donor := gsub('.*_(.*)','\\1', subtype)]
+  melted_genes[, subtype := gsub('(.*)_(.*)','\\1', subtype)]
+  melted_genes[, subtype := factor(subtype, levels=subtype_order)]
+  melted_genes[, best_subtype := subtype[which.max(zscore)], by=gene]
+  melted_genes[, zdiff := zscore[which.max(zscore)] - mean(zscore), by=gene]
+  gene_order <- unique(melted_genes[subtype == best_subtype, gene[order(zdiff)]])
+  melted_genes[, gene := factor(gene, levels=gene_order)]
+  melted_genes[, max_score := max(abs(zscore)), by='gene']
+  melted_genes[, mean_zscore := mean(zscore), by=c('gene','subtype')]
+  
+  #reorder
+  new_gene_order <- c()
+  for (group_i in rev(subtype_order)) {
+    if (use_dendsort) {
+      cast_group <- dcast(melted_genes[!is.na(subtype) & best_subtype == group_i], 
+          gene ~ subtype + donor, value.var='zscore')
+      
+      group_gene_order <- dendsort(hclust(dist(
+        cast_group[,-1])))$order
+      group_genes <- as.character(cast_group$gene[group_gene_order])
+    } else {
+      group_genes <- melted_genes[
+        !is.na(subtype) & best_subtype == group_i][
+          subtype == best_subtype][order(mean_zscore), unique(as.character(gene))]
+    }
+    new_gene_order <- c(new_gene_order, group_genes)
+  }
+  
+  melted_genes[, gene := factor(gene, levels=new_gene_order)]
+  cast_formula <- "best_subtype ~."
+  
+  # subset on best genes per cluster
+  best_genes <- unique(
+    melted_genes[subtype == best_subtype][
+      rev(new_gene_order), on='gene'][,
+        list(subtype, mean_zscore), by='gene'])[order(-mean_zscore),
+          gene[1:max_genes], by='subtype']$V1
+  
+  # best genes per cluster
+  label_gene_list <- unique(unlist(label_genes, use.names=F))
+  best_genes <- unique(c(best_genes, label_gene_list))
+  
+  #first 4 genes chosen per cluster
+  glist <- list()
+  for (i in 1:length(label_genes)) 
+    glist[[i]] <- data.table(subtype=names(label_genes[i]), genes=label_genes[[i]][1:4])
+  gene_top4 <- rbindlist(glist)
+  
+  # for annotation
+  best_per_subtype <-unique(
+    melted_genes[subtype == best_subtype][
+      rev(new_gene_order), on='gene'][,
+        list(subtype, mean(zscore)), by='gene'])[,
+          is_best := gene %in% gene[1:max_genes], by='subtype']
+  
+  melted_genes[
+    gene %in% best_genes &
+    subtype == best_subtype &
+    donor == donor[1],
+      label := ifelse(gene %in% label_gene_list, as.character(gene), NA)]
+    
+  # alternate none with subtype name (two donors)
+  row_names <- as.vector(t(cbind(rep('', length(subtype_order)), 
+    cluster_name_dt[subtype_order, on='Subtype'][, subtype_lbl])))
+  unique_donor_subset <- unique(melted_genes[, list(donor, subtype)])
+  n_lines <- unique_donor_subset[, length(unique(subtype))]
+  
+  max_x <- length(levels(melted_genes[gene %in% best_genes, interaction(donor,subtype)]))
+  
+  display_genes <- melted_genes[gene %in% best_genes]
+  
+  separator_table <- display_genes[
+      subtype == best_subtype & donor == donor[1], list(n_genes= as.double(.N)), by='subtype']
+      
+  separator_table[rev(subtype_order), on='subtype', pos := cumsum(n_genes)+0.5]
+  separator_table[, x_pos := (n_lines-rank(pos))*2 + 0.5]
+  
+  label_table <- display_genes[,
+    paste(na.omit(label), collapse=', '), by='subtype'][
+      separator_table, on='subtype']
+  
+  top4_table <- gene_top4[,
+    paste(na.omit(genes), collapse='\n'), by='subtype'][
+      separator_table, on='subtype']
+  
+  de_gene_heatmap_boxed <- ggplot(display_genes) + 
+    geom_tile(aes(x=interaction(donor,subtype), y=gene, fill=zscore)) +
+    scale_x_discrete(expand=c(0,0)) + 
+    scale_y_discrete(expand=c(0,0)) +
+    geom_vline(color='white', xintercept=0.5+c(1:n_lines-1)*2) +
+    geom_rect(data=separator_table,
+      aes(ymax=pos-0.25, ymin=pos-n_genes+0.25, xmin=x_pos, color=subtype),
+      xmax=max_x+label_width, fill=NA, size=0.6) +
+    geom_rect(data=separator_table,
+      aes(ymax=pos-0.25, ymin=pos-n_genes+0.25, xmin=x_pos, xmax=x_pos+2, color=subtype), fill=NA, size=0.6) +
+    scale_color_manual(guide='none', values=unlist(all_colors)) +
+    scale_fill_distiller('Gene\nz-score',
+      palette='PuOr', oob=scales::squish, limit=c(-2, 2), type='div',
+      breaks=c(2,0,-2), labels=c('≥2','0','≤-2')) +
+    geom_label(
+      data=top4_table,
+      label.size=0,
+      fill=NA,
+      nudge_x=-0.55,
+      size=label_font_size*1.8,
+      aes(x=max_x+1, y=pos-n_genes, label=V1, vjust=-0.05, hjust=0)) +
+    theme_minimal() +
+    coord_flip(clip='off') +
+    theme(
+      axis.text.x=element_blank(),
+      strip.text.y=element_blank(),
+      axis.text.y=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank(),
+      plot.margin = unit(c(70, 5.5, 0, 5.5), "points"))
+  
+  donor_idents <- ggplot(unique_donor_subset) + 
+    geom_tile(aes(y=interaction(donor, subtype), fill=donor, x='a')) + 
+    scale_y_discrete(labels=row_names, expand=c(0,0)) + 
+    scale_x_discrete(expand=c(0,0)) +
+    geom_hline(color='white', yintercept=0.5+c(1:n_lines-1)*2) +
+    scale_fill_discrete('Donor', labels=c('A','B')) + 
+    theme_minimal() +
+    coord_fixed(ratio=1) +
+    theme(
+      axis.text.y=element_blank(),
+      axis.text.x=element_blank(),
+      axis.title.y=element_blank(),
+      axis.title.x=element_blank(),
+      plot.margin = unit(c(22, 0, 5.5, 0), "points"))
+  
+  cluster_idents <- ggplot(unique_donor_subset) + 
+    geom_tile(aes(y=interaction(donor, subtype), fill=subtype, x='a')) + 
+    geom_hline(color='white', yintercept=0.5+c(1:n_lines-1)*2) +
+    scale_y_discrete(labels=row_names, expand=c(0,0)) + 
+    scale_x_discrete(expand=c(0,0)) +
+    scale_fill_manual(values=all_colors) +
+    theme_minimal() +
+    coord_fixed(ratio=1) +
+    theme(
+      legend.position = 'none',
+      axis.text.y = element_text(vjust = -0.5, hjust=1),
+      axis.title.x= element_blank(),
+      axis.title.y=element_blank(),
+      axis.text.x=element_blank(),
+      panel.background = element_blank(),
+      plot.margin = unit(c(22, 0, 5.5, 5.5), "points"))
+  
+
+  return(cluster_idents | donor_idents | de_gene_heatmap_boxed )
+}
+
 if (!(exists('cd4_pruned'))) {
   Idents(scrna_cd4_all) <- 'Subtype'
   cd4_pruned <- prune_cells(scrna_cd4_all, rescale=T)
@@ -1119,7 +1351,7 @@ plots$cd4_gene_heatmap <- make_gene_heatmap(
   cd4_pruned, cd4_order, 
   max_genes=50, label_genes=cd4_genes, rescale=F, 
   use_dendsort=T,
-  label_width = 6.75, label_font_size=1.8, label_line_width=18)
+  label_width = 6.75, label_font_size=1.8, label_line_width=18) 
 
 plots$cd8_gene_heatmap <- make_gene_heatmap(
   cd8_pruned, cd8_order, max_genes=50,
@@ -1186,6 +1418,65 @@ plots$combined_gene_heatmap_boxed <- (
   plots$cd4_gene_heatmap_boxed | plot_spacer() | plots$cd8_gene_heatmap_boxed | plot_spacer() | (
   (plot_spacer() / legend) + plot_layout(heights=c(1,1)))) +
     plot_layout(widths=c(8,2,9,2,3))
+
+# combined boxed horiz
+
+cd4_gene_heatmap_boxed_horiz_orig <- make_gene_heatmap_horiz(
+  cd4_pruned, cd4_order, 
+  max_genes=100,
+  label_genes=cd4_genes, rescale=F, 
+  use_dendsort=T, boxed=T,
+  label_width = 8, label_font_size=1.5)
+
+cd8_gene_heatmap_boxed_horiz_orig <- make_gene_heatmap_horiz(
+  cd8_pruned, cd8_order,
+  max_genes=100,
+  label_genes=cd8_genes, rescale=F, 
+  use_dendsort=T, boxed=T,
+  label_width = 8, label_font_size=1.5)
+  
+  
+plots$cd4_gene_heatmap_boxed_horiz <- cd4_gene_heatmap_boxed_horiz_orig + 
+  theme(plot.margin = unit(c(35, 0, 0, 5.5), "points"))
+
+plots$cd8_gene_heatmap_boxed_horiz <- cd8_gene_heatmap_boxed_horiz_orig + 
+  theme(plot.margin = unit(c(35, 0, 0, 5.5), "points"))
+
+plots$cd4_gene_heatmap_boxed_horiz[[1]] <- plots$cd4_gene_heatmap_boxed_horiz[[1]] + 
+  ggtitle('CD4')
+plots$cd4_gene_heatmap_boxed_horiz[[3]] <- plots$cd4_gene_heatmap_boxed_horiz[[3]] +
+  theme(legend.position='none')
+plots$cd4_gene_heatmap_boxed_horiz[[2]] <- plots$cd4_gene_heatmap_boxed_horiz[[2]] + 
+  theme(legend.position='none')
+
+legend_horiz <- plot_grid(
+  get_legend(
+    # create some space to the left of the legend
+    plots$cd8_gene_heatmap_boxed_horiz[[3]] + theme(
+      legend.box.margin = margin(0, 0, 0, 12),
+      legend.justification=c(1,1), legend.position=c(1,1),
+      legend.key.width=unit(0.4, 'lines'))),
+  get_legend(
+    plots$cd8_gene_heatmap_boxed_horiz[[2]] + theme(
+      legend.box.margin = margin(0, 0, 0, 12),
+      legend.justification=c(1,0), legend.position=c(1,0),
+      legend.key.width=unit(0.4, 'lines'))),
+  ncol=1
+)
+
+plots$cd8_gene_heatmap_boxed_horiz[[1]] <- plots$cd8_gene_heatmap_boxed_horiz[[1]] + 
+  ggtitle('CD8')
+plots$cd8_gene_heatmap_boxed_horiz[[3]] <- plots$cd8_gene_heatmap_boxed_horiz[[3]] + 
+  labs(y='Top 100 DE genes per cluster') + theme(axis.title.x=element_text()) 
+plots$cd8_gene_heatmap_boxed_horiz[[2]] <- plots$cd8_gene_heatmap_boxed_horiz[[2]] + theme(legend.position='none')
+
+plots$combined_gene_heatmap_boxed_horiz <- ((
+  (plots$cd4_gene_heatmap_boxed_horiz / plots$cd8_gene_heatmap_boxed_horiz) + 
+    plot_layout(heights=c(8,9)) & theme(legend.position='none')) |
+  legend_horiz) + plot_layout(widths=c(10,1)) & 
+  theme(
+    plot.title.position = "plot",
+    plot.title=element_text(margin=unit(c(0,0,0,0),'points'), hjust=0))
 
 ```
 
@@ -1290,7 +1581,10 @@ make_adt_heatmap <- function(seurat_obj, adt_groups, subtype_order) {
   }
   
   de_adt_heatmap <- ggplot(melted_adt) + 
-    geom_raster(aes(x=subtype, y=gene, fill=zscore)) +
+    geom_raster(aes(x=factor(subtype,
+      levels=cluster_name_dt[subtype_order, on='Subtype']$Subtype,
+      labels=cluster_name_dt[subtype_order, on='Subtype']$subtype_lbl),
+      y=gene, fill=zscore)) +
     facet_grid(as.formula(cast_formula), scales='free', space='free') +
     scale_fill_distiller(
       'CITE-seq z-score', palette='PuOr',
@@ -1306,6 +1600,85 @@ make_adt_heatmap <- function(seurat_obj, adt_groups, subtype_order) {
   return(de_adt_heatmap)
 }
 
+make_adt_heatmap <- function(seurat_obj, adt_groups, subtype_order, return_data=F) {
+  
+  seurat_obj <- ScaleData(seurat_obj, assay='SCT_ADT_INT')
+  
+  all_adt <- AverageExpression(
+    seurat_obj,
+    assays = 'SCT_ADT_INT',
+    features = NULL,
+    return.seurat = FALSE,
+    group.by = "Subtype",
+    slot = "scale.data"
+  )
+
+  # melt, clean
+  melted_adt <- reshape2::melt(all_adt[[1]])
+  melted_adt <- data.table(melted_adt)
+  names(melted_adt) <- c('gene','subtype','zscore')
+  melted_adt[, donor := gsub('.*_(.*)','\\1', subtype)]
+  melted_adt[, subtype := gsub('(.*)_(.*)','\\1', subtype)]
+  melted_adt[, subtype := factor(subtype, levels=subtype_order)]
+  melted_adt[, best_subtype := subtype[which.max(zscore)], by=gene]
+  melted_adt[, zdiff := zscore[which.max(zscore)] - mean(zscore), by=gene]
+  gene_order <- unique(melted_adt[subtype == best_subtype, gene[order(zdiff)]])
+  melted_adt[, gene := factor(gene, levels=gene_order)]
+  melted_adt[, max_score := max(abs(zscore)), by='gene']
+  
+  # remove '.adt'
+  melted_adt[, gene := gsub('\\.adt','',gene)]
+  
+
+  # assign groups
+  if (!is.null(adt_groups)) {
+    for(i in 1:length(adt_groups)) {
+      melted_adt[gene %in% adt_groups[[i]], group := names(adt_groups)[i]]
+    }
+    #reorder
+    new_adt_order <- c()
+    for (group_i in na.omit(unique(melted_adt$group))) {
+      
+      cast_group <- dcast(melted_adt[!is.na(subtype) & group == group_i], 
+          gene ~ subtype, value.var='zscore')
+      
+      group_adt_order <- dendsort(hclust(dist(
+        dcast(melted_adt[group == group_i], 
+          gene ~ subtype, value.var='zscore')[,-1])))$order
+      group_adts <- cast_group$gene[group_adt_order]
+      new_adt_order <- c(new_adt_order, group_adts)
+    }
+    melted_adt <- melted_adt[!is.na(group)]
+    melted_adt[, gene := factor(gene, levels=new_adt_order)]
+    cast_formula <- "group~."
+  } else {
+    cast_formula <- "best_subtype ~."
+  }
+  
+  de_adt_heatmap <- ggplot(melted_adt) + 
+    geom_raster(aes(x=factor(subtype,
+      levels=cluster_name_dt[subtype_order, on='Subtype']$Subtype,
+      labels=cluster_name_dt[subtype_order, on='Subtype']$subtype_lbl),
+      y=gene, fill=zscore)) +
+    facet_grid(as.formula(cast_formula), scales='free', space='free') +
+    scale_fill_distiller(
+      'CITE-seq z-score', palette='PuOr',
+      oob=scales::squish, limit=c(-1, 1), type='div', breaks=c(-1,0,1),
+      labels=c('>1', '0', '<1')) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank(),
+      plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
+  
+  if (return_data) {
+    melted_adt
+  } else {
+    return(de_adt_heatmap)
+  }
+}
+
 cd8_stim_subsets <- c('STIM-GLYC','STIM-OXPHOS','STIM-IFNG','STIM-GNLY','STIM-INACT','STIM-UNTR')
 cd4_stim_subsets <- c('STIM-GLYC','STIM-OXPHOS','STIM-IFNG','STAT1-IRF1','STIM-UNTR')
 
@@ -1315,6 +1688,33 @@ cd8_stim_citeseq_map <- make_adt_heatmap(cd8_stim_prune, adt_groups, cd8_order)
 cd4_stim_prune <- prune_cells(scrna_cd4_all, subtypes= cd4_stim_subsets, k_types='cd19+')
 cd4_stim_citeseq_map <- make_adt_heatmap(cd4_stim_prune, adt_groups, cd4_order)
 
+combined_adt_data <- rbind(make_adt_heatmap(cd8_stim_prune, adt_groups, cd8_order, return_data=T)[, t_type := 'CD8'], make_adt_heatmap(cd4_stim_prune, adt_groups, cd4_order,  return_data=T)[, t_type := 'CD4'])
+
+plots$combined_adt_plot <- ggplot(combined_adt_data) + 
+  geom_raster(aes(x=factor(subtype,
+    levels=cluster_name_dt[comb_order, on='Subtype']$Subtype,
+    labels=cluster_name_dt[comb_order, on='Subtype']$subtype_lbl),
+    y=gene, fill=zscore)) +
+  facet_grid('group~t_type', scales='free', space='free') +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  scale_fill_distiller(
+    'CITE-seq z-score', palette='PuOr',
+    oob=scales::squish, limit=c(-1, 1), type='div', breaks=c(-1,0,1),
+    labels=c('>1', '0', '<1')) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+    axis.title.x=element_blank(),
+    axis.title.y=element_blank(),
+    panel.border=element_rect(color='grey70', fill=NA),
+    plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
+
+
+```
+
+
+```{r}
 # "NAIVE-CD7"=
 #  "IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7"
 # "MEM-CD29"=
@@ -1456,7 +1856,7 @@ make_cdf <- function(seurat_obj, pathway_name, pathway_label,
   
   # pull out pathway
   data <- data.table(FetchData(seurat_obj, 
-      c(pathway_name,'Subtype','car')))
+      unique(c(pathway_name,'Subtype','car', group.by))))
 
   # subset on subtypes
   if (!is.null(subtypes)) {
@@ -1515,7 +1915,7 @@ make_cdf <- function(seurat_obj, pathway_name, pathway_label,
 }
 
 pathway_list <- list(
-  'IFNG'='BIOCARTA_IFNG_PATHWAY',
+  'IFNG'='REACTOME_INTERFERON_GAMMA_SIGNALING',
   'NFkB'='BIOCARTA_NFKB_PATHWAY',
   'Th1/Cytotoxic'='BOSCO_TH1_CYTOTOXIC_MODULE',
   'Ca2+ Signaling'='KEGG_CALCIUM_SIGNALING_PATHWAY',
@@ -1631,9 +2031,13 @@ module_tile_grid <- function(seurat_obj, pathway_list, group.by, dots=F,
 # ACTIVATED SUBSET PATHWAYS
 activated_subtypes <- c('STIM-GLYC','STIM-OXPHOS','STIM-IFNG')
 
+cd8_pruned[['subtype_lbl']] <- cluster_name_dt[cd8_pruned[['Subtype']], on='Subtype']$subtype_lbl
 plots$cd8_module_tiles <- module_tile_grid(cd8_pruned,
-    pathway_list, group.by='Subtype', dots=F, subtypes=activated_subtypes)
-plots$cd4_module_tiles <- module_tile_grid(cd4_pruned, pathway_list, group.by='Subtype', dots=F, 
+    pathway_list, group.by='subtype_lbl', dots=F, subtypes=activated_subtypes)
+
+cd4_pruned[['subtype_lbl']] <- cluster_name_dt[cd4_pruned[['Subtype']], on='Subtype']$subtype_lbl
+plots$cd4_module_tiles <- module_tile_grid(cd4_pruned,
+    pathway_list, group.by='subtype_lbl', dots=F, 
   subtypes=activated_subtypes,
   override_pathway_order = plots$cd8_module_tiles$pathway_order,
   override_group_order = plots$cd8_module_tiles$group_order)
@@ -1664,20 +2068,27 @@ plots$combined_tile_plot <- ggplot(combined_tile_data) +
 plots$cd8_expanded_modules <- module_tile_grid(scrna_cd8_all, pathway_list=setNames(gsea_subsets,gsea_subsets), subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS','STIM-UNTR','STIM-INACT','STIM-GNLY'), group.by='Subtype', dots=T)
 
 plots$cd4_expanded_modules <- module_tile_grid(scrna_cd4_all, pathway_list=setNames(gsea_subsets,gsea_subsets), subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS','STIM-UNTR','STAT1-IRF1'), group.by='Subtype', dots=T)
+
+# ALL subsets
+#plots$cd8_module_tiles <- module_tile_grid(cd8_pruned, subtypes=cd8_order,
+#    setNames(gsea_subsets,gsea_subsets), group.by='subtype_lbl', dots=F)
+# plots$cd4_module_tiles <- module_tile_grid(cd4_pruned, subtypes=cd4_order,
+#    setNames(gsea_subsets,gsea_subsets), group.by='subtype_lbl', dots=F)
+
 ```
 ## Supplemental per donor CAR plot
 
 ```{r}
 
 cd8_barplot_data <- get_cluster_enrich_plot(
-  prune_cells(scrna_cd8_all),
-   'Subtype', hide='K_only',
+  cd8_pruned,
+   'subtype_lbl', hide='K_only',
   facet_formula=formula(k_type~car), bar_position='dodge',
   by_vars=c('car','CD4v8','k_type','donor'))
 
 cd4_barplot_data <- get_cluster_enrich_plot(
-  prune_cells(scrna_cd4_all),
-   'Subtype', hide='K_only',
+  cd4_pruned,
+   'subtype_lbl', hide='K_only',
   facet_formula=formula(k_type~car), bar_position='dodge',
   by_vars=c('car','CD4v8','k_type','donor'))
 
@@ -1690,7 +2101,7 @@ donor_barplot <- function(data, subtype_order) {
   
   disp_data <- data[mean_frac > 0.01][, 
     car := factor(car, levels=umap_car_order)][,
-     cluster := factor(cluster, levels=subtype_order)]
+     cluster := factor(cluster, levels=cluster_name_dt[subtype_order, on='Subtype']$subtype_lbl)]
   
   ggplot(disp_data) + 
       geom_bar(aes(
@@ -1721,7 +2132,7 @@ donor_barplot <- function(data, subtype_order) {
         legend.key.width=unit(0.4, 'lines'))
 }
 
-cd8_pct_barplots <- (
+plots$cd8_pct_barplots <- (
   (donor_barplot(cd8_barplot_data$data[k_type == 'cd19+'], rev(cd8_order)) + 
     theme(axis.title=element_blank())) / 
   (donor_barplot(cd8_barplot_data$data[k_type == 'baseline'], rev(cd8_order)) +
@@ -1733,13 +2144,13 @@ cd8_pct_barplots <- (
     legend.key.height=unit(0.4, 'lines'),
     legend.key.width=unit(2, 'lines'))
 
-cd4_pct_barplots <- (
+plots$cd4_pct_barplots <- (
   (donor_barplot(cd4_barplot_data$data[k_type == 'cd19+'], rev(cd4_order)) + 
     theme(axis.title=element_blank())) / 
   (donor_barplot(cd4_barplot_data$data[k_type == 'baseline'], rev(cd4_order)) +
      theme(strip.text.x = element_blank()))
 ) + 
-  plot_layout(heights=c(6, 8), guides='collect') & 
+  plot_layout(heights=c(8, 6), guides='collect') & 
   theme(
     legend.position = 'bottom',
     legend.key.height=unit(0.4, 'lines'),
@@ -1788,6 +2199,22 @@ plots$fig_assembled_3 <- plot_grid(
   ncol=3,
   labels=c('','','E'),
   rel_widths=c(1.6,1,1.2))
+
+plots$fig_assembled_4 <- plot_grid(
+  plot_grid(
+    plot_grid(plots$combined_umap, plots$car_dotplot_horiz,
+      ncol=1, rel_heights=c(1.3,1), labels=c('A','B')), 
+    plot_grid(plots$combined_paper_umap, plots$combined_tile_plot,
+      ncol=1, rel_heights = c(1.3,1), labels=c('C','D')),
+    ncol=2,
+    labels=c('',''),
+    rel_widths=c(1.6,1)),
+  plots$combined_gene_heatmap_boxed_horiz,
+  nrow=2,
+  labels=c('','E'),
+  rel_heights=c(2.4,1))
+
+combined_gene_heatmap_boxed_horiz
 ```
 
 ## Supp fig, proliferation per subset
