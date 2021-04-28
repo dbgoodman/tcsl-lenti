@@ -113,11 +113,38 @@ pca.pos.sort.group.plot <- ggplot(projected.metrics,
   labs(title='') +
   theme(axis.text = element_blank())
 
+ggplot(projected.metrics[, CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
+    aes(x = PC1, y = PC2, label = CAR.label, 
+      size=(CAR.align %in% names(car_colors)), 
+      fill=len)) +
+  geom_point(pch=21, color='black') +
+  scale_size_manual(guide=F, values=c(4,6)) +
+  scale_fill_distiller(palette='RdYlBu') +
+  geom_text_repel(data=projected.metrics,
+    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+  labs(title = 'PCA Using CD19+ Sort Group Bins') +
+  theme_bw() +
+  labs(title='') +
+  theme(axis.text = element_blank())
+
 
 ggsave(here::here('..','figs','new_pca.pdf'), pca.pos.sort.group.plot,
        height=4, width=5, useDingbats=FALSE)
 
 pca.pos.sort.group.plot
+
+#explain components
+# map component names back to variables
+comp_names <- unique(cbind(
+    total_combined[,paste(group, assay, k.type, t.type, comparison, sep='_')],
+    total_combined[,paste(group, assay, k.type, t.type, comparison, sep='|')]))
+indiv_components <- data.table(matrix(unlist(strsplit(comp_names[,2], '\\|')), ncol=5, byrow=T))
+names(indiv_components) <- c('group', 'assay', 'k.type', 't.type', 'comparison')
+indiv_components <- data.table(measure=comp_names[,1], indiv_components)
+
+component_rotations <- indiv_components[melt.data.table(data.table(combined_pca$rotation, keep.rownames=T), id.vars='rn'), on=c(measure='rn')]
+
+ggplot(component_rotations[variable %in% c('PC1','PC2')][, list(diff_1v2= value[variable == 'PC1'] - value[variable == 'PC2']), by=.(assay, comparison, k.type, t.type)][, assay_group := assay][assay %in% c('CD69','IFNy','IL2'), assay_group := 'markers'][, list(value= sum(diff_1v2)), by=.(t.type, k.type, assay, assay_group)]) + geom_bar(aes(x=assay, y=value, fill=assay_group), color='grey50', stat='identity') + facet_grid(k.type + assay_group ~ t.type, scales='free', space='free') + geom_hline(yintercept=0) + coord_flip() + labs(x='Pooled Assay Scores, grouped', y='<- More PC2     More PC1 ->')
 ```
 
 ## Fig 3 Abund over time
@@ -188,15 +215,24 @@ fig3_ab <- plot_grid(pca.pos.sort.group.plot + theme(legend.position='none'), g,
   
 ctv_gated_means_subset <- ctv_gated_means_dt[variable=='ctv2_t' & k562 == 'cd19+']
 
-ctv_gated_means_donormerge_dt <- ctv_gated_means_subset[, `:=`(
+ctv_gated_means_donormerge_dt <- ctv_gated_means_subset[
+  # leave out donor 1 day 33 in cd8s?
+  #(donor %in% c(1,2) & day != 'd33') | ((donor == 2 & day == 'd33') | t_type == 'cd4'),
+  ,
+  `:=`(
   value_rel_day_mean= mean(value_rel_day, na.rm=T),
   value_rel_day_sd= sd(value_rel_day)),
   by=c('k562','day','car','variable','t_type')]
 
-ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[variable %in% c('ctv2_t') & k562 == 'cd19+']
+ctv_gated_means_donormerge_subset <- ctv_gated_means_donormerge_dt[
+  variable %in% c('ctv2_t') & k562 == 'cd19+']
 
-max_val <- ctv_gated_means_donormerge_subset[, max(abs(value_rel_day_mean[car != 'KLRG1']))]
-ctv_gated_means_donormerge_subset[abs(value_rel_day_mean) > max_val, value_rel_day_mean := max_val * sign(value_rel_day_mean)]
+max_val <- ctv_gated_means_donormerge_subset[, max(abs(value_rel_day_mean[car != 'KLRG1']), na.rm=T)]
+
+ctv_gated_means_donormerge_subset[
+  abs(value_rel_day_mean) > max_val,
+  value_rel_day_mean := max_val * sign(value_rel_day_mean)]
+
 ctv_gated_means_donormerge_subset[, t_type := factor(t_type, labels=c('CD4','CD8'))]
 
 proliferation_tiles <- ggplot(ctv_gated_means_donormerge_subset,
@@ -205,7 +241,7 @@ proliferation_tiles <- ggplot(ctv_gated_means_donormerge_subset,
   facet_grid(. ~ t_type) + 
   scale_fill_viridis_c(
     'Relative Proliferation (-ΔMFI)\n(mean of 2 donors)',
-    limits = c(-1,1)*max_val,
+    limits = c(-1,1)*max_val, oob=scales::squish,
     breaks=c(300, 150, 0, -150, -300),
     labels=c(300,150,0,-150, '≤-300'),
     na.value = '#FFFFFF') + 

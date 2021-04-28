@@ -28,6 +28,7 @@ library(ggrepel)
 library(scales)
 library(MBA)
 library(dendsort)
+library(ggrastr)
 
 reload_data=F
 source(here::here('r','fig_colors.R'))
@@ -105,8 +106,10 @@ cluster_name_map <- list(
 )
 
 # make dt mapping old names, new names, colors
-cluster_name_dt <- data.table(Subtype=names(cluster_name_map), subtype_lbl=unlist(cluster_name_map))
-cluster_name_dt <- data.table(Subtype=names(all_colors), color=unlist(all_colors))[
+cluster_name_dt <- data.table(
+  Subtype=names(cluster_name_map), subtype_lbl=unlist(cluster_name_map))
+cluster_name_dt <- data.table(
+  Subtype=names(all_colors), color=unlist(all_colors))[
   cluster_name_dt, on='Subtype']
 
 cd4_order <- c(
@@ -171,7 +174,7 @@ labels_dt <- umap_dt[,
   by=c('subtype_lbl','t_type','Subtype')]
 
 plots$subtypes <- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
-  geom_point(size=0.3) + 
+  rasterise(geom_point(size=0.3), dpi=500) + 
   coord_fixed() +
   geom_label_repel(
     data=labels_dt,
@@ -190,7 +193,7 @@ inset_umap_point_size = 0.05
 #per phase
 plots$per_phase <- ggplot(
     umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Phase)) +
-  geom_point(size=inset_umap_point_size*0.1, alpha=0.25) + 
+  rasterise(geom_point(size=inset_umap_point_size*0.1, alpha=0.25), dpi=500) + 
   coord_fixed() +
   scale_color_manual(values=phase_colors) +
   theme_minimal() + 
@@ -206,7 +209,7 @@ plots$per_phase <- ggplot(
 plots$per_donor <- ggplot(
     umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, 
       color=factor(donor, labels=c('A','B')))) +
-  geom_point(size=inset_umap_point_size*0.1, alpha=0.25) + 
+  rasterise(geom_point(size=inset_umap_point_size*0.1, alpha=0.25), dpi=500) + 
   scale_color_discrete('Donor') +
   coord_fixed() +
   theme_minimal() + 
@@ -237,7 +240,7 @@ plots$activation <- ggplot(
     umap_dt[cluster_stim, on=c('t_type','Subtype')][sample(.N)], 
     aes(x=wnnUMAP_1, y=wnnUMAP_2, 
       color=cd19_clust_act_l2fc)) +
-  geom_point(size=inset_umap_point_size*0.1, alpha=0.25) + 
+  rasterise(geom_point(size=inset_umap_point_size*0.1, alpha=0.25), dpi=500) + 
   scale_color_distiller(
     'Stim:Unstim',
     palette='PuOr', direction=-1, oob=scales::squish, limits=c(-5,5),
@@ -265,6 +268,9 @@ combined_inset_umap <- plot_grid(
 # ratio = 1.8
 plots$combined_umap <- (plots$subtypes + theme(legend.position='none') | 
     (plots$per_phase / plots$per_donor / plots$activation)) + plot_layout(widths=c(4.5,1))
+
+plots$combined_umap_vert <- ((plots$subtypes + theme(legend.position='none')) / 
+    (plots$per_phase | plots$per_donor | plots$activation)) + plot_layout(heights=c(4.5,1))
 
 ```
 
@@ -296,10 +302,10 @@ plots$per_car_umap <- ggplot(sampled_umap, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=
     factor(Subtype,
       levels=cluster_name_dt[comb_order, on='Subtype']$Subtype,
       labels=cluster_name_dt[comb_order, on='Subtype']$subtype_lbl))) +
-  geom_point(
+  rasterise(geom_point(
     data=copy(car_umap_grid_dt)[, c('car','k_type') := list(NULL,NULL)],
-    size=0.1, color='grey90') + 
-  geom_point(size=0.05) +
+    size=0.1, color='grey90'), dpi=500) + 
+  rasterise(geom_point(size=0.05), dpi=500) +
   coord_fixed() +
   scale_color_manual('Cluster', values= cluster_name_dt[, setNames(color, subtype_lbl)]) +
   facet_grid(k_type~car, switch = "y") +
@@ -371,8 +377,8 @@ interpolate_score <- function(umap_data, resolution, score_name, plot=T, pal_nam
   
   if(plot) {
     return(ggplot(data, aes(x=wnnUMAP_1, y=wnnUMAP_2)) +
-      geom_point(size=0.1, color='grey30') +
-      geom_contour_filled(data=mba_interp, aes(z=score), alpha=0.8, bins=9) +
+      rasterise(geom_point(size=0.1, color='grey30')) +
+      rasterise(geom_contour_filled(data=mba_interp, aes(z=score), alpha=0.8, bins=9)) +
       scale_fill_manual(values=c('white','white',brewer.pal(9,pal_name)[3:9])) + 
       coord_fixed() +
       theme_minimal() +
@@ -1333,7 +1339,7 @@ make_gene_heatmap_horiz <- function(
       plot.margin = unit(c(22, 0, 5.5, 5.5), "points"))
   
 
-  return(cluster_idents | donor_idents | de_gene_heatmap_boxed )
+  return(cluster_idents | donor_idents | de_gene_heatmap_boxed)
 }
 
 if (!(exists('cd4_pruned'))) {
@@ -2208,13 +2214,35 @@ plots$fig_assembled_4 <- plot_grid(
       ncol=1, rel_heights = c(1.3,1), labels=c('C','D')),
     ncol=2,
     labels=c('',''),
-    rel_widths=c(1.6,1)),
+    rel_widths=c(1.2,1)),
   plots$combined_gene_heatmap_boxed_horiz,
   nrow=2,
   labels=c('','E'),
-  rel_heights=c(2.4,1))
+  rel_heights=c(2,1))
 
-combined_gene_heatmap_boxed_horiz
+plots$fig_assembled_5 <- plot_grid(
+  plot_grid(
+    plot_grid(plots$combined_umap_vert, plots$combined_paper_umap,
+      ncol=2, rel_widths=c(1.3,1), labels=c('A','C')), 
+    plot_grid(plots$car_dotplot_horiz, plots$combined_tile_plot,
+      ncol=2, rel_widths = c(1.5,1), labels=c('B','D')),
+    ncol=1,
+    labels=c('',''),
+    rel_heights=c(1.3,1)),
+  plots$combined_gene_heatmap_boxed_horiz,
+  nrow=2,
+  labels=c('','E'),
+  rel_heights=c(2,1))
+
+scaling_factor <- 1.4
+ggsave(
+  'scrna_fig.pdf',
+  plots$fig_assembled_5, device='pdf',
+  width=8.5*scaling_factor,
+  height=10*scaling_factor,
+  units=c('in'),
+  dpi=300)
+
 ```
 
 ## Supp fig, proliferation per subset
@@ -2226,4 +2254,49 @@ ggplot(
     aes(x=t_subtype, fill=Phase, y=pct_phase, group=interaction(t_subtype, Phase)),
     stat='identity') + 
   coord_flip()
+```
+
+## Other plots
+
+```{r}
+
+rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
+  rna_data <- FetchData(prune_cells(scrna_all),
+    vars=c(names(scrna_all@meta.data), rna_name), slot='counts')
+  
+  names(rna_data)[length(names(rna_data))] <- 'RNA_count'
+  interact <- NULL
+  if (separate_by_donor)
+    interact <- 'donor'
+    
+  by_subset <- ggplot(rna_data,
+      aes_string(x='Subtype', y='RNA_count', color='Subtype',
+        group= paste0("interaction(", paste0(c(interact,'Subtype'), collapse = ", "), ")"))) + 
+    stat_summary(fun = mean, geom = "point", position=position_dodge(0.5)) + 
+    stat_summary(fun.data = mean_se, geom = "errorbar", position=position_dodge(0.5)) +
+    facet_grid(t_type~., scale='free') +
+    scale_color_manual(values=all_colors) +
+    theme_minimal() +
+    coord_flip() +
+    labs(title=paste0(rna_name,' Expression by Subtype'), y='UMIs per cell') +
+    theme(panel.background=element_rect(fill=NA, color='grey50'))
+  
+  by_car <- ggplot(rna_data, 
+      aes_string(x='car', y='RNA_count', color='car',
+        group= paste0("interaction(", paste0(c(interact,'car'), collapse = ", "), ")"))) +
+    stat_summary(fun = mean, geom = "point", position=position_dodge(0.5)) + 
+    stat_summary(fun.data = mean_se, geom = "errorbar", position=position_dodge(0.5)) +
+    facet_grid(t_type~k_type) +
+    scale_color_manual(values=car_colors_umap) +
+    theme_minimal() +
+    coord_flip() +
+    labs(title=paste0(rna_name,' Expression by CAR'), y='UMIs per cell') +
+    theme(panel.background=element_rect(fill=NA, color='grey50'))
+  
+  return((by_car + by_subset & theme(legend.position='none')) + plot_layout(widths=c(2,1)))
+}
+
+# BAFF-R Expression
+rna_by_subtype_and_car('TNFRSF13C', separate_by_donor=T)
+```
 ```

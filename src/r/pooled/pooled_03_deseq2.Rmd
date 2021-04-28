@@ -22,6 +22,7 @@ library(plotly)
 library(Rtsne)
 library(scales)
 library(dplyr)
+library(ggtext)
 
 rm(list = ls())
 
@@ -42,6 +43,7 @@ array.list <- c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')
 # load colors
 source(here::here('r','fig_colors.R'))
 
+`%ni%` <- Negate(`%in%`)
 
 ```
 
@@ -57,6 +59,9 @@ https://support.bioconductor.org/p/126713/
 
 
 ```{r}
+
+read.counts[CAR.align == 'TNR8', CAR.align := 'CD30']
+read.counts[CAR.align == 'HAVCR1b', CAR.align := 'TIM1']
 
 cts <- dcast(
     read.counts[, .(
@@ -75,8 +80,8 @@ vst_cts <- reshape2::melt(varianceStabilizingTransformation(as.matrix(cts)))
 names(vst_cts) <- c('CAR.align','sort.group.bin', 'vst')
 rlog_cts <- reshape2::melt(rlog(as.matrix(cts)))
 names(rlog_cts) <- c('CAR.align','sort.group.bin', 'rlog')
-rlog_cts$CAR.align <- factor(rlog_cts$CAR.align, levels=1:40, 
-  labels=levels(vst_cts$CAR.align))
+# rlog_cts$CAR.align <- factor(rlog_cts$CAR.align, levels=1:40, 
+#   labels=levels(vst_cts$CAR.align))
 
 norm_cts <- merge(
   vst_cts, rlog_cts, by=c('CAR.align','sort.group.bin'))
@@ -91,12 +96,16 @@ read.counts <- read.counts[!is.na(t.type)]
 
 #prolif 1 & 2
 
+# get average divisions per car
+read.counts[, ctv.divisions := as.numeric(mapvalues(factor(ctv.bin.score), c(1,2,4,8), c(0.5, 2.5, 5, 7)))]
+read.counts[, avg.divisions := sum(car.bin.pct * as.numeric(ctv.divisions))/.N, by=c('CAR.align','sort.group')]
+
 read.counts[, 
-  vst_car_score := sum((vst - mean(vst)) * sqrt(ctv.bin.score)),
+  vst_car_score := sum((vst - mean(vst)) * sqrt(ctv.divisions)),
   by=c('CAR.align','sort.group')]
 
 read.counts[, 
-  rlog_car_score := sum((rlog - mean(rlog)) * sqrt(ctv.bin.score)),
+  rlog_car_score := sum((rlog - mean(rlog)) * sqrt(ctv.divisions)),
   by=c('CAR.align','sort.group')]
 
 ## post-cytof
@@ -116,36 +125,32 @@ ggplot(read.counts) +
     geom_boxplot(
         aes(x=reorder(CAR.align,vst_car_score), y=vst_car_score)) + 
     coord_flip() + 
-    facet_wrap(t.type ~ k.type) + 
-    facet_grid(t.type ~ assay + k.type)
+    facet_grid(t.type ~ assay + k.type, scales='free')
 
 ggplot(read.counts) + 
     geom_boxplot(
         aes(x=reorder(CAR.align,rlog_car_score), y=rlog_car_score)) + 
     coord_flip() + 
-    facet_wrap(t.type ~ k.type) + 
-    facet_grid(t.type ~ assay + k.type)
+    facet_grid(t.type ~ assay + k.type, scales='free')
 
 ggplot(read.counts) + 
     geom_point(
         aes(x=rlog_car_score, y=CAR.score, color=interaction(donor, batch))) + 
     coord_flip() + 
-    facet_wrap(t.type ~ k.type) + 
-    facet_grid(t.type ~ assay + k.type)
+    facet_grid(t.type ~ assay + k.type, scales='free')
 
 ggplot(read.counts) + 
     geom_point(
         aes(x=rlog_car_score, y=vst_car_score, color=interaction(donor, batch))) + 
     coord_flip() + 
-    facet_wrap(t.type ~ k.type) + 
-    facet_grid(t.type ~ assay + k.type)
+    facet_grid(t.type ~ assay + k.type, scales='free')
 ```
 
 # Raw bin plot (fig 2A)
 
 ```{r}
 subset_barplot_reads <- read.counts[
-  assay == 'CTV1' & batch == 'prolif2' & donor == 'd2' & k.type == 'pos']
+  assay == 'CTV1' & batch == 'prolif2' & donor == 'd1' & k.type == 'pos']
 
 subset_barplot_reads <- subset_barplot_reads[,
   CAR.ranked.sep := factor(
@@ -160,6 +165,26 @@ subset_barplot_reads[,
 remove_t_type_sep <- function (breaks)
   unlist(lapply(breaks, function(str)
     strsplit(str, '|',fixed=T)[[1]][1]))
+
+remove_t_type_sep_col <- function (breaks) {
+  car_name <- unlist(lapply(breaks, function(str)
+    strsplit(str, '|',fixed=T)[[1]][1]))
+  
+  car_axis_colors <- rep('black', length(car_name))
+  car_axis_colors[grep('CD28', car_name)] <- car_colors['CD28']
+  car_axis_colors[grep('4-1BB', car_name)] <- car_colors['41BB']
+
+  # bold CAR names if colored
+  car_name[car_axis_colors != 'black'] <- paste0('**',car_name[car_axis_colors != 'black'],'**')
+  
+  car_color_span <- paste("<span style = 'color: ",
+    car_axis_colors,
+    ";'>",
+    car_name,
+    "</span>", sep = "")
+  
+  return(car_color_span)
+}
 
 barplot_stacked_plot <- ggplot(subset_barplot_reads) +
   geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
@@ -181,22 +206,38 @@ barplot_stacked_plot <- ggplot(subset_barplot_reads) +
 ggsave(here::here('..','figs','pooled','fig2a_stackbar_single_donor.pdf'), 
        barplot_stacked_plot, height=6, width=9, useDingbats=FALSE)
 
+other_car_colors <- unique(subset_barplot_reads$CAR.align)[
+  unique(subset_barplot_reads$CAR.align) %ni% c('4-1BB','CD28')]
+other_car_colors <- setNames(rep(NA,length(other_car_colors)),other_car_colors)
+
+#element_rect(fill=brewer.pal(4,'YlGn')[1])
+
 barplot_stacked_plot_horiz <- ggplot(subset_barplot_reads) +
   geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
     stat='identity', width=1) +
   scale_fill_brewer(palette = "YlGn") +
   facet_wrap(t.type ~ ., scales = 'free_x', nrow=1) +
   labs(y='% sorted into each bin', x='CAR Costimulatory Domains, ranked') +
-  scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep) +
-  scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0, 0)), 
+  scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep_col) +
+  scale_y_continuous(limits = c(-0.0175,1), expand = expansion(mult = c(0, 0)), 
                      breaks=c(0, .5, 1), labels=percent) +
-  theme_bw(base_size=12) + theme(axis.ticks = element_blank()) + 
+  coord_cartesian(clip='off') +
+  annotate(geom='rect', xmin=-Inf, xmax=Inf, ymin=0, ymax=1, color='black', fill=NA, size=0.25) +
+  theme_bw(base_size=12) + 
   theme(
-    axis.text.x = element_text(size=9, angle = 90, vjust = 0.5, hjust=1),
+    axis.ticks = element_blank(),
+    axis.text.x = element_markdown(size=9, angle = 90, vjust = 0.5, hjust=1),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
     strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"))
+    panel.background = element_blank(),
+    panel.border = element_blank()) +
+  geom_point(aes(x=CAR.ranked.sep, y=-0.0175, color=CAR.align),
+      pch=17,
+      size=2.8) +
+  scale_color_manual(values=c(other_car_colors, car_colors, '4-1BB'=car_colors[['41BB']]), guide='none')
+
+  
 
 ggsave(here::here('..','figs','pooled','fig2a_stackbar_single_donor_horiz.pdf'), 
        barplot_stacked_plot_horiz, height=6, width=9, useDingbats=FALSE)
@@ -224,25 +265,35 @@ remove_t_type_sep <- function (breaks)
     strsplit(str, '|',fixed=T)[[1]][1]))
 
 barplot_stacked_multi_plot <- ggplot(subset_barplot_reads) +
+  annotate(geom='rect', xmin=-Inf, xmax=Inf, ymin=0, ymax=1, color='black',
+    fill=brewer.pal(4, 'YlGn')[1], size=0.25) +
   geom_bar(aes(y=car.bin.pct, x=CAR.ranked.sep, fill=bin),
     stat='identity', width=1) +
   scale_fill_brewer(palette = "YlGn") +
   facet_wrap(sort.group ~ t.type, scales = 'free_x', ncol=2) +
   labs(y='', x='') +
   scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep) +
-  scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0, 0)), 
+  scale_y_continuous(limits = c(-0.025,1), expand = expansion(mult = c(0, 0)), 
                      breaks=c(0, .5, 1), labels=percent) +
-  theme_bw(base_size=18) + theme(axis.ticks = element_blank()) + 
+  theme_bw(base_size=18) + 
   theme(
+    axis.ticks = element_blank(),
     axis.text.x = element_blank(),
     axis.text.y = element_blank(),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
     strip.background = element_blank(),
+    panel.border = element_blank(),
     strip.text= element_blank(),
-    panel.background = element_rect(fill= brewer.pal(4, 'YlGn')[1]),
-    legend.position = "none",
-    panel.border = element_rect(colour = "black"))
+    legend.position = "none") +
+  coord_cartesian(clip='off') +
+  annotate(geom='rect', xmin=-Inf, xmax=Inf, ymin=0, ymax=1, color='black',
+    fill=NA, size=0.25) +
+  geom_point(aes(x=CAR.ranked.sep, y=-0.025, color=CAR.align),
+      pch=17,
+      size=2.8) +
+  scale_color_manual(
+    values=c(other_car_colors, car_colors, '4-1BB'=car_colors[['41BB']]), guide='none')
 
 ggsave(here::here('..','figs','pooled','fig2a_stackbar_both_donors.pdf'), 
        barplot_stacked_multi_plot, height=6, width=9, useDingbats=FALSE)
@@ -1460,6 +1511,8 @@ data.output.dir <- file.path(here::here(
 load(
   file=file.path(data.output.dir, 'pooled_deseq2_data.Rdata'))
 
+all.deseq.results.dt[CAR.align == 'TNR8', CAR.align := 'CD30']
+all.deseq.results.dt[CAR.align == 'HAVCR1b', CAR.align := 'TIM1']
 
 all.deseq.results.dt[, padj.disp := -log10(padj)]
 all.deseq.results.dt[, lfc.disp := log2FoldChange]
@@ -1480,8 +1533,8 @@ data.dt[, CAR.type := factor(
 
 assay_fig_labels <- c(
   'Initial Proliferation\n(d0-d3/d4)', 
-  'Cumulative Proliferation\n(d0-d16)', 
-  'Cumulative Proliferation,\n(d0-d24)')
+  'Relative Expansion\n(d0-d16)', 
+  'Relative Expansion,\n(d0-d24)')
 
 
 # combined rlog car score for CTV1 & CTV2, baseline abundance for CTV3
@@ -1574,7 +1627,7 @@ interbin_volcano <- ggplot(data.subset.dt[order(CAR.type)],
     labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors'),
     values=c(1.5,3,3,2.5), guide=F) +
   geom_hline(yintercept=-log10(0.05), linetype = 'dashed', alpha=.3) +
-  labs(x='Relative Proliferation,\nlog2 FC', 
+  labs(x='Relative Expansion,\nlog2 FC', 
        y='-log10(p)') + 
   scale_y_continuous(limits=c(0, max_pval_y), expand=c(.05,.05,0,0)) +
   scale_x_continuous(limits=c(-3.25,3.25), breaks=c(-3:3)) +
@@ -1645,6 +1698,28 @@ ggsave(here::here('..','figs','pooled','mixed_4v8.pdf'), prolif_4v8,
 
 ```{r, fig.width=7, fig.height=4}
 
+cast_4v8 <- dcast(data.dt[
+    k.type == 'pos' & 
+        ((ref_set == 'baseline' & test_set == 'A' & assay != 'CTV1') | 
+        (ref_set == 'CD' & test_set == 'A' & assay == 'CTV1'))], 
+      CAR.align + assay + CAR.type ~ t.type, 
+    value.var = c("log2FoldChange", "padj.disp"))
+
+# rename facets
+cast_4v8[, assay := factor(assay, 
+    labels=assay_fig_labels)]
+
+# label significant hits
+cast_4v8[, CAR.type.size := CAR.type]
+cast_4v8[CAR.type == 'other' & 
+    ((padj.disp_CD4 > -log10(0.05) & log2FoldChange_CD4 > 0) | 
+    (padj.disp_CD8 > -log10(0.05) & log2FoldChange_CD8 > 0)), 
+  CAR.type.size := 'other_sig']
+
+cast_4v8[, CAR.label.sig := '']
+cast_4v8[CAR.type.size != 'other',
+    CAR.label.sig := CAR.align]
+
 cast_4v8[, mean_lfc := rowMeans(cbind(log2FoldChange_CD4, log2FoldChange_CD8))]
 cast_4v8[, rel_8 := log2FoldChange_CD8 - log2FoldChange_CD4]
 
@@ -1673,8 +1748,8 @@ prolif_4v8_rel <- ggplot(cast_4v8[order(CAR.type)],
   geom_hline(yintercept=0, linetype='dashed', alpha=.7) +
   geom_text_repel(size=3, point.padding=0.25, segment.color='grey') +
   theme_minimal() + 
-  labs(y='log2 CD8:CD4 proliferation ratio', 
-       x='Relative proliferation,\n log2 mean FC') +
+  labs(y='log2 CD8:CD4 ratio', 
+       x='Relative proliferation/expansion,\n log2 FC') +
   theme(panel.border=element_rect(fill=NA)) +
   guides(size=F)
 
@@ -1765,7 +1840,6 @@ ggsave(here::here('..','figs','pooled','mixed_posneg.pdf'), prolif_posneg,
 
 ```{r fig.height=4, fig.width=2.5, units='inches'}
 
-
 ##deseq2
 
 all.deseq.results.dt[, comparison := paste(test_set,ref_set,sep= '.')]
@@ -1805,8 +1879,6 @@ rel_abund_means[,
 rel_abund_means[, comparison := 'abund_rel_baseline']
 rel_abund_means[, 
   combined_var := paste(assay,comparison, sep='.'), by=.(t.type)]
-
-
 
 ### Cytokines
 
@@ -1920,7 +1992,7 @@ make_dendroheatmap_vert <- function(
 }
 
 make_dendroheatmap <- function(
-  df, title, dendro_units=grid::unit(0.2, "null"), 
+  df, title,
   legend_theme=theme(legend.position = "none"), boxnumbers=F)
 {
   
@@ -1945,28 +2017,37 @@ make_dendroheatmap <- function(
       levels = labels(car_dendro))
   
   #manual x labels
-  y_lab_man <- c('CD69 18h',
-    'Prolif d3-4','Prolif d14-16','Prolif d24',
-    'IFNy d3', 'IL2 d3', 'CD69 18h',
-    'Prolif d4','Prolif d14-16','Prolif d24')
+  y_lab_man <- c(
+    IFNy.CD4='IFNy d3', IL2.CD4='IL2 d3',
+    CD69.CD4='CD69 18h', CD69.CD8='CD69 18h',
+    CTV1.CD4='Proliferation d3/d4', CTV1.CD8='Proliferation d3/d4',
+    CTV2.CD4='Expansion d0-14/16', CTV2.CD8='Expansion d0-14/16',
+    CTV3.CD4='Expansion d0-24', CTV3.CD8='Expansion d0-24'
+    )
   
   # heatmap
-  var_heatmap <- ggplot(df) + 
+  var_heatmap <-   ggplot(df[,
+      t.type := factor(t.type, levels=c('CD8','CD4'))][,
+        assay := factor(assay, levels= c('IL2','IFNy','CD69','CTV1','CTV2','CTV3'))]) + 
     geom_tile(aes(y = interaction(assay,t.type), x = CAR.align, 
                   fill = value.scale), colour = "black", size = .20, alpha=ifelse(boxnumbers, 0.5, 1)) + 
     scale_fill_distiller('Z-score', 
       palette='PiYG', limits=c(-3,3), oob=scales::squish, direction=1) +
     scale_y_discrete(expand=c(0,0),
       labels=y_lab_man) +
-    scale_x_discrete(labels= (
-        function (breaks)
-          unlist(lapply(breaks, function(str)
-            strsplit(str, '|',fixed=T)[[1]][1])))) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+    scale_x_discrete(labels= remove_t_type_sep_col) +
+    labs(title=title) + 
+    facet_grid(t.type~., scales='free', space='free', switch='y') + 
+    coord_cartesian(clip="off") +
+    theme(
+        strip.placement = "outside",
+        axis.text.x = element_markdown(angle = 90, hjust = 1),
+        axis.ticks = element_blank(),
         axis.title.y = element_blank(),
+        plot.margin=margin(-19,5.5,5.5,5.5, 'points'),
+        strip.background = element_blank(),
         panel.background = element_rect(fill='white'),
-        axis.title.x = element_blank()) +
-    labs(title=title)
+        axis.title.x = element_blank())
   
     if (boxnumbers) {
       var_heatmap <- var_heatmap + 
@@ -1974,18 +2055,25 @@ make_dendroheatmap <- function(
           label=round(value.scale,1)), colour = "black")
     }
   
-    var_heatmap <- var_heatmap + legend_theme
+  var_heatmap <- var_heatmap + legend_theme
   
   # col dendro
   dendro_data_col <- dendro_data(car_dendro, type = "rectangle")
   
-  dendro_col <- axis_canvas(var_heatmap, axis = "x") + 
-    geom_segment(data = segment(dendro_data_col), 
+  dendro_col <- axis_canvas(var_heatmap, axis = "x") +
+    geom_segment(data = segment(dendro_data_col),
         aes(x = x, y = y*0.99, xend = xend, yend = yend*0.99))
-  plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
-    dendro_col, dendro_units, position = "top")
+  # plot_dendroheat <- insert_xaxis_grob(var_heatmap, 
+  #   dendro_col, dendro_units, position = "top")
   
-  return(ggdraw(plot_dendroheat))
+  plot_dendroheat <- (
+    dendro_col+theme(plot.margin = margin(10,0,0,0))) / 
+    (var_heatmap + theme(
+        plot.margin= margin(0,40,0,0), panel.spacing= unit(5,'pt'), plot.title=element_blank())
+    ) +
+    plot_layout(heights=c(1,6))
+  
+  return(plot_dendroheat)
 }
 
 # make_dendroheatmap(total_combined[xor(comparison == 'rlog_car_score', grepl('CTV',assay)) & k.type == 'pos'],
@@ -2027,15 +2115,14 @@ chosen_metrics <- total_combined[k.type == 'pos' &
       (!(assay %in% c('CTV1','CTV2','CTV3')) & comparison == 'rlog_car_score'))]
 
 fig_2a_single_dendro <- make_dendroheatmap(
-  chosen_metrics,
+  df=chosen_metrics,
   title='',
   legend_theme=theme(
       legend.position = c(1, 0.5), 
       legend.justification = c(0, 0.5),
-      plot.margin = unit(c(5.5,66,5.5,44), "pt")))
+      plot.margin = margin(5.5,66,5.5,44, unit="pt")))
 
 fig_2a_single_dendro
-
 ```
 
 ### single heatmap, with numbers in boxes
@@ -2134,7 +2221,7 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
     'Days of continuous CD19 stimulation', 
     expand = c(0, 0.4, 0, 1.4), 
     labels=c('Baseline', 'Day 3-4', 'Day 14-16', 'Day 24')) +
-  scale_y_continuous('Relative Proliferation,\n log2 FC') +
+  scale_y_continuous('Relative Expansion,\n log2 FC') +
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA))
 
@@ -2178,7 +2265,7 @@ fig2_abundance_over_time_vert <- ggplot(prolif_data[order(CAR.type)], aes(
     'Days of continuous CD19 stimulation', 
     expand = c(0, 0.4, 0, 1.4), 
     labels=c('Baseline', 'Day 3-4', 'Day 14-16', 'Day 24')) +
-  scale_y_continuous('Relative Proliferation,\n log2 FC') +
+  scale_y_continuous('Relative Expansion,\n log2 FC') +
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA))
 
@@ -2258,8 +2345,8 @@ prolif_4v8_rel_vert <- ggplot(cast_4v8_abund[
   geom_hline(yintercept=0, linetype='dashed', alpha=.7) +
   geom_text_repel(size=3, point.padding=0.25, segment.color='grey') +
   theme_minimal() + 
-  labs(y='log2 CD8:CD4 proliferation ratio', 
-       x='Rel. proliferation, log2 mean FC') +
+  labs(y='log2 CD8:CD4 ratio', 
+       x='Mean Proliferation or Expansion, log2 mean FC') +
   theme(panel.border=element_rect(fill=NA)) +
   guides(size=F)
 
@@ -2365,20 +2452,17 @@ cytokine_panel <- ggplot(cytokine.pct.pos[assay %in% c("IL2","IFNy")]) +
       values=c('CD19+'=cd19_val[2], 'CD19-'='grey30')) + 
   facet_wrap(~ assay, scales='free_x') +
   scale_y_continuous(label=percent) +
-  scale_x_discrete(labels= (
-        function (breaks)
-          unlist(lapply(breaks, function(str)
-            strsplit(str, '|',fixed=T)[[1]][1])))) +
+  scale_x_discrete(labels= remove_t_type_sep_col) +
   labs(y = '% Positive (ICS)') +
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA),
-        axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.text.x = element_markdown(angle = 90, hjust = 1, vjust=0.5),
         axis.title.x = element_blank(),
         panel.grid.major.x = element_blank(),
         strip.background = element_rect(colour="white", fill="white"),
         legend.title = element_blank(),
         legend.justification=c(1,1),
-        legend.position=c(0.99,1.01))
+        legend.position=c(1,1.03))
 
 ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel,
        height=3, width=8, useDingbats=FALSE)
@@ -2410,7 +2494,7 @@ cytokine.pct.pos.melt <- melt(
 
 cytokine.pct.pos.melt[, CD19 := factor(CD19, levels=c('pos','neg'), labels=c('CD19+','CD19-'))]
 
-cytokine_panel <- ggplot(cytokine.pct.pos.melt) + 
+cytokine_panel_patent <- ggplot(cytokine.pct.pos.melt) + 
   
   geom_segment(data=cytokine.pct.pos.melt[CD19 == 'CD19+'], 
     aes(
@@ -2455,6 +2539,56 @@ ggsave(here::here('..','figs','pooled','cytokine_plot.pdf'), cytokine_panel_pate
        height=3, width=8, useDingbats=FALSE)
 
 cytokine_panel_patent
+
+```
+
+### CD69 flowseq
+
+```{r}
+
+cd69.pct.pos <- dcast(
+  read.counts[batch == "post-cytof" & assay == 'CD69'][
+    bin %in% c('C','D'), list(pct_pos= sum(car.bin.pct)), 
+      by=c('assay','CAR.align', 'k.type','t.type')],
+  assay + CAR.align + t.type ~ k.type, value.var='pct_pos')
+
+cd69.pct.pos[, CAR.align.assay := factor(paste(CAR.align,t.type,sep='|'))]
+cd69.pct.pos[, CAR.align.assay := factor(
+  CAR.align.assay, 
+  levels=levels(CAR.align.assay),
+  labels=cd69.pct.pos[, gsub('(.*)\\..*', '\\1', levels(CAR.align.assay))])]
+
+cd69_panel <- ggplot(cd69.pct.pos) + 
+  geom_segment(aes(x = reorder(CAR.align.assay, neg-pos), 
+                   xend = reorder(CAR.align.assay, neg-pos), 
+                   y = neg, 
+                   yend = pos), color="grey") +
+  geom_point(
+    aes(x = reorder(CAR.align.assay, neg-pos), y = pos, color='CD19+'), 
+    size=2.5) +
+  geom_point(
+    aes(x = reorder(CAR.align.assay, neg-pos), y = neg, color='CD19-'), 
+    size=2.5) + 
+  scale_color_manual(
+      values=c('CD19+'=cd19_val[2], 'CD19-'='grey30')) + 
+  facet_wrap(~ t.type, scales='free_x') +
+  scale_y_continuous(label=percent) +
+  scale_x_discrete(labels= remove_t_type_sep_col) +
+  labs(y = '% Positive (ICS)') +
+  theme_minimal() +
+  theme(panel.border=element_rect(fill=NA),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.title.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        strip.background = element_rect(colour="white", fill="white"),
+        legend.title = element_blank(),
+        legend.justification=c(1,1),
+        legend.position=c(0.99,1.01))
+
+ggsave(here::here('..','figs','pooled','cd69_panel.pdf'), cd69_panel,
+       height=3, width=8, useDingbats=FALSE)
+
+cd69_panel
 
 ```
 
@@ -2515,9 +2649,10 @@ plot_abcde_old
 ## Fig 2 New
 
 ```{r}
-plot_a <- plot_grid(barplot_stacked_plot_horiz+theme(legend.position = "none"), barplot_stacked_multi_plot,
-  rel_widths=c(3.5,1),
-  align='h',
+plot_a <- plot_grid(
+  barplot_stacked_plot_horiz+theme(legend.position = "none"), 
+  (barplot_stacked_multi_plot / plot_spacer()) + plot_layout(heights=c(4.5,1)), 
+  rel_widths=c(5,1),
   ncol = 2)
 
 plot_b <- cytokine_panel + 
@@ -2535,10 +2670,10 @@ plot_abcde <- plot_grid(
   plot_b,
   plot_grid(plot_c, plot_d, labels=c('C','D'), ncol=2),
   plot_e,
-  labels=c('A','B','','E'), ncol=1, nrow=4, rel_heights=c(1,0.8,1.2,1))
+  labels=c('A','B','','E'), ncol=1, nrow=4, rel_heights=c(0.9,0.9,1.2,1))
 
 ggsave(here::here('..','figs','compiled','fig2.pdf'), plot_abcde,
-       height=15, width=11, useDingbats=FALSE)
+       height=13, width=11, useDingbats=FALSE)
 
 
 ```

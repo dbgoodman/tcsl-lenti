@@ -61,7 +61,7 @@ all_colors <- list(
     'STIM-IFNG'=colors_mid[6],
     'STIM-GNLY'=colors_mid[8],
     'STIM-OXPHOS'=colors_mid[9],
-    'STIM-GLYC'=colors_mid[10])
+    'STIM-GLYC'='#ED5F1C') #brewer.pal(9,'Reds')[6]) #colors_mid[10]
 
 # SCRNA PHASE COLORS
 # --------------------------------------------------------------------------------------------------

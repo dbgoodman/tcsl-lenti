@@ -1168,7 +1168,8 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, 
   cluster_resolution <- 1.3
   cluster_name <- paste0('wsnn_res.',as.character(cluster_resolution))
   
-  seurat_obj <- RunUMAP(seurat_obj, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+  seurat_obj <- RunUMAP(seurat_obj,
+    nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
   seurat_obj <- FindClusters(seurat_obj, 
     graph.name = "wsnn", algorithm = 3, 
     resolution = cluster_resolution, verbose = FALSE)
@@ -1194,7 +1195,8 @@ sct_umap <- function(seurat_obj, pct.mt.cutoff=13, cluster_res=1.3, redo_sct=F, 
   
   DefaultAssay(seurat_obj) <- 'SCT_INT'
   rna_umap_plots <- umap_plot(seurat_obj, 
-    plot_title_text=paste(title,"RNA WNN"), assay='SCT_INT', cluster_name=cluster_name, reduction= 'wnn.umap')
+    plot_title_text=paste(title,"RNA WNN"),
+    assay='SCT_INT', cluster_name=cluster_name, reduction= 'wnn.umap')
 
   plots$adt_umap_plots <- adt_umap_plots$umap_plots
   plots$rna_umap_plots <- rna_umap_plots$umap_plots
@@ -1608,7 +1610,7 @@ map_geneset_parallel <- function(seurat_obj, geneset_list, assay='RNA', nbin=24,
 
 
 #remove bead stim, cd30, censored clusters, DP cells, etc
-prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, rescale=F, t_types=NULL) {
+prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, rescale=F, t_types=NULL, assay=NULL) {
   no_cd30 <- seurat_obj$car != 'CD30' & seurat_obj$car != 'K_only'
   no_beadstim <- seurat_obj$k_type != 'bead_stim'
   no_rmclust <- seurat_obj$Subtype != 'REMOVE' &
@@ -1644,6 +1646,10 @@ prune_cells <- function(seurat_obj, cars=NULL, k_types=NULL, subtypes=NULL, resc
   if (rescale) {
     new_obj <- ScaleData(new_obj, assay='SCT_INT')
     new_obj <- ScaleData(new_obj,assay= 'SCT_ADT_INT')
+  }
+  
+  if (!is.null(assay)) {
+    DefaultAssay(new_obj) <- assay
   }
   return(new_obj)
 }
