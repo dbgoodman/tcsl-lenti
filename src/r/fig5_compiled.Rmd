@@ -21,6 +21,7 @@ library(gtable)
 library(cowplot)
 library(ggridges)
 library(tidyverse)
+library(rstatix)
 
 car_set <- c('41BB','CD28','BAFF-R','CD40','TACI')
 
@@ -292,6 +293,12 @@ make_day_plot <- function(marker_freq, plot_day) {
   return(day_plot)
 }
 
+#KRUSKAL WALLIS FTW!
+day_dt[
+  car %in% c('41BB','CD28'), list(n_pos_marker=factor(rep(n_pos_marker, Freq))), 
+  by=.(day, car, t_type, donor)][,
+    wilcox_test(car ~ n_pos_marker), by=.(day, t_type, donor)]
+
 plots$n_exhaust <- make_day_plot(get_marker_counts(exh_dt), c(6,15)) + labs(
   x='Number of exhaustion markers per cell', y='% of cells')
 
@@ -301,6 +308,71 @@ plots$n_exhaust_3 <- make_day_plot(
 
   
 plots$n_exhaust
+
+# stacked plot
+day_dt[,
+  list(n_pos_marker=as.numeric(rep(n_pos_marker, Freq))),
+  by=.(day, car, t_type, donor, well)][
+    day== 6,
+    summary(glm(
+      n_pos_marker ~ car + donor + 0,
+      family=poisson))]
+
+day_dt <- get_marker_counts(
+  exh_dt,
+  exh_vars=c('tim3_t','lag3_t', 'pd1_t'))[
+    day %in% c(6,15) &
+    car %in% c('41BB','CD28','BAFF-R') &
+    k562 == 'cd19+']
+
+stacked_exh_plot <- function(day_dt_subset) {
+  
+  day_dt_subset <- day_dt_subset[, 
+      c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
+      by=c('n_pos_marker','t_type','donor','day','k562','car')][,
+        t_type := toupper(t_type)]
+  
+  day_dt_subset[, car := factor(car)]
+  day_dt_subset[, pct := as.numeric(pct)]
+  
+  ggplot(unique(day_dt_subset[, list(car, mean_pct, n_pos_marker, day, t_type, donor)])) +
+    geom_bar(aes(x=car, y=mean_pct, fill=n_pos_marker),
+      stat='identity', width=1, color='black', size=0.2) +
+    facet_grid(day ~ donor, scales='free') +
+    scale_y_continuous(expand=c(0,0), labels=label_percent()) +
+    scale_x_discrete(expand=c(0,0), limits=rev) +
+    scale_fill_manual(
+      'Exh. Markers\n per cell', values=brewer.pal(9,'RdPu')[c(2,3,5,8)]) +
+    labs(x="CAR", y='Fraction of Cells') +
+    theme_minimal() +
+    coord_flip() +
+    theme(
+      panel.grid=element_blank(),
+      panel.border=element_rect(color='black', size=0.2, fill=NA))
+}
+
+exh_stacked_bars <- (
+  stacked_exh_plot(day_dt[t_type == 'cd4'][, day := factor(day, labels=paste0('d',c(6,15)))][,
+      donor := factor(paste0('Donor ',donor))]) +
+    labs(subtitle='CD4') +
+    theme(
+      axis.text.x=element_blank(),
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.text.y=element_text(color=car_colors[rev(c('CD28','41BB','BAFF-R'))], face='bold', size=rel(1.1)),
+      axis.title=element_blank())
+) / (
+  stacked_exh_plot(day_dt[t_type == 'cd8'][, day := factor(day, labels=paste0('d',c(6,15)))][,
+      donor := factor(paste0('Donor ',donor))]) + 
+    labs(subtitle='CD8') +
+    theme(
+      strip.text.x=element_text(size=0),
+      plot.margin=margin(0,5.5,5.5,5.5,'pt'),
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.text.y=element_text(color=car_colors[rev(c('CD28','41BB','BAFF-R'))], face='bold', size=rel(1.1)),
+      axis.title=element_blank())
+) + 
+  plot_layout(guides='collect')
+
 ```
 
 ## jurkat signaling

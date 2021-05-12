@@ -11,6 +11,7 @@ library(ggplot2)
 library(data.table)
 library(scales)
 library(RColorBrewer)
+library(rstatix)
 
 data_dir <- here::here('..','data')
 load(file.path(data_dir, 'exh.sampled.Rdata'))
@@ -292,7 +293,7 @@ ggplot(marker_freq[k562 != 'none' & n_pos_marker != 7 & k562 == 'cd19+']) +
 #% GFP positive
 # ggplot(exh_dt[car != '' & variable == 'gfp_t', sum(gt_thresh)/.N, by=c('well','plate','day','car','donor','k562','t_type')]) + geom_point(aes(x=car, y=V1, shape=factor(donor), color=car)) + facet_grid(k562~t_type + day) + scale_color_manual(values=c(car_colors, 'untrans'='grey')
 
-marker_ct <- exh_dt[!outlier_well & variable %in% c('tim3_t','lag3_t','cd39_t', 'pd1_t'),
+marker_ct <- exh_dt[!outlier_well & variable %in% c('tim3_t','lag3_t', 'pd1_t'),
   list(n_pos_marker= sum(gt_thresh)),
   by=c('well','plate','day','Time','car','donor','k562','t_type')]
 
@@ -303,7 +304,7 @@ marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type
 
 marker_ct <- map_day_0(marker_ct)
 
-marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:4))), 
+marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:3))), 
   by=c('well','plate','day','car','donor','k562','t_type')]
 names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
 

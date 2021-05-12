@@ -29,6 +29,7 @@ library(scales)
 library(MBA)
 library(dendsort)
 library(ggrastr)
+library(scales)
 
 reload_data=F
 source(here::here('r','fig_colors.R'))
@@ -38,7 +39,7 @@ options(future.globals.maxSize = 14000 * 1024^2)
 plan("sequential")
 plan()
 
-reload_h5_data <- F
+#reload_h5_data <- F
 rerun_geneset_scores <- F
 
 car_colors_umap <- car_colors
@@ -173,13 +174,13 @@ labels_dt <- umap_dt[,
   list(wnnUMAP_1=mean(wnnUMAP_1), wnnUMAP_2=mean(wnnUMAP_2)),
   by=c('subtype_lbl','t_type','Subtype')]
 
-plots$subtypes <- ggplot(umap_dt, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
-  rasterise(geom_point(size=0.3), dpi=500) + 
+plots$subtypes <- ggplot(umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Subtype)) +
+  rasterise(geom_point(size=0.1, alpha=0.25), dpi=500) + 
   coord_fixed() +
   geom_label_repel(
     data=labels_dt,
     aes(x=wnnUMAP_1, y=wnnUMAP_2, label=subtype_lbl),
-    fill= alpha(c("white"),0.9), force=0.5) + 
+    fill= alpha(c("white"),0.75), force=0.5, size=3) + 
   scale_color_manual(values=all_colors) +
   theme_minimal() + 
   theme(
@@ -193,7 +194,7 @@ inset_umap_point_size = 0.05
 #per phase
 plots$per_phase <- ggplot(
     umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, color=Phase)) +
-  rasterise(geom_point(size=inset_umap_point_size*0.1, alpha=0.25), dpi=500) + 
+  rasterise(geom_point(size=inset_umap_point_size*0.01, alpha=0.05), dpi=500) + 
   coord_fixed() +
   scale_color_manual(values=phase_colors) +
   theme_minimal() + 
@@ -215,6 +216,26 @@ plots$per_donor <- ggplot(
   theme_minimal() + 
   guides(color = guide_legend(override.aes = list(size = 5, alpha=1))) +
   theme(
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    legend.justification = c(0,1),
+    panel.grid=element_blank())
+
+plots$per_donor_sep <- ggplot(
+    umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, 
+      color=factor(donor, labels=c('A','B')))) +
+  rasterise(geom_point(
+    data=copy(umap_dt)[, 'donor' := NULL],
+    size=inset_umap_point_size*0.01, color='grey90'), dpi=500) +
+  rasterise(geom_point(size=inset_umap_point_size*0.01, alpha=0.05), dpi=500) + 
+  scale_color_discrete('Donor') +
+  coord_fixed() +
+  facet_wrap(~donor) +
+  theme_minimal() + 
+  guides(color = guide_legend(override.aes = list(size = 5, alpha=1))) +
+  theme(
+    strip.text=element_blank(),
     axis.text=element_blank(),
     axis.line = element_blank(),
     axis.title=element_blank(),
@@ -245,7 +266,7 @@ plots$activation <- ggplot(
     'Stim:Unstim',
     palette='PuOr', direction=-1, oob=scales::squish, limits=c(-5,5),
     breaks=c(-5,-3,0,3,5),
-    labels=rev(c('>32x stim','8x stim','1:1','8x unstim','>32x unstim'))) +
+    labels=rev(c('32:1','8:1','1:1','1:8','1:32'))) +
   coord_fixed() +
   theme_minimal() + 
   theme(
@@ -254,7 +275,8 @@ plots$activation <- ggplot(
     axis.title=element_blank(),
     panel.grid=element_blank(),
     legend.justification = c(0,1),
-    legend.key.width=unit(0.4, 'lines'))
+    legend.key.width=unit(0.4, 'lines'),
+    legend.key.height=unit(0.8, 'lines'))
 
 combined_inset_umap <- plot_grid(
   plots$per_phase,
@@ -271,6 +293,11 @@ plots$combined_umap <- (plots$subtypes + theme(legend.position='none') |
 
 plots$combined_umap_vert <- ((plots$subtypes + theme(legend.position='none')) / 
     (plots$per_phase | plots$per_donor | plots$activation)) + plot_layout(heights=c(4.5,1))
+
+plots$combined_umap_vert_v2 <- ((plots$subtypes + theme(legend.position='none')) / 
+  (plots$per_phase | plots$per_donor_sep | plots$activation) + plot_layout(widths=c(1,2,1))
+) + plot_layout(heights=c(4.5,1))
+
 
 ```
 
@@ -358,7 +385,7 @@ interpolate_score <- function(umap_data, resolution, score_name, plot=T, pal_nam
   data <- umap_data[,list(t_type, wnnUMAP_1, wnnUMAP_2, score=get(score_name))]
   data[, scaled := score]
   data[scaled < 0, scaled := 0]
-  data[, scaled := rescale(scaled, to=c(0,1)), by=c('t_type')]
+  data[, scaled := scales::rescale(scaled, to=c(0,1)), by=c('t_type')]
   
   # remove single point outliers (mostly in dead zone between cd4/cd8)
   data_no_outliers <- data[!(-wnnUMAP_1 > 1 & -wnnUMAP_1 < 3 & wnnUMAP_2 > -1.5)]
@@ -572,7 +599,9 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
     scale_size('% CAR Cells', range=c(1,max_size), 
       breaks=c(0.1, 0.25, 0.4), labels=c('10%','25%','40%')) + 
     theme_minimal() + 
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+    theme(
+      legend.key.width=unit(0.4, 'lines'),
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
     labs(y='', x='')
   
   if (flip)
@@ -876,7 +905,9 @@ diff_gene_n[,
 diff_gene_n[, 
   paired_2 := make_paired_factor(subtype_2 %in% shared_subtypes, flip=T)]
 
-diff_gene_n[, subtype_1 := 
+diff_gene_n[, subtype_1 := factor(subtype_1,
+        levels=cluster_name_dt[cd4_order, on='Subtype']$Subtype,
+        labels=cluster_name_dt[cd4_order, on='Subtype']$subtype_lbl)]
 
 diff_gene_n[, subtype_2 := factor(subtype_2,
       levels=cluster_name_dt[cd8_order, on='Subtype']$Subtype,
@@ -884,12 +915,8 @@ diff_gene_n[, subtype_2 := factor(subtype_2,
 
 plots$matched_clusters <- ggplot(diff_gene_n,
     aes(
-      x=factor(subtype_1,
-        levels=cluster_name_dt[cd4_order, on='Subtype']$Subtype,
-        labels=cluster_name_dt[cd4_order, on='Subtype']$subtype_lbl), 
-      y=factor(subtype_2,
-        levels=cluster_name_dt[cd8_order, on='Subtype']$Subtype,
-        labels=cluster_name_dt[cd8_order, on='Subtype']$subtype_lbl))) + 
+      x=subtype_1,
+      y=subtype_2)) + 
   geom_tile(aes(
     fill=N/top_n)) + 
   geom_tile(aes(
@@ -1047,7 +1074,9 @@ make_gene_heatmap <- function(
       label := ifelse(gene %in% label_gene_list, as.character(gene), NA)]
     
   # alternate none with subtype name (two donors)
-  row_names <- as.vector(t(cbind(rep('', length(subtype_order)), subtype_order)))
+  row_names <- as.vector(t(cbind(rep('', length(subtype_order)), 
+    cluster_name_dt[subtype_order, on='Subtype'][, subtype_lbl])))
+    
   unique_donor_subset <- unique(melted_genes[, list(donor, subtype)])
   n_lines <- unique_donor_subset[, length(unique(subtype))]
   
@@ -1341,6 +1370,11 @@ make_gene_heatmap_horiz <- function(
 
   return(cluster_idents | donor_idents | de_gene_heatmap_boxed)
 }
+```
+
+### Assemble individial components of gene heatmaps
+
+```{r}
 
 if (!(exists('cd4_pruned'))) {
   Idents(scrna_cd4_all) <- 'Subtype'
@@ -1401,7 +1435,7 @@ plots$combined_gene_heatmap
 
 plots$cd4_gene_heatmap_boxed <- make_gene_heatmap(
   cd4_pruned, cd4_order, 
-  max_genes=50, label_genes=cd4_genes, rescale=F, 
+  max_genes=100, label_genes=cd4_genes, rescale=F, 
   use_dendsort=T, boxed=T,
   label_width = 7.25, label_font_size=1.5, label_line_width=18)
 
@@ -1501,6 +1535,7 @@ adt_groups <- list(
     "CD86",
     "CD38",
     "ICOS",
+    "GITR",
     "CD2",
     "CD69",
     "CD40",
@@ -1527,8 +1562,7 @@ adt_groups <- list(
   "Inhibitory"=c(
     "PD1",
     "LAG3",
-    "Tim3",
-    "GITR"))
+    "Tim3"))
 
 
 make_adt_heatmap <- function(seurat_obj, adt_groups, subtype_order) {
@@ -1716,6 +1750,8 @@ plots$combined_adt_plot <- ggplot(combined_adt_data) +
     panel.border=element_rect(color='grey70', fill=NA),
     plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
 
+rm(cd8_stim_prune)
+rm(cd4_stim_prune)
 
 ```
 
@@ -1749,7 +1785,7 @@ plots$combined_adt_plot <- ggplot(combined_adt_data) +
 #  "ICOS, CD2, LAG3, CD80, CD30, ICOS, IL2RA"
 # "STIM-INACT"=
 #  "Tim3, CD2, CD7, CCR6, TNFRSF18"
-# 
+
 # NAIVE-CD7: IFITM2, VIM, STMN1, HMGN2, CAPG, STIM1, CD7, IFITM1, PLEKHO1, TCF7
 # 
 # MEM-CD29_genes: SELL, ZEB2, EOMES, ITGA1, ITGB2, ITGB7, ITGA4, ITGB1, PLEK, CXCR3, CD59, ID2, IGFBP3, MHC-II, PYHIN1, PRR5L, S100A4, ANXA1, CCL5, TNFSF9, BATF, CX3CR1, FGFBP2, KLRG1, NKG7, GZMK, CST7, HOPX
@@ -1771,6 +1807,70 @@ plots$combined_adt_plot <- ggplot(combined_adt_data) +
 # STIM-INACT-genes: BATF, CTSW, DDX21, CYP1B1, BATF3, GZMA, TNFSF10, PFN1
 # STIM-INACT-proteins: Tim3, CD2, CD7, CCR6, GITR
 
+```
+### ADT Umap plots
+
+```{r}
+umap_proteins <- c(
+  'CD62L',
+  'CD45RA',
+  'CD45RO',
+  'HLA-ABC',
+  'CD49b',
+  'IL2RA')
+
+umap_protein_ranges <- list(
+  'CD62L.adt'=c(0,4),
+  'CD45RA.adt'=c(0,3),
+  'CD45RO.adt'=c(-0.5,1.75),
+  'HLA-ABC.adt'=c(0,2.5),
+  'CD49b.adt'=c(0,2.5),
+  'IL2RA.adt'=c(0,8))
+
+umap_range_dt <- data.table(
+  variable=names(umap_protein_ranges),
+  var.min=sapply(umap_protein_ranges, function (x) x[1]),
+  var.max=sapply(umap_protein_ranges, function (x) x[2]))
+
+prev_assay <- DefaultAssay(scrna_all)
+DefaultAssay(scrna_all) <- 'SCT_ADT_INT'
+citeseq_data <- data.table(
+  FetchData(
+    scrna_all,
+    paste0(umap_proteins,'.adt'),
+    slot='data'),
+  keep.rownames=T)
+DefaultAssay(scrna_all) <- prev_assay
+setnames(citeseq_data, 'rn','X_index')
+citeseq_umap <- citeseq_data[umap_dt, on='X_index']
+csu_melt <- melt(citeseq_umap, measure.vars=paste0(umap_proteins,'.adt'))
+
+csu_melt <- csu_melt[umap_range_dt, on='variable'][, 
+  value.scaled := scales::rescale(
+    scales::oob_squish(value, range=c(var.min[1], var.max[1]))),
+  by='variable']
+
+var_order <- c('CD62L','CD45RA','CD45RO','CD49b','HLA-ABC','IL2RA')
+csu_melt <- csu_melt[,
+  variable := factor(variable, levels=paste0(var_order,'.adt'), labels=var_order)]
+
+plots$citeseq_umaps <- ggplot(csu_melt,
+    aes(x=wnnUMAP_1, y=wnnUMAP_2, color=value.scaled)) +
+  rasterise(geom_point(size=inset_umap_point_size, alpha=0.5), dpi=500) + 
+  scale_color_distiller('Protein expression (CITE-Seq)',
+    palette='RdPu', direction=1, limit=c(0,1),
+    breaks=c(0,1),
+    labels=c('min','max')) +
+  coord_fixed() +
+  facet_wrap(~variable) +
+  theme_minimal() + 
+  theme(
+    legend.position='bottom',
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    legend.justification = c(0,1),
+    panel.grid=element_blank())
 ```
 
 ## PATHWAYS
@@ -1843,6 +1943,11 @@ gsea_subsets <- c(
 # look at DE genes in each pathway:
 #combined_de_markers[rn %in% get_geneset('MOOTHA_FFA_OXYDATION')][order(avg_log2FC)]
 
+gsea.pathways.file <- here::here(
+     '..','..','scrnaseq_tcsl154',
+     'rds',
+     paste0('gsea_pathways.Rdata'))
+
 if (rerun_geneset_scores) {
   cd8_gsea_scores_rna <- map_geneset_parallel(cd8_pruned, gsea_subsets, assay='RNA', nbin=24)
   cd8_pruned[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
@@ -1855,7 +1960,24 @@ if (rerun_geneset_scores) {
   
   cd4_gsea_scores_rna <- map_geneset_parallel(cd4_pruned, gsea_subsets, assay='RNA', nbin=16)
   cd4_pruned[[names(cd4_gsea_scores_rna)]] <- cd4_gsea_scores_rna
+  
+  save(list=c(
+    'cd8_gsea_scores_rna',
+    'cd8_all_gsea_scores_rna',
+    'cd4_gsea_scores_rna',
+    'cd4_all_gsea_scores_rna'),
+    file=gsea.pathways.file)
+} else {
+  if (!exists('cd8_gsea_scores_rna'))
+    load(gsea.pathways.file)
+  cd8_pruned[[names(cd8_gsea_scores_rna)]] <- cd8_gsea_scores_rna
+  cd4_pruned[[names(cd4_gsea_scores_rna)]] <- cd4_gsea_scores_rna
+  scrna_cd8_all[[names(cd8_all_gsea_scores_rna)]] <- cd8_all_gsea_scores_rna
+  scrna_cd4_all[[names(cd4_all_gsea_scores_rna)]] <- cd4_all_gsea_scores_rna
 }
+
+
+
 
 make_cdf <- function(seurat_obj, pathway_name, pathway_label, 
     subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS'), quant_limit=0.05, group.by='Subtype', colorlist=unlist(all_colors), return_val='cdf') {
@@ -1920,12 +2042,14 @@ make_cdf <- function(seurat_obj, pathway_name, pathway_label,
     'test'= test_results))
 }
 
+
+
 pathway_list <- list(
   'IFNG'='REACTOME_INTERFERON_GAMMA_SIGNALING',
   'NFkB'='BIOCARTA_NFKB_PATHWAY',
   'Th1/Cytotoxic'='BOSCO_TH1_CYTOTOXIC_MODULE',
   'Ca2+ Signaling'='KEGG_CALCIUM_SIGNALING_PATHWAY',
-  'Cell Adhesion/\nIntegrins'='KEGG_CELL_ADHESION_MOLECULES_CAMS',
+  'Cell Adhesion'='KEGG_CELL_ADHESION_MOLECULES_CAMS',
   'OXPHOS'='HALLMARK_OXIDATIVE_PHOSPHORYLATION',
   'TCA'="MOOTHA_TCA",
   'Th2/GATA3'="BIOCARTA_GATA3_PATHWAY",
@@ -2234,10 +2358,40 @@ plots$fig_assembled_5 <- plot_grid(
   labels=c('','E'),
   rel_heights=c(2,1))
 
-scaling_factor <- 1.4
+#width=1280&height=1366&scale=1
+plots$fig_assembled_6 <- plot_grid(
+  plot_grid(
+    #A
+    ((plots$subtypes + theme(legend.position='none')) / 
+      (plots$per_phase | plots$per_donor_sep | plots$activation) + 
+        plot_layout(widths=c(1,4,1))) + plot_layout(heights=c(5,1)),
+    #C
+    plots$car_dotplot_horiz,
+    #D,E
+    plot_grid(
+      plots$citeseq_umaps,
+      plots$combined_tile_plot,
+      ncol=2,
+      rel_widths=c(1.2,1),
+      labels=c('D','E')
+    ),
+    ncol=1,
+    rel_heights=c(1.2,1,0.8),
+    labels=c('A','C','D')),
+  plot_grid(
+    plots$combined_gene_heatmap_boxed,
+    plots$combined_paper_umap,
+    ncol=1,
+    rel_heights=c(1.2,0.8),
+    labels=c('B','E')),
+  rel_widths=c(1.4,1)
+)
+
+
+scaling_factor <- 1.6
 ggsave(
   'scrna_fig.pdf',
-  plots$fig_assembled_5, device='pdf',
+  plots$fig_assembled_6, device='pdf',
   width=8.5*scaling_factor,
   height=10*scaling_factor,
   units=c('in'),
@@ -2270,7 +2424,7 @@ rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
     interact <- 'donor'
     
   by_subset <- ggplot(rna_data,
-      aes_string(x='Subtype', y='RNA_count', color='Subtype',
+      aes_string(x='Subtype', y='RNA_count', color='Subtype', shape=interact,
         group= paste0("interaction(", paste0(c(interact,'Subtype'), collapse = ", "), ")"))) + 
     stat_summary(fun = mean, geom = "point", position=position_dodge(0.5)) + 
     stat_summary(fun.data = mean_se, geom = "errorbar", position=position_dodge(0.5)) +
@@ -2282,7 +2436,7 @@ rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
     theme(panel.background=element_rect(fill=NA, color='grey50'))
   
   by_car <- ggplot(rna_data, 
-      aes_string(x='car', y='RNA_count', color='car',
+      aes_string(x='car', y='RNA_count', color='car', shape=interact,
         group= paste0("interaction(", paste0(c(interact,'car'), collapse = ", "), ")"))) +
     stat_summary(fun = mean, geom = "point", position=position_dodge(0.5)) + 
     stat_summary(fun.data = mean_se, geom = "errorbar", position=position_dodge(0.5)) +
