@@ -741,3 +741,50 @@ ggsave(here::here('..','figs','compiled','fig4.pdf'), fig4_compiled_v3, height=1
 
 ```
 
+
+##Supp Fig In vivo Killing
+
+```{r}
+
+all_cars <- ggplot(growth_dt_means[day <=45],
+  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+  geom_line(legend=F) + geom_point(show.legend=F) +
+  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='None')*1) +
+  scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
+  labs(color="g", linetype="g") + theme_minimal()
+
+all_group <- c('None','Untransduced','41BB','BAFF-R','CD28', 'CD40', 'KLRG1','TACI', 'zeta')
+car_linetypes <- 1+(levels(growth_dt_means[,car])=='None')*1
+names(car_linetypes) <- levels(growth_dt_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.spacing.y = unit(2, 'pt'),
+      legend.margin = margin(2, 3, 3, 3),
+      legend.key.height=unit(15,'pt'),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill=NA))
+
+
+tumor_a <- ggplot(growth_dt_means[day <=50 & car %in% all_group][car == 'Untransduced', car := 'Unt'],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=rename(car_linetypes, replace = c("Untransduced" = "Unt"))) +
+      scale_color_manual("", values=c('Unt'='#666666', 'None'='#666666', car_colors)) +
+      theme_minimal() + 
+      plot_theme + 
+      labs(y=bquote('Tumor Volume'~(mm^3)), x='')
+
+
+
+tumor_a
+
+```
+
