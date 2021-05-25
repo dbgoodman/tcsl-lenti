@@ -111,7 +111,7 @@ plot_theme <- theme(
       panel.border = element_rect(fill=NA))
 
 
-tumor_a <- ggplot(growth_dt_means[day <=30 & car %in% left_group],
+tumor_alppl2 <- ggplot(growth_dt_means[day <=30 & car %in% left_group],
         aes(x=day, y=vol_lwl, color=car, linetype=car)) +
       geom_line() + 
       geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
@@ -123,7 +123,7 @@ tumor_a <- ggplot(growth_dt_means[day <=30 & car %in% left_group],
 
 in_vivo_tumor_growth <- plot_grid(
     NULL,
-    tumor_a,
+    tumor_alppl2,
     rel_heights=c(0.2, 0.5, 0.5),
     labels=c('F','G','H'), ncol=1, align='v',axis='tb')
 
