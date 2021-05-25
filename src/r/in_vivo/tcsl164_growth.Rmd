@@ -1,0 +1,146 @@
+---
+title: "tcsl164"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(data.table)
+library(scales)
+library(RColorBrewer)
+library(ggrepel)
+library(plyr)
+library(ggpubr)
+library(cowplot)
+library(plyr)
+
+output_dir <- file.path(here::here('..','figs'))
+
+data_dir <- here::here('..','data')
+
+data.output.dir <- file.path(here::here(
+  '..','..',
+  's3-roybal-tcsl',
+  'lenti_screen_compiled_data','data'))
+
+load(file=file.path(data.output.dir, 'incucyte_plot_data.Rdata'))
+
+# add 'd' in front of days
+incucyte_new_dt[, day_f := factor(day, levels=c(0,8,15,22,29), labels=paste0('d',c(0,8,15,22,29)))]
+incucyte_new_dt[, t_type := factor(t_type, labels=toupper(unique(t_type)))]
+
+car_set <- c('41BB-CD19','CD28-KO','41BB-ALPPL2','CD28-Lenti')
+chosen_measure <- 'redintensity'
+source(here::here('r','fig_colors.R'))
+```
+
+
+
+```{r}
+
+growth_dt <- fread("~/s3-roybal-tcsl/lenti_screen_compiled_data/data/invivo/tcsl164_growth_r.csv")
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt <- growth_dt[car != '']
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB-CD19','41BB-ALPPL2','CD28-KO','CD28-Lenti','NT','Unt'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+ggplot(growth_dt,
+  aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
+  geom_line() +
+  facet_wrap(~car)
+
+supp_invivo_burden <- ggplot(growth_dt[day < 45 & car != 'NT'],
+    aes(
+      x=day,
+      y=vol_lwl,
+      color=factor(car,levels=c(car_order,'Unt')),
+      group=interaction(car,cage,mouse))) +
+  geom_line() +
+  facet_wrap(~car) +
+  scale_color_manual(values=c(car_colors, 'Unt'='grey50')) +
+  theme_minimal() + theme(legend.position = 'NT') +
+  geom_vline(xintercept=-Inf) +
+  geom_hline(yintercept=-Inf)
+
+growth_dt_means <- growth_dt[, list(
+  vol_lww = mean(vol_lww, na.rm=T),
+  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
+  vol_lwl = mean(vol_lwl, na.rm=T),
+  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
+  vol_lwlw = mean(vol_lwlw, na.rm=T),
+  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
+  by=c('car','day')]
+
+all_cars <- ggplot(growth_dt_means[day <=45],
+  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+  geom_line(legend=F) + geom_point(show.legend=F) +
+  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='NT')*1) +
+  scale_color_manual("", values=c('Unt'='#666666', 'NT'='#666666', car_colors)) +
+  labs(color="g", linetype="g") + theme_minimal()
+
+left_group <- c('NT','Unt','41BB-CD19','41BB-ALPPL2')
+right_group <- c('NT','Unt','CD28-KO','CD28-Lenti')
+car_linetypes <- 1+(levels(growth_dt_means[,car])=='NT')*1
+names(car_linetypes) <- levels(growth_dt_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.spacing.y = unit(2, 'pt'),
+      legend.margin = margin(2, 3, 3, 3),
+      legend.key.height=unit(15,'pt'),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill=NA))
+
+
+tumor_a <- ggplot(growth_dt_means[day <=30 & car %in% left_group],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=car_linetypes) +
+      scale_color_manual("", values=c('Unt'='#666666', 'NT'='#666666', '41BB-CD19'='#6BAED6', '41BB-ALPPL2'='#01578a')) +
+      theme_minimal() + 
+      plot_theme + 
+      labs(y=bquote('Tumor Volume'~(mm^3)), x='')
+
+in_vivo_tumor_growth <- plot_grid(
+    NULL,
+    tumor_a,
+    rel_heights=c(0.2, 0.5, 0.5),
+    labels=c('F','G','H'), ncol=1, align='v',axis='tb')
+
+in_vivo_tumor_growth
+
+## STATS (after discussion with CSA, 5/12/21)
+
+# first car is baseline, others are compared to it
+cars_stats <- c('Untransduced', 'BAFF-R')
+
+summary(
+  lm(
+    data=growth_dt[car %in% cars_stats][, car :=factor(car, levels= cars_stats)],
+    formula=vol_lwl ~ day + car))
+
+
+
+
+
+```
