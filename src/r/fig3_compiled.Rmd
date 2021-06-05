@@ -38,7 +38,7 @@ rerun_deseq <- F
 reload_data <- F
 
 # arrayed list of CARs
-array.list <- c('BAFF-R','TNR8','4-1BB','TACI','CD28','KLRG1','CD40')
+array.list <- c('BAFF-R','CD30','4-1BB','TACI','CD28','KLRG1','CD40')
 
 # load colors
 source(here::here('r','fig_colors.R'))
@@ -104,8 +104,13 @@ censor_negative_min = -1500
 ## Fig 3 PCA
 
 ```{r}
+
+total_combined[CAR.align == 'TNR8', CAR.align := 'CD30']
+total_combined[CAR.align == 'HAVCR1b', CAR.align := 'TIM1']
+
 cast_metrics <- dcast(
-  total_combined, CAR.align ~ group + assay + k.type + t.type + comparison, 
+  total_combined[!((grepl('[ABCD]+\\.[ABCD]+',comparison) | grepl('rlog',comparison)) & assay == 'CTV3')],
+  CAR.align ~ group + assay + k.type + t.type + comparison, 
   value.var='value.scale')
 
 combined_pca <- prcomp(cast_metrics[,-1])
@@ -138,50 +143,141 @@ projected.metrics <- cbind.data.frame(CAR.align=cast_metrics[, CAR.align],
   projected.metrics)
 
 projected.metrics <- data.table(merge(projected.metrics, 
-  unique(read.counts[, .(CAR.align, len)]), 
+  unique(
+    copy(read.counts)[
+      CAR.align == 'TNR8', CAR.align := 'CD30'][
+      CAR.align == 'HAVCR1b', CAR.align := 'TIM1'][
+        , .(CAR.align, len)]), 
   by = "CAR.align"))
+
+pca_car_colors <- copy(car_colors)
+names(pca_car_colors) <- gsub('TNR8', 'CD30', names(pca_car_colors))
 
 projected.metrics[CAR.align == '4-1BB', CAR.align := '41BB']
 projected.metrics[, CAR.annot := 'none']
-projected.metrics[CAR.align %in% names(car_colors), CAR.annot := CAR.align]
+projected.metrics[CAR.align %in% names(pca_car_colors), CAR.annot := CAR.align]
 projected.metrics[, CAR.annot := factor(
-  CAR.annot, levels=c(names(car_colors)[1:7], 'none'))]
+  CAR.annot, levels=c(names(pca_car_colors)[1:7], 'none'))]
 
+types <- fread(text="
+  CAR.align,Activity,Family
+  CRTAM,Costimulatory,IgSF
+  CD28,Costimulatory,IgSF
+  ICOS,Costimulatory,IgSF
+  CXADR,Costimulatory,IgSF
+  CD244,Costimulatory,IgSF
+  CD7,Costimulatory,IgSF
+  NTB-A,Costimulatory,IgSF
+  CD200R,Costimulatory,IgSF
+  NKR-P1A,Costimulatory,IgSF
+  GITR,Costimulatory,TNFRSF Type 5
+  CD30,Costimulatory,TNFRSF Type 5
+  41BB,Costimulatory,TNFRSF Type 5
+  CD40,Costimulatory,TNFRSF Type L
+  CD96,Unknown,IgSF
+  CD300a,Unknown,CD300
+  CD300f,Unknown,CD300
+  CD2,Mixed,IgSF
+  TIM1,Mixed,TIM
+  NKG2D,Mixed,Lectin
+  CD72,Mixed,Lectin
+  DC-SIGN,Mixed,Lectin
+  Siglec-3,Mixed,Lectin
+  TACI,Mixed,TNFRSF Type S
+  BAFF-R,Mixed,TNFRSF Type S
+  BCMA,Mixed,TNFRSF Type S
+  LAG3,Inhibitory,IgSF
+  CRACC,Inhibitory,IgSF
+  TIGIT,Inhibitory,IgSF
+  BTLA,Inhibitory,IgSF
+  LAIR1,Inhibitory,IgSF
+  PD1,Inhibitory,IgSF
+  CTLA4,Inhibitory,IgSF
+  ILT2,Inhibitory,IgSF
+  ILT3,Inhibitory,IgSF
+  ILT4,Inhibitory,IgSF
+  KLRG1,Inhibitory,IgSF
+  KIR3DL1,Inhibitory,IgSF
+  KIR2DL1,Inhibitory,IgSF
+  HAVCR2,Inhibitory,TIM
+  TLT-1,Inhibitory,TREM")
+
+
+#pct explained
+pct_exp <- scales::label_percent()(pca.dt[pc %in% c(1,2), var.norm])
+```
+
+### PCA Plots
+
+```{r}
+# by name
 pca.pos.sort.group.plot <- ggplot(projected.metrics,
-    aes(x = PC1, y = PC2, label = CAR.align, 
-      size=(CAR.align %in% names(car_colors)), 
+    aes(x = -PC1, y = -PC2, label = CAR.align,
+      size=(CAR.align %in% names(pca_car_colors)),
       color=CAR.annot)) +
   geom_point() +
   geom_text_repel(data=projected.metrics[CAR.annot != 'none'],
     size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
   scale_size_discrete(guide=F) +
   scale_color_manual('',
-    labels=c(names(car_colors)[1:7], 'other costims'),
-    values=c(car_colors[1:7], 'grey')) +
-  labs(title = 'PCA Using CD19+ Sort Group Bins') +
+    labels=c(names(pca_car_colors)[1:7], 'other costims'),
+    values=c(pca_car_colors[1:7], 'grey')) +
+  labs(
+    x=paste0('PC1 (',pct_exp[1],')'),
+    y=paste0('PC2 (',pct_exp[2],')')) +
   theme_bw() +
-  labs(title='') +
-  theme(axis.text = element_blank())
+  theme(axis.text = element_blank(), panel.grid=element_blank())
 
-ggplot(projected.metrics[, CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
-    aes(x = PC1, y = PC2, label = CAR.label, 
-      size=(CAR.align %in% names(car_colors)), 
-      fill=len)) +
+# by size
+pca.pos.sort.size.plot <- ggplot(
+    projected.metrics[,
+      CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
+    aes(
+      x = -PC1, y = -PC2, label = CAR.label, 
+      size=(CAR.align %in% names(pca_car_colors)), 
+      fill=len/3)) +
   geom_point(pch=21, color='black') +
   scale_size_manual(guide=F, values=c(4,6)) +
   scale_fill_distiller(palette='RdYlBu') +
   geom_text_repel(data=projected.metrics,
     size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
-  labs(title = 'PCA Using CD19+ Sort Group Bins') +
+  labs(
+    x=paste0('PC1 (',pct_exp[1],')'),
+    y=paste0('PC2 (',pct_exp[2],')')) +
   theme_bw() +
-  labs(title='') +
-  theme(axis.text = element_blank())
+  theme(
+    axis.text = element_blank(),
+    panel.grid=element_blank(),
+    legend.key.width=unit(0.4, 'lines'))
 
+# by type
+pca_type_combined <- merge(types, projected.metrics, by='CAR.align', all=T)
 
-ggsave(here::here('..','figs','new_pca.pdf'), pca.pos.sort.group.plot,
-       height=4, width=5, useDingbats=FALSE)
-
-pca.pos.sort.group.plot
+pca.pos.sort.type.plot <- ggplot(pca_type_combined[,
+  CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
+    aes(x = -PC1, y = -PC2, label = CAR.label, shape=Activity, fill=Family,
+      size=(CAR.align %in% names(pca_car_colors)))) +
+  geom_point() +
+  scale_shape_manual(values=c(24,25,23,21)) +
+  scale_size_manual(guide=F, values=c(2,5)) +
+  guides(
+    fill = guide_legend(override.aes = list(shape = 21, size=5)),
+    shape = guide_legend(override.aes = list(size=5))) +
+  scale_fill_manual(values=c(
+    setNames(
+      brewer.pal(12,'Paired')[c(5,3,7,9,10)],
+      c('CD300','IgSF','Lectin','TIM','TREM')),
+    setNames(
+      brewer.pal(5,'Blues')[c(2,3,4)],
+      paste('TNFRSF Type',c('5','L','S'))
+    ))) +
+  geom_text_repel(data=pca_type_combined,
+    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+  labs(
+    x=paste0('PC1 (',pct_exp[1],')'),
+    y=paste0('PC2 (',pct_exp[2],')')) +
+  theme_bw() +
+  theme(axis.text = element_blank(), panel.grid=element_blank())
 
 #explain components
 # map component names back to variables
@@ -192,16 +288,82 @@ indiv_components <- data.table(matrix(unlist(strsplit(comp_names[,2], '\\|')), n
 names(indiv_components) <- c('group', 'assay', 'k.type', 't.type', 'comparison')
 indiv_components <- data.table(measure=comp_names[,1], indiv_components)
 
-component_rotations <- indiv_components[melt.data.table(data.table(combined_pca$rotation, keep.rownames=T), id.vars='rn'), on=c(measure='rn')]
+component_rotations <- indiv_components[
+  melt.data.table(data.table(combined_pca$rotation, keep.rownames=T), id.vars='rn'),
+  on=c(measure='rn')]
 
-ggplot(component_rotations[variable %in% c('PC1','PC2')][, list(diff_1v2= value[variable == 'PC1'] - value[variable == 'PC2']), by=.(assay, comparison, k.type, t.type)][, assay_group := assay][assay %in% c('CD69','IFNy','IL2'), assay_group := 'markers'][, list(value= sum(diff_1v2)), by=.(t.type, k.type, assay, assay_group)]) + geom_bar(aes(x=assay, y=value, fill=assay_group), color='grey50', stat='identity') + facet_grid(k.type + assay_group ~ t.type, scales='free', space='free') + geom_hline(yintercept=0) + coord_flip() + labs(x='Pooled Assay Scores, grouped', y='<- More PC2     More PC1 ->')
+indiv_component_plot <- ggplot(
+  component_rotations[
+    variable %in% c('PC1','PC2')][,
+      list(diff_1v2= value[variable == 'PC1'] - value[variable == 'PC2']),
+      by=.(assay, comparison, k.type, t.type)][, assay_group := assay][
+        assay %in% c('CD69','IFNy','IL2'), assay_group := 'markers'][,
+          list(value= sum(diff_1v2)), by=.(t.type, k.type, assay, assay_group)]) + 
+  geom_bar(aes(x=assay, y=value, fill=assay_group), color='grey50', stat='identity') +
+  facet_grid(k.type + assay_group ~ t.type, scales='free', space='free') +
+  geom_hline(yintercept=0) +
+  coord_flip() +
+  labs(x='Pooled Assay Scores, grouped', y='<- More PC2     More PC1 ->')
+
+plot_rotations <- component_rotations[variable %in% c('PC1','PC2')][,
+  `:=`(min_val= min(value), max_val=max(value)), by=.(k.type, assay, t.type, comparison)][,
+    measure_group := assay][
+      grep('baseline', comparison), measure_group := 'expansion'][
+        assay %in% c('CD69','IFNy','IL2'), measure_group := 'markers']
+
+ggplot(plot_rotations) +
+  geom_point(aes(x=interaction(assay,comparison), y=-value, color=variable)) +
+  geom_linerange(data=plot_rotations[variable=='PC1'], aes(x=interaction(assay,comparison),
+      ymin=-min_val, ymax=-max_val, color=ifelse(min_val == value, 'PC1','PC2'))) +
+  facet_grid(k.type + measure_group ~ t.type, scales='free', space='free') +
+  geom_hline(yintercept=0) + coord_flip()
+
+
+plot_summary <- copy(plot_rotations)[
+  measure_group == 'markers', measure_group := assay][
+  measure_group == 'expansion', measure_group := paste(assay, measure_group, sep='.')][,
+  list(val_mean=mean(-value)), by=.(measure_group, k.type, t.type, variable)]
+
+plot_summary[, measure_group := factor(
+  measure_group,
+  levels=c('IL2','IFNy','CD69','CTV3.expansion',
+           'CTV2.expansion','CTV1.expansion','CTV2','CTV1'),
+  labels=c('IL2','IFNy','CD69','Expansion:\nd0-d24','Expansion:\nd0-d16',
+           'Expansion:\nd0-d4','Proliferation:\nd9-d16','Proliferation:\nd0-d3/4'))]
+
+pca_factors <- ggplot(plot_summary[, k.type := factor(k.type, labels=c('CD19-','CD19+'))]) + 
+  geom_bar(
+    aes(x=measure_group, y=val_mean, fill=variable),
+    stat='identity', position=position_dodge(0.7), color='grey30', size=0.5, alpha=0.8, width=0.7) +
+  facet_grid(k.type~t.type, scales='free_y', space='free_y') +
+  geom_hline(yintercept=0, size=0.5, linetype=2) +
+  scale_y_continuous(breaks=c(-0.10, 0, 0.10)) +
+  coord_flip() +
+  labs(x='Measurement (mean DESeq2 LFC)',y="Principal Component\nContribution (rotation)") +
+  theme_minimal() +
+  theme(
+    panel.border=element_rect(color='black', fill=NA),
+    panel.grid=element_blank())
+
+ratio.values <- pca_type_combined[, (max(PC1)-min(PC1))/(max(PC2)-min(PC2))]
+
+
+supp_S2_1_pca <- (
+  (pca_factors + theme(legend.position='bottom') + labs(fill='')) | 
+  (
+    (pca.pos.sort.type.plot + coord_fixed(ratio.values)) /
+    (pca.pos.sort.size.plot + coord_fixed(ratio.values) + labs(fill='Domain Length (aa)')) +
+    plot_layout(guides='collect')
+  )
+) + plot_layout(widths=c(0.6,1))
+
 ```
 
 ## Fig 3 Abund over time
 
 ```{r, echo=FALSE}
 
-car.abund.order <- c('CD28','4-1BB','BAFF-R','TACI','CD40','TNR8','KLRG1')
+car.abund.order <- c('CD28','4-1BB','BAFF-R','TACI','CD40','CD30','KLRG1')
 
 car.abund.set <- read.counts[assay=='baseline' & batch=='prolif2',
           list(car.abund.baseline= car.abund, donor, CAR.align, t.type)]
@@ -307,8 +469,56 @@ proliferation_tiles <- ggplot(ctv_gated_means_donormerge_subset,
 
 proliferation_tiles
 ```
+
+### CTV cd19- tiles, supp
+
 ```{r}
-make_ridge_plot_panel <- function(df, var, show_line=F) {
+  
+ctv_gated_means_subset_supp <- ctv_gated_means_dt[variable=='ctv2_t' & k562 == 'cd19-']
+
+ctv_gated_means_donormerge_supp_dt <- ctv_gated_means_subset_supp[
+  # leave out donor 1 day 33 in cd8s?
+  #(donor %in% c(1,2) & day != 'd33') | ((donor == 2 & day == 'd33') | t_type == 'cd4'),
+  ,
+  `:=`(
+  value_rel_day_mean= mean(value_rel_day, na.rm=T),
+  value_rel_day_sd= sd(value_rel_day)),
+  by=c('k562','day','car','variable','t_type')]
+
+ctv_gated_means_donormerge_supp_subset <- ctv_gated_means_donormerge_supp_dt[
+  variable %in% c('ctv2_t') & k562 == 'cd19-']
+
+max_val <- ctv_gated_means_donormerge_supp_subset[, max(abs(value_rel_day_mean[car != 'KLRG1']), na.rm=T)]
+
+ctv_gated_means_donormerge_supp_subset[
+  abs(value_rel_day_mean) > max_val,
+  value_rel_day_mean := max_val * sign(value_rel_day_mean)]
+
+ctv_gated_means_donormerge_supp_subset[, t_type := factor(t_type, labels=c('CD4','CD8'))]
+
+proliferation_tiles_neg <- ggplot(ctv_gated_means_donormerge_supp_subset,
+    aes(fill=0-value_rel_day_mean, y=factor(car, levels=rev(car_order)), x=day)) + 
+  geom_tile(color='white') + 
+  facet_grid(. ~ t_type) + 
+  scale_fill_viridis_c(
+    'Relative Proliferation (-ΔMFI)\n(mean of 2 donors)',
+    limits = c(-1,1)*max_val, oob=scales::squish,
+    breaks=c(300, 150, 0, -150, -300),
+    labels=c(300,150,0,-150, '≤-300'),
+    na.value = '#FFFFFF') + 
+  theme_minimal(base_size=12) + 
+  theme(
+    panel.background=element_rect(fill="white", colour="white"),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.position = "bottom") +
+  scale_y_discrete('', expand=c(0,0)) + 
+  scale_x_discrete('', expand=c(0,0))
+
+proliferation_tiles_neg
+```
+
+```{r}
+make_ridge_plot_panel <- function(df, var, show_line=F, facet_formula=' ~ t_type + day') {
   
   df[, car := factor(car, levels=car_order)]
   
@@ -320,7 +530,7 @@ make_ridge_plot_panel <- function(df, var, show_line=F) {
   geom_density_ridges(
     aes(y=factor(car, levels=rev(car_order)), x=value, color=car, fill=car, height=..ndensity..), 
     alpha=0.7, scale=1) +
-  facet_grid( ~ t_type + day, switch="both") +
+  facet_grid(as.formula(facet_formula), switch="both") +
   xlim(c(600, NA)) +
   theme_minimal() +
   scale_fill_manual(values=rev(car_colors)) +
@@ -354,15 +564,93 @@ traces_horiz <- (
     guides(fill = guide_colorbar(title.position = "top", title.hjust = 0, barwidth=10))) /
   ctv_2_days) & theme(plot.margin=margin(0,0,0,-10,'pt'), panel.grid=element_blank())
 
+plots$ctv_supp <- (
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19+' & t_type == 'cd4' & donor == 1],
+    'ctv2_t', facet_formula='~ day') +
+      labs(title='CD4', x='', y= '') + 
+    theme(
+      legend.position='none',
+      axis.title.x = element_blank(),
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank()) | 
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19+' & t_type == 'cd4' & donor == 2],
+    'ctv2_t', facet_formula='~ day') +
+      labs(x='', y= '') + 
+    theme(
+      legend.position='none',
+      axis.title.x = element_blank(),
+      axis.text.y = element_blank(),
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank())
+) / (
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19+' & t_type == 'cd8' & donor == 1],
+    'ctv2_t', facet_formula='~ day') +
+      labs(title='CD8', x='CTV (AU) (Donor 1)', y= '') + 
+    theme(
+      legend.position='none',
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank()) | 
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19+' & t_type == 'cd8' & donor == 2],
+    'ctv2_t', facet_formula='~ day') +
+      labs(x='CTV (AU) (Donor 2)', y= '') + 
+    theme(
+      legend.position='none',
+      axis.text.y = element_blank(),
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank()))
+
+plots$ctv_cd19neg_supp <- (
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19-' & t_type == 'cd4' & donor == 1],
+    'ctv2_t', facet_formula='~ day') +
+      labs(title='CD4', x='', y= '') + 
+    theme(
+      legend.position='none',
+      axis.title.x = element_blank(),
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank()) | 
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19-' & t_type == 'cd4' & donor == 2],
+    'ctv2_t', facet_formula='~ day') +
+      labs(x='', y= '') + 
+    theme(
+      legend.position='none',
+      axis.title.x = element_blank(),
+      axis.text.y = element_blank(),
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank())
+) / (
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19-' & t_type == 'cd8' & donor == 1],
+    'ctv2_t', facet_formula='~ day') +
+      labs(title='CD8', x='CTV (AU) (Donor 1)', y= '') + 
+    theme(
+      legend.position='none',
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank()) | 
+  make_ridge_plot_panel(
+    ctv_fig_subset_dt[k562=='cd19-' & t_type == 'cd8' & donor == 2],
+    'ctv2_t', facet_formula='~ day') +
+      labs(x='CTV (AU) (Donor 2)', y= '') + 
+    theme(
+      legend.position='none',
+      axis.text.y = element_blank(),
+      panel.border=element_rect(color='black', fill=NA),
+      axis.text.x = element_blank()))
+
+
 ```
 
 ### CD4 CD40 Cumulative Growth
 ```{r}
 
 cd4_cumulative_growth <- fread(file.path(here::here('..', 'data', 'cd4_cumulative_growth.csv')))
-
-car_expansion <- melt(cd4_cumulative_growth, measure.vars=c('41BB','BAFF-R','CD28','CD40','KLRG1','TACI','TNR8','zeta'))
-names(car_expansion)
+setnames(cd4_cumulative_growth, 'TNR8','CD30')
+car_expansion <- melt(cd4_cumulative_growth, measure.vars=c('41BB','BAFF-R','CD28','CD40','KLRG1','TACI','CD30','zeta'))
 
 cd4_expansion_plot <- ggplot(car_expansion[
         measure=='expansion' & variable %in% c('CD40','CD28','41BB')], 
@@ -374,6 +662,7 @@ cd4_expansion_plot <- ggplot(car_expansion[
   theme_bw() + labs(x='Days in culture', y='Cumulative Fold Expansion', title='Cumulative CD4 T cell Expansion in culture')
 
 ```
+## Exhaustion Plots
 
 ### PD1
 ```{r}
@@ -426,11 +715,10 @@ pd1_line_plot_v2 <- ggplot(
         panel.grid.minor = element_blank(),
         strip.background = element_blank())
 
-pd1_line_plot
+#pd1_line_plot
 
-pd1_line_plot_v2
+#pd1_line_plot_v2
 ```
-
 ### Stacked Exhaustion Bars
 
 ```{r}
@@ -522,6 +810,154 @@ plots$exh_stacked_bars
 
 ```
 
+### Exhaustion Summary (supp)
+
+```{r}
+
+get_marker_counts <- function(exh_dt, exh_vars=c('tim3_t','lag3_t', 'pd1_t','cd39_t')) {
+  marker_ct <- exh_dt[!outlier_well & variable %in% exh_vars,
+    list(n_pos_marker= sum(gt_thresh)),
+    by=c('well','plate','day','Time','car','donor','k562','t_type')]
+  
+  marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
+  
+  marker_ct <- map_day_0(marker_ct)
+  
+  marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:length(exh_vars)))), 
+    by=c('well','plate','day','car','donor','k562','t_type')]
+  names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
+  
+  marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
+    by=c('well','plate','day','car','donor','k562','t_type')]
+  
+  return(marker_freq)
+}
+
+if (!exists('supp_day_dt'))
+  supp_day_dt <- get_marker_counts(
+    exh_dt,
+    exh_vars=c('tim3_t','lag3_t', 'pd1_t'))[
+      day %in% c(0,6,15,24,33) &
+      k562 == 'cd19+']
+
+stacked_exh_plot <- function(day_dt_subset) {
+  
+  day_dt_subset <- day_dt_subset[, 
+      c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
+      by=c('n_pos_marker','t_type','donor','day','k562','car')][,
+        t_type := toupper(t_type)]
+  
+  day_dt_subset[, car := factor(car)]
+  day_dt_subset[, pct := as.numeric(pct)]
+  
+  ggplot(unique(day_dt_subset[, list(car, mean_pct, n_pos_marker, day, t_type, donor)])) +
+    geom_bar(aes(x=factor(day, levels=rev(levels(factor(day)))), y=mean_pct, fill=n_pos_marker),
+      stat='identity', width=1, color='black', size=0.2) +
+    facet_grid(car ~ donor, scales='free') +
+    scale_y_continuous(expand=c(0,0), labels=label_percent()) +
+    scale_x_discrete(expand=c(0,0), limits=rev) +
+    scale_fill_manual(
+      'Exh. Markers per cell', values=brewer.pal(9,'RdPu')[c(1,2,5,7,9)]) +
+    labs(x="Days in Culture", y='Fraction of Cells') +
+    theme_minimal() +
+    theme(
+      panel.grid=element_blank(),
+      panel.border=element_rect(color='black', size=0.2, fill=NA))
+
+}
+
+plots$supp_exh_stacked_bars <- ((
+  stacked_exh_plot(supp_day_dt[t_type == 'cd4' & day %in% c(0,6,15,24,33)][,
+      donor := factor(paste0('Donor ',donor))]) +
+    labs(subtitle='CD4', tag='B') +
+    theme(
+      panel.background = element_rect(fill='grey70'),
+      legend.position='bottom',
+      axis.text.y=element_blank(),
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title=element_blank())
+  ) / (
+  stacked_exh_plot(supp_day_dt[t_type == 'cd8' & day %in% c(0,6,15,24,33)][,
+      donor := factor(paste0('Donor ',donor))]) +
+    labs(subtitle='CD8', x='Day') +
+    theme(
+      panel.background = element_rect(fill='grey70'),
+      legend.position='bottom',
+      axis.text.y=element_blank(),
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title.y=element_blank())
+  ) & theme(legend.position='bottom')) + 
+  plot_layout(guides='collect')
+
+indiv_marker_means_supp <- map_day_0(exh_dt)[(
+    variable %in% c('tim3_t','lag3_t', 'pd1_t') &
+    outlier_well==F &
+    k562 == 'cd19+'
+  ),
+  list(
+    mean_val=mean(value),
+    sem_val=sqrt(var(value)/.N)),
+  by=.(donor, k562, day, t_type, car, variable)]
+
+indiv_marker_means_supp[, variable := factor(variable)]
+indiv_marker_means_supp[, variable := factor(variable,
+  labels=toupper(gsub('_t','',levels(variable))))]
+
+plot_indiv_marker_t_type <- function(indiv_marker_mean_subset) {
+  ggplot(indiv_marker_mean_subset, 
+       aes(x=day, color=car, y=mean_val)) + 
+  geom_line() +
+  geom_linerange(
+    aes(
+      ymin=mean_val-sem_val/2,
+      ymax=mean_val+sem_val/2,
+      group=interaction(car, day, variable, donor))) +
+  geom_point() +
+  scale_color_manual(values=c(car_colors, untrans='grey50')) +
+  facet_grid(variable ~ donor, scale='free_y') +
+  theme_minimal() +
+  theme(
+    panel.border = element_rect(fill=NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position='bottom',
+    strip.background = element_blank())
+}
+
+plots$supp_marker_means <- ((
+  plot_indiv_marker_t_type(indiv_marker_means_supp[t_type == 'cd4'][, 
+      donor := factor(paste0('Donor ',donor))][,
+      variable := factor(variable, labels=levels(variable))]) +
+    labs(subtitle='CD4', tag='A') +
+    theme(
+      legend.position='none',
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title=element_blank())
+  ) / (
+  plot_indiv_marker_t_type(indiv_marker_means_supp[t_type == 'cd8' & !is.na(donor)][, 
+      donor := factor(paste0('Donor ',donor))]) +
+    labs(subtitle='CD8', x='Day') +
+    theme(
+      legend.position='bottom',
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title.y=element_blank())
+  ) & theme(legend.position='bottom') & guides(color=guide_legend(title='', nrow=2))) + 
+  plot_layout(guides='collect')
+
+supp_S2_2 <- (
+  plots$supp_marker_means &
+    theme(legend.position = 'bottom')) | 
+  (plots$supp_exh_stacked_bars &
+    guides(fill=guide_legend(name='CAR',
+      direction = "horizontal",
+      title.position = "top",
+      label.position = "bottom",
+      keywidth=unit(1, 'lines'),
+      keyheight=unit(1, 'lines'))) &
+    theme(legend.position = 'bottom'))
+```
+## Diff Plots
+
 ### Load Differentiation Data 
 
 ```{r}
@@ -589,18 +1025,17 @@ plots$cd27_lines_expanded <- ggplot(
                 (donor == 2 | (donor == 1 & day < 33))][, donor := paste('Donor',donor)], 
     aes(x=day, y=val_mean/1000, 
         ymin=(val_mean-val_sd)/1000, 
-        ymax=(val_mean+val_sd)/1000, color=car, group=car, linetype=car)) + 
+        ymax=(val_mean+val_sd)/1000, color=car, group=car)) + 
     geom_point() + 
     geom_line() + 
     geom_linerange() +
     facet_grid(t_type ~ donor, scale='free') + 
     scale_color_manual(
-        values=c(car_colors,grey)) +
+        values=c(car_colors,'grey50')) +
     scale_linetype_manual(
         values=c(1,1,1,1,1,1,1,3,1)) +
-    theme_minimal(base_size=9) + 
-    geom_vline(xintercept=-Inf) + 
-    geom_hline(yintercept=-Inf) +
+    theme_minimal() +
+    theme(panel.border=element_rect(fill=NA), panel.grid=element_blank()) +
     labs(y='CD27 log MFI (AU)', x='Days in culture')
 ```
 
@@ -701,13 +1136,260 @@ plots$cd27_lines_expanded
 plots$cd27_ridges
 ```
 
-### Compile
+### Diff Markers Supp 
+
+```{r}
+
+fcs_flags <- dcast(
+  diff_dt[!is.na(gt_thresh) & outlier_well==F],
+  donor + k562 + day + t_type + car + well + plate + outlier_well + event_id + col + row ~ variable, 
+  value.var='gt_thresh')[
+    !is.na(donor) & !is.na(day)]
+
+names(fcs_flags) <- gsub('(.*)_t','\\1',names(fcs_flags))
+
+fcs_flags[,
+  `:=`(
+    cd62_cd45ro_diff= factor(
+      cd45ro + 2*cd62l),
+    cd62_cd45ra_diff= factor(
+      cd62l + 2*cd45ra),
+    cd45ra_ccr7_diff= factor(
+      cd45ra + 2*ccr7),
+    cd45ro_ccr7_diff= factor(
+      cd45ro + 2*ccr7),
+    cd45ro_cd27_diff= factor(
+      cd45ro + 2*cd27),
+    cd62_cd27_diff= factor(
+      cd62l + 2*cd27)
+  )]
+
+
+levels(fcs_flags$cd62_cd45ra_diff) <- c('TEM','TCM','TEMRA','Naive')
+levels(fcs_flags$cd62_cd45ro_diff) <- c('TEMRA','TEM','Naive','TCM')
+levels(fcs_flags$cd45ra_ccr7_diff) <- c('TEM','TEMRA','TCM','Naive')
+levels(fcs_flags$cd45ro_ccr7_diff) <- c('TEMRA','TEM','Naive','TCM')
+levels(fcs_flags$cd45ro_cd27_diff) <- c(
+  'CD45RO-/CD27-','CD45RO+/CD27-','CD45RO-/CD27+','CD45RO+/CD27+')
+levels(fcs_flags$cd62_cd27_diff) <- c(
+  'CD62L-/CD27-','CD62L+/CD27-','CD62L-/CD27+','CD62L+/CD27+')
+
+diff_marker_dt <- melt.data.table(
+    fcs_flags,
+    measure.vars= c(
+        'cd62_cd45ra_diff', 'cd62_cd45ro_diff', 
+        'cd45ro_ccr7_diff', 'cd45ra_ccr7_diff',
+        'cd45ro_cd27_diff', 'cd62_cd27_diff',
+        'cd62l', 'cd27', 'ccr7', 'cd45ro', 'cd45ra', 'cd95'))
+
+make_diff_percent_dt <- function(dt, diff_set) {
+  
+  subset_dt <- map_day_0(
+    dcast(dt[variable == diff_set],
+    ... ~ variable, value.var='value'))
+  subset_dt[, c(diff_set) := factor(get(diff_set))]
+  
+  subset_dt <- subset_dt[, 
+    reshape2::melt(table(get(diff_set))),
+    by=c('car', 'donor', 'day', 'k562', 'well', 'plate', 'type')][,
+      frac := value/sum(value),
+      by=c('car', 'donor', 'day', 'k562', 'well', 'plate', 'type')]
+  names(subset_dt) <- gsub('V1', 'value', names(subset_dt))
+  names(subset_dt) <- gsub('Var1', 'diff', names(subset_dt))
+  
+  diff_mean_dt <- subset_dt[!is.na(donor), list(
+      val_mean= mean(frac), 
+      val_sd= sd(frac)), 
+      by=c('car','k562','donor','day','diff','type')]
+
+  return(diff_mean_dt)
+}
+
+cd62_cd45ra_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd45ra_diff')
+cd62_cd45ro_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd45ro_diff')
+cd45ra_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ra_ccr7_diff')
+cd45ro_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_ccr7_diff')
+cd45ro_cd27_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_cd27_diff')
+cd27_dt <- make_diff_percent_dt(diff_marker_dt, 'cd27')
+cd95_dt <- make_diff_percent_dt(diff_marker_dt, 'cd95')
+
+
+plot_by_day <- function(diff_mean_dt, title, formula_txt='car~k562+donor+type') {
+  return(
+    ggplot(diff_mean_dt[, car := factor(car, levels=c(car_order, 'untrans'))][,
+        donor := factor(paste0('Donor ',donor))]) + 
+      geom_bar(aes(x=as.factor(day), y=val_mean, fill=diff),
+        stat='identity', position='stack', width=1, color='black', size=0.2) +
+      scale_fill_manual(values=hcl.colors(4,'Temps')) +
+      facet_grid(as.formula(formula_txt)) + 
+      scale_y_continuous(expand=c(0,0), labels=label_percent()) +
+      scale_x_discrete(expand=c(0,0)) +
+      theme_minimal() +
+      theme(
+        panel.grid=element_blank(),
+        panel.border=element_rect(color='black', size=0.2, fill=NA)) +
+      labs(x='Day', y='% Subset', title=title))
+}
+
+all_diff_plots <- (
+  plot_by_day(
+    cd62_cd45ra_diff_dt[k562=='cd19+'], 'CD62L vs CD45RA differentiation') |
+  plot_by_day(
+    cd62_cd45ro_diff_dt[k562=='cd19+'], 'CD62L vs CD45RO differentiation') |
+  plot_by_day(
+    cd45ra_ccr7_diff_dt[k562=='cd19+'], 'CD45RA vs CCR7 differentiation') |
+  plot_by_day(
+    cd45ro_ccr7_diff_dt[k562=='cd19+'], 'CD45RO vs CCR7 differentiation'))
+
+plots$diff_supp <- (
+  (plot_by_day(
+    cd62_cd45ra_diff_dt[k562=='cd19+' & type == 'cd4' &
+      !(car == 'untrans' & day == 33 & donor == 2)],
+      'CD62L vs CD45RA differentiation', formula_txt='car~donor') +
+    labs(subtitle='CD4') +
+    theme(
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      panel.background = element_rect(fill='grey70'),
+      legend.position='none',
+      axis.text.x=element_blank(),
+      plot.title=element_blank(),
+      axis.text.y=element_blank())) /
+  (plot_by_day(
+    cd62_cd45ra_diff_dt[k562=='cd19+' & type == 'cd8'],
+      'CD62L vs CD45RA differentiation', formula_txt='car~donor') +
+    labs(subtitle='CD8') +
+    guides(fill=guide_legend(title='',
+      direction = "horizontal",
+      title.position = "top",
+      label.position = "bottom",
+      keywidth=unit(1, 'lines'),
+      keyheight=unit(1, 'lines')))) +
+    theme(
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      panel.background = element_rect(fill='grey70'),
+      plot.title=element_blank(),
+      legend.position='bottom',
+      axis.text.y=element_blank())
+)
+
+```
+
+## CAR Expression Differences (supp)
+
+```{r}
+map_day_0_diff <- function(df) {
+  return(rbind(
+    df[k562!='none'],
+    df[k562=='none'],
+    df[k562=='none' & day == 0][, k562 := 'cd19+'],
+    df[k562=='none' & day == 0][, k562 := 'cd19-']
+  ))
+}
+
+diff_cast_dt <- dcast(diff_dt[!is.na(value)],
+  t_type + donor + k562 + day + car + well + plate + event_id + col + row ~ variable,
+  value.var='value')
+
+mfi_myc_summ <- melt(diff_cast_dt[!is.na(car) & car != 'untrans', list(
+  myc_to_gfp=mean(myc_t/gfp_t),
+  gfp=mean(gfp_t),
+  myc=mean(myc_t)),
+  by=c('car','donor','day','k562','t_type')], id.vars=c('car','donor','day','k562','t_type'))[,
+    value_norm := value/mean(value), by=c('variable')]
+
+myc_average_exp <- map_day_0_diff(mfi_myc_summ)[,
+  list(car, value_norm_day= value/mean(value)), 
+  by=c('variable','day','donor','k562','t_type')][,
+    list(car, value_avg= value_norm_day/mean(value_norm_day)),
+  by=c('variable','k562','t_type')][,
+    car := factor(car, levels=car_order)][variable == 'myc']
+
+
+supp_S3_2_gfp_myc <- ggplot(myc_average_exp[,
+    k562 := factor(
+      k562,
+      levels=levels(factor(k562)),
+      labels=c('CD19+ K562s','CD19- K562s','No K562s'))
+    ][car == 'TNR8', car := 'CD30'][,
+    car := factor(car, levels=gsub('TNR8','CD30',car_order))],
+    aes(
+      x=car, fill=car, y=value_avg, color=car, group=(interaction(car,k562)))) + 
+  geom_boxplot(alpha=0.8) +
+  scale_y_continuous() +
+  scale_color_manual('', values=pca_car_colors) +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  scale_fill_manual('', values=pca_car_colors) +
+  facet_grid( ~  k562, scale='free') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(fill=NA, color='grey30'),
+    legend.position='none',
+    strip.background = element_blank()) +
+  labs(y='CAR : GFP Ratio\n(relative to mean)',
+       x='CAR', title='') +
+  geom_hline(yintercept=1, linetype=3, color='grey50')
+
+```
+
+### Metab Placeholder Plot
+
+```{r}
+
+metab_dt <- fread(text="
+  t_type,41BB,BAFF-R,CD28,TACI,zeta
+  CD4,0.48398212,1.00948129,-0.365573,-0.5706298,-1.9264523
+  CD8,0.37320327,0.92599065,0.06335877,-1.8369371,-0.5431782")
+
+metab_dt <- melt(metab_dt, id.var='t_type', variable.name = 'car', value.name='zscore')
+
+metab_dt[, car.ordered := reorder(interaction(car,t_type), -zscore)]
+
+
+metab_horiz <- ggplot(metab_dt) +
+  geom_bar(aes(
+    x=car.ordered,
+    y=zscore,
+    fill=car), stat='identity') +
+  facet_grid(~t_type, scales='free') +
+  scale_fill_manual(values=car_colors) + 
+  scale_x_discrete(labels=function (x) gsub('\\.CD\\d','',x)) +
+  theme_minimal() +
+  theme(
+    axis.text.x=element_text(angle = 90, hjust = 1, vjust=0.5),
+    panel.border=element_rect(color='black', fill=NA),
+    panel.grid=element_blank(),
+    legend.position='none') +
+  labs(x='',y='Mitochondrial Metabolic Dependence (Z-score)')
+
+metab_vert <- ggplot(metab_dt) +
+  geom_bar(aes(
+    x=factor(car, levels=c('BAFF-R','41BB','CD28','TACI','zeta')),
+    y=zscore, fill=car, color=car), stat='identity', alpha=0.8) +
+  facet_grid(t_type~., scales='free') +
+  scale_fill_manual(values=car_colors) +
+  scale_color_manual(values=car_colors) + 
+  scale_x_discrete(labels=function (x) gsub('\\.CD\\d','',x)) +
+  theme_minimal() +
+  geom_hline(yintercept=0, linetype=2) +
+  theme(
+    axis.text.x=element_text(angle = 90, hjust = 1, vjust=0.5),
+    panel.border=element_rect(color='black', fill=NA),
+    panel.grid=element_blank(),
+    legend.position='none') +
+  labs(x='',y='Mitochondrial Metabolic\nDependence(Z-score)')
+
+metab_vert
+```
+
+## Compile
 
 ```{r}
 
 fig3_compiled <- plot_grid(
   plot_grid(
-    pca.pos.sort.group.plot +
+    pca.pos.sort.group.plot + coord_fixed(ratio=2.1) +
       theme(
         legend.position='none',
         panel.grid=element_blank()),
@@ -761,3 +1443,27 @@ fig3_compiled <- plot_grid(
 ggsave(here::here('..','figs','compiled','fig3.pdf'), fig3_compiled, height=12, width=10, useDingbats=FALSE)
 ```
 
+### Compile Supp
+
+```{r}
+
+figS2_compiled <- plot_grid(
+  plot_grid(
+    supp_S2_1_pca,
+    (
+      plots$ctv_supp /
+      ((supp_S3_2_gfp_myc | metab_vert) + plot_layout(widths=c(2,1)))
+    ) + plot_layout(heights=c(1,1,1)),
+    rel_heights=c(0.8,1), ncol=1),
+  plot_grid(
+    (supp_S2_2 | plots$diff_supp) + plot_layout(widths=c(1,1,1)),
+    NULL,
+    plots$cd27_lines_expanded + theme(legend.position='none'),
+    ncol=1, rel_heights=c(3,0.1,0.9)),
+  ncol=2, rel_widths=c(1.15,1)
+)
+
+fig_scaling <- 1.75
+ggsave(here::here('..','figs','compiled','figS2.pdf'), figS2_compiled,
+       height=9.25*fig_scaling, width=8.5*fig_scaling, useDingbats=FALSE)
+```

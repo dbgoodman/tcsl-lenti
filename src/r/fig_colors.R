@@ -51,7 +51,8 @@ show_colors <- function(car_colors, car_order) {
 # --------------------------------------------------------------------------------------------------
 all_colors <- list(
     'NAIVE-CD62L'=colors_mid[1],
-    'NAIVE-CD7'=colors_mid[2],
+    #'NAIVE-CD7'=colors_mid[2],
+    'NAIVE-CD7'='#A084AF',
     'STAT1-IRF1'=colors_mid[4],
     'STIM-INACT'=colors_mid[4],
     'STIM-TC2'=colors_dark[10],

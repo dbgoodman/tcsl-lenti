@@ -278,12 +278,37 @@ plots$activation <- ggplot(
     legend.key.width=unit(0.4, 'lines'),
     legend.key.height=unit(0.8, 'lines'))
 
+#activation v2
+plots$activation2 <- ggplot(
+    umap_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, 
+      color=factor(k_type, levels=c('baseline','cd19+','bead_stim'), labels=c('Unstim','CD19 Stim', 'Untr\n+CD3/CD28 Beads')))) +
+  rasterise(geom_point(
+    data=copy(umap_dt)[, 'donor' := NULL],
+    size=inset_umap_point_size*0.01, color='grey90'), dpi=500) +
+  rasterise(geom_point(size=inset_umap_point_size*0.01, alpha=0.2), dpi=500) + 
+  scale_color_manual('Stimulation',
+    values=c(
+      brewer.pal(11,'PuOr')[c(9,3)],
+      brewer.pal(11,'PiYG')[c(9)]),
+      ) +
+  coord_fixed() +
+  theme_minimal() + 
+  guides(color = guide_legend(
+    override.aes = list(size = 5, alpha=1))) +
+  theme(
+    strip.text=element_blank(),
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    legend.justification = c(0,1),
+    panel.grid=element_blank())
+
 combined_inset_umap <- plot_grid(
   plots$per_phase,
   NULL,
   plots$per_donor,
   NULL,
-  plots$activation,
+  plots$activation2,
   ncol=1,
   rel_heights=c(1,-0.1,1,-0.1,1))
 
@@ -331,12 +356,12 @@ plots$per_car_umap <- ggplot(sampled_umap, aes(x=wnnUMAP_1, y=wnnUMAP_2, color=
       labels=cluster_name_dt[comb_order, on='Subtype']$subtype_lbl))) +
   rasterise(geom_point(
     data=copy(car_umap_grid_dt)[, c('car','k_type') := list(NULL,NULL)],
-    size=0.1, color='grey90'), dpi=500) + 
-  rasterise(geom_point(size=0.05), dpi=500) +
+    size=0.1, color='grey90'), dpi=200) + 
+  rasterise(geom_point(size=0.05, alpha=0.1), dpi=200) +
   coord_fixed() +
   scale_color_manual('Cluster', values= cluster_name_dt[, setNames(color, subtype_lbl)]) +
   facet_grid(k_type~car, switch = "y") +
-  guides(color = guide_legend(override.aes = list(size = 5))) +
+  guides(color = guide_legend(override.aes = list(size = 5, alpha=1), nrow=1)) +
   theme_minimal() + 
   theme(
     legend.position="bottom",
@@ -453,9 +478,15 @@ get_sig_data <- function(subtype_dt, col_name) {
   return(sig_data)
 }
 
-make_minidot_plot <- function(umap_data, module_name) {
+make_minidot_plot <- function(umap_data, module_name, rescale_t_types=F, reorder_x=F) {
   
-  umap_means <- umap_data[, score := get(module_name)][, 
+  if (rescale_t_types) {
+    umap_data <- umap_data[, score := scale(get(module_name)), by=c('t_type')]
+  } else {
+    umap_data <- umap_data[, score := scale(get(module_name))]
+  }
+  
+  umap_means <- umap_data[, 
     list(Subtype=Subtype[1], t_type=t_type[1], score=mean(score), stdev=std(score)), 
       by=c('t_subtype','donor')]
   
@@ -466,9 +497,14 @@ make_minidot_plot <- function(umap_data, module_name) {
   umap_means[padj < 0.001, sig_lbl := '**']
   umap_means[padj < 0.0001, sig_lbl := '***']
   
+  if (reorder_x) {
+    type_ranks <- umap_means[, list(mean(-score)), by='t_subtype'][, t_subtype[order(V1)]]
+    umap_means[, t_subtype := factor(t_subtype, levels=type_ranks)]
+  }
+  
   plot <- ggplot(umap_means, aes(
       x=t_subtype, y=score, fill=Subtype, 
-      color=Subtype, group=interaction(donor,Subtype))) +
+      color=Subtype, group=interaction(donor,t_subtype))) +
     geom_linerange(
       aes(ymin=lwr, ymax=upr), size=0.5,
       color='grey30',
@@ -493,7 +529,6 @@ make_minidot_plot <- function(umap_data, module_name) {
       legend.position = 'none',
       axis.title.y = element_blank(),
       axis.text.x = element_blank(),
-      axis.text.y = element_blank(),
       panel.background=element_rect(fill=NA, color=NA),
       panel.border=element_rect(fill=NA, color=NA),
       strip.text = element_text(vjust = -1.0), 
@@ -503,10 +538,16 @@ make_minidot_plot <- function(umap_data, module_name) {
   return(plot)
 }
 
-make_minidot_plot_car <- function(umap_data, module_name, run_test=F) {
+make_minidot_plot_car <- function(umap_data, module_name, run_test=F, rescale_t_types=F, reorder_x=F) {
+  
+  if (rescale_t_types) {
+    umap_data <- umap_data[, score := scale(get(module_name)), by=c('t_type')]
+  } else {
+    umap_data <- umap_data[, score := scale(get(module_name))]
+  }
   
   # plot means
-  umap_means <- umap_data[, score := get(module_name)][, 
+  umap_means <- umap_data[, 
     list(score=mean(score), stdev=std(score)), 
       by=c('t_type','donor','car')]
   
@@ -514,8 +555,15 @@ make_minidot_plot_car <- function(umap_data, module_name, run_test=F) {
   sig_data <- umap_data[, get_sig_data(.SD,'car'), by=c('donor','t_type')]
   umap_means <- merge(umap_means, sig_data, on=c('t_type','donor','car'))
   
+  umap_means <- umap_means[, t_car := interaction(t_type, car)]
+  
+  if (reorder_x) {
+    car_ranks <- umap_means[, list(mean(-score)), by=c('t_car')][, t_car[order(V1)]]
+    umap_means[, t_car := factor(t_car, levels=car_ranks)]
+  }
+  
   plot <- ggplot(umap_means, aes(
-      x=car, y=score, fill=car, 
+      x=t_car, y=score, fill=car, 
       color=car, group=interaction(donor,car))) +
     geom_linerange(
       aes(ymin=lwr, ymax=upr), size=0.5,
@@ -536,7 +584,6 @@ make_minidot_plot_car <- function(umap_data, module_name, run_test=F) {
       axis.title.y = element_blank(),
       axis.title.x = element_blank(),
       axis.text.x = element_blank(),
-      axis.text.y = element_blank(),
       panel.background=element_rect(fill=NA, color=NA),
       panel.border=element_rect(fill=NA, color=NA),
       strip.text = element_text(vjust = -1.0), 
@@ -573,7 +620,8 @@ plots$combined_paper_umap
 # CAR/Cluster Dotplots
 
 ```{r}
-car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
+car_pct_dotplot <- function(
+    car_metadata, subtype_order, max_size=15, flip=T, legend.pos='right', car_text_relsize=1.2) {
   
   car_clust_pct_act <- data.table(car_metadata)[, .N, 
     by=c('car','Subtype')][, 
@@ -616,7 +664,10 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
         y=factor(Subtype,
           levels=cluster_name_dt[rev(subtype_order), on='Subtype']$Subtype,
           labels=cluster_name_dt[rev(subtype_order), on='Subtype']$subtype_lbl),
-        fill=Subtype, x='a'), width=0.9, height=0.9) + 
+        fill=factor(Subtype,
+          levels=cluster_name_dt[rev(subtype_order), on='Subtype']$Subtype,
+          labels=cluster_name_dt[rev(subtype_order), on='Subtype']$subtype_lbl),
+        x='a'), width=0.9, height=0.9) + 
       #geom_hline(color='white', yintercept=0.5+c(1:n_lines-1), size=2) +
       scale_x_discrete(expand=c(0,0)) + 
       scale_y_discrete(expand=c(0,0)) +
@@ -634,7 +685,12 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
   
     pct_dotplot_combined <- cluster_idents + theme(plot.margin=unit(c(5.5,5.5,5.5,-5.5), "points")) | 
       (pct_dotplot + theme(
+        legend.position=legend.pos,
         axis.text.y=element_blank(),
+        axis.text.x=
+          element_text(color=car_colors_umap[names(car_colors_umap) != 'CD30'],
+          face='bold',
+          size=rel(car_text_relsize)),
         strip.text.x=element_blank(),
         axis.title.y=element_blank(),
         plot.margin = unit(c(5.5, -5.5, 5.5, 5.5), "points")))
@@ -667,13 +723,14 @@ car_pct_dotplot <- function(car_metadata, subtype_order, max_size=15, flip=T) {
     
     pct_dotplot_combined <- (
       pct_dotplot + theme(
+        legend.position=legend.pos,
         axis.text.x=element_blank(),
         strip.text.x=element_blank(),
         # color CAR names
         axis.text.y=
           element_text(color=car_colors_umap[names(car_colors_umap) != 'CD30'],
-        face='bold',
-        size=rel(1.2)),
+            face='bold',
+            size=rel(car_text_relsize)),
         axis.title.y=element_blank(),
         plot.margin = unit(c(5.5, 5.5, -5.5, 5.5), "points"))) /
       cluster_idents + theme(plot.margin=unit(c(-5.5,5.5,5.5,5.5), "points"))
@@ -728,6 +785,25 @@ plots$car_dotplot_unstim <- (
       theme(plot.title.position="plot")
   ) + 
   plot_layout(guides='collect', heights=c(4,3)) & 
+  theme(plot.margin=unit(c(0,0,0,0),'points'))
+
+plots$car_dotplot_unstim_vert <- (
+  ((car_pct_dotplot(
+      data.table(scrna_cd4_all@meta.data)[
+        k_type == 'baseline' & !is.na(Subtype) & car != 'K_only' & !grepl('STIM',Subtype) &
+        car != 'CD30' & Subtype != 'REMOVE' &
+        Subtype != 'NA'], cd4_order, max_size=9, legend.pos='none', car_text_relsize=0.9) +
+      ggtitle('CD4 Baseline') + 
+      theme(legend.position='none')) |
+     (car_pct_dotplot(
+      data.table(scrna_cd8_all@meta.data)[
+        k_type == 'baseline' & !is.na(Subtype) & car != 'K_only' & !grepl('STIM',Subtype) &
+        car != 'CD30' & Subtype != 'REMOVE' &
+        Subtype != 'NA'], cd8_order, max_size=9, legend.pos='none', car_text_relsize=0.9) +
+      ggtitle('CD8 Baseline'))) & 
+      theme(plot.title.position="plot")
+  ) + 
+  plot_layout(widths=c(1,10,10)) & 
   theme(plot.margin=unit(c(0,0,0,0),'points'))
 
 plots$car_dotplot_all <- (
@@ -920,7 +996,8 @@ plots$matched_clusters <- ggplot(diff_gene_n,
   geom_tile(aes(
     fill=N/top_n)) + 
   geom_tile(aes(
-    color=(subtype_1 == subtype_2 & subtype_1 != 'STIM-UNTR')), fill=NA, size=0.5) + 
+    color=(as.character(subtype_1) == as.character(subtype_2) &
+      subtype_1 != 'Baseline')), fill=NA, size=0.5) + 
   scale_fill_gradientn(
     '% overlap of\ntop 100\nDE genes',
     colors=c('white',brewer.pal(9,'Greens')),  label=label_percent()) + 
@@ -1372,7 +1449,7 @@ make_gene_heatmap_horiz <- function(
 }
 ```
 
-### Assemble individial components of gene heatmaps
+### Assemble individual components of gene heatmaps
 
 ```{r}
 
@@ -1837,7 +1914,7 @@ DefaultAssay(scrna_all) <- 'SCT_ADT_INT'
 citeseq_data <- data.table(
   FetchData(
     scrna_all,
-    paste0(umap_proteins,'.adt'),
+    names(umap_protein_ranges),
     slot='data'),
   keep.rownames=T)
 DefaultAssay(scrna_all) <- prev_assay
@@ -1873,7 +1950,66 @@ plots$citeseq_umaps <- ggplot(csu_melt,
     panel.grid=element_blank())
 ```
 
-## PATHWAYS
+### RNA Umap plots (supp)
+
+```{r}
+umap_rna_ranges <- list(
+  'IFNG'=c(0,6),
+  'KLRB1'=c(0,10),
+  'GZMB'=c(0,15),
+  'HLA-DRA'=c(0,7),
+  'ITGB1'=c(0,5),
+  'EOMES'=c(0,4),
+  'S100A4'=c(0,5),
+  'PRF1'=c(0,3))
+
+umap_rna_range_dt <- data.table(
+  variable=names(umap_rna_ranges),
+  var.min=sapply(umap_rna_ranges, function (x) x[1]),
+  var.max=sapply(umap_rna_ranges, function (x) x[2]))
+
+prev_assay <- DefaultAssay(scrna_all)
+DefaultAssay(scrna_all) <- 'SCT_INT'
+umap_rna_data <- data.table(
+  FetchData(
+    scrna_all,
+    names(umap_rna_ranges),
+    slot='data'),
+  keep.rownames=T)
+DefaultAssay(scrna_all) <- prev_assay
+setnames(umap_rna_data, 'rn','X_index')
+sct_rna_umap <- umap_rna_data[umap_dt, on='X_index']
+csu_melt <- melt(sct_rna_umap, measure.vars=names(umap_rna_ranges))
+
+csu_melt <- csu_melt[umap_rna_range_dt, on='variable'][, 
+  value.scaled := scales::rescale(
+    scales::oob_squish(value, range=c(var.min[1], var.max[1]))),
+  by='variable']
+
+var_order <-  names(umap_rna_ranges)
+csu_melt <- csu_melt[,
+  variable := factor(variable, levels=var_order)]
+
+plots$rna_umaps <- ggplot(csu_melt,
+    aes(x=wnnUMAP_1, y=wnnUMAP_2, color=value.scaled)) +
+  rasterise(geom_point(size=inset_umap_point_size, alpha=0.5), dpi=100) + 
+  scale_color_distiller('RNA expression (SCTransform)',
+    palette='RdPu', direction=1, limit=c(0,1),
+    breaks=c(0,1),
+    labels=c('min','max')) +
+  coord_fixed() +
+  facet_wrap(~variable, nrow=1) +
+  theme_minimal() + 
+  theme(
+    legend.position='bottom',
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    legend.justification = c(0,1),
+    panel.grid=element_blank())
+```
+
+## Pathways
 
 ```{r}
 if (!(exists('cd4_pruned'))) {
@@ -1975,9 +2111,6 @@ if (rerun_geneset_scores) {
   scrna_cd8_all[[names(cd8_all_gsea_scores_rna)]] <- cd8_all_gsea_scores_rna
   scrna_cd4_all[[names(cd4_all_gsea_scores_rna)]] <- cd4_all_gsea_scores_rna
 }
-
-
-
 
 make_cdf <- function(seurat_obj, pathway_name, pathway_label, 
     subtypes=c('STIM-IFNG','STIM-GLYC','STIM-OXPHOS'), quant_limit=0.05, group.by='Subtype', colorlist=unlist(all_colors), return_val='cdf') {
@@ -2288,6 +2421,148 @@ plots$cd4_pct_barplots <- (
 
 ```
 
+### Innateness Plot
+
+```{r}
+
+innateness_dt <- fread(here::here('..','data','gutierrez_arcelus_et_al_2019-sup_dat_3.csv'))
+
+innateness_sig_dt <- innateness_dt[
+  CalledSignificant==1 &
+  GENE_NAME %in% scrna_all@assays$SCT_INT@var.features & 
+  GENE_NAME != 'AKR1C3']
+
+innateness_scrna_dt <- data.table(FetchData(prune_cells(scrna_all),
+    vars=c(names(scrna_all@meta.data), innateness_sig_dt$GENE_NAME),
+    slot='scale.data'))
+
+innateness_scrna_dt$innateness <- scale(
+  as.matrix(innateness_scrna_dt[, innateness_sig_dt$GENE_NAME, with=F]) %*% 
+    innateness_sig_dt$`InnatenessLevel_(Beta)`)
+
+# add wnn umap
+innateness_scrna_dt <- umap_dt[, list(cell, wnnUMAP_1, wnnUMAP_2)][innateness_scrna_dt, on='cell']
+
+innateness_scrna_dt[, t_subtype := paste(t_type, Subtype, sep='.')]
+
+innateness_boxplots <- (
+  (ggplot(innateness_scrna_dt) +
+    geom_boxplot(aes(x=Subtype, y=innateness, color=Subtype, fill=Subtype), alpha=0.5) + 
+    facet_grid(t_type~., scale='free') +
+    theme_minimal() +
+    coord_flip() +
+    scale_color_manual(values=all_colors) +
+    scale_fill_manual(values=all_colors)) | 
+  ggplot(innateness_scrna_dt) +
+    geom_boxplot(aes(x=car, y=innateness, color=car, fill=car), alpha=0.5) + 
+    facet_grid(t_type~., scale='free') +
+    theme_minimal() +
+    coord_flip() + 
+    scale_color_manual(values=car_colors_umap) + 
+    scale_fill_manual(values=car_colors_umap)
+  ) & theme(legend.position='')
+
+innateness_umap <- ggplot(
+    innateness_scrna_dt[sample(.N)], aes(x=wnnUMAP_1, y=wnnUMAP_2, 
+      color=innateness)) +
+  rasterise(geom_point(size=inset_umap_point_size, alpha=0.5), dpi=300) + 
+  scale_color_distiller('Lymphocyte Innateness\nZ-score\n(Gutierrez-Arcelus et al.)', palette='RdYlGn', direction=1, limits=c(-2,2), oob=scales::squish) +
+  coord_fixed() +
+  theme_minimal() + 
+  guides(color = guide_colorbar(override.aes = list(size = 5, alpha=1), title.position='top', barheight = unit(0.4, 'line'))) +
+  theme(
+    legend.position=c(0,1),
+    legend.direction = 'horizontal',
+    legend.justification = c("left", "top"),
+    axis.text=element_blank(),
+    axis.line = element_blank(),
+    axis.title=element_blank(),
+    panel.grid=element_blank())
+
+# innateness_minidot_plots <- (
+#    / (
+#   make_minidot_plot_car(
+#     innateness_scrna_dt[sample(.N)], 'innateness', rescale_t_types = T, reorder_x=T) +
+#     labs(y='CAR z-score') +
+#     theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5))
+# ) & theme(plot.margin= unit(c(0, 0, 0, 0), "points"))
+# 
+#  innateness_plot <- ((( & 
+#       theme(legend.position='none', plot.margin= unit(c(0, 0, 0, 0), "points"))) /
+#     innateness_minidot_plots) +
+#       plot_layout(heights=c(2,1.3))
+```
+
+### Combine All Paper UMAP plot sets
+
+```{r}
+
+plots$paper_correlation_umap <- (
+  interpolate_score(umap_dt, 500, 'Sheih_et_al_IRF1', pal_name='Greys') + 
+    ggtitle('Sheih et al. 2020', 
+      subtitle='Clonotypes enriched after\nengraftment in CAR patients') | 
+  (interpolate_score(umap_dt, 500, 'Nicolet_et_al_CD29core1', pal_name='Greys') +
+    ggtitle('Nicolet et al. 2020', 
+      subtitle='CD29+ Cytotoxic signature,\npredicts survival in Melanoma')) |
+  (interpolate_score(innateness_scrna_dt, 500, 'innateness', pal_name='Greys') + 
+    ggtitle('Gutierrez-Arcelus et al. 2019', subtitle='Lymphocyte Innateness'))) &
+  theme(
+    legend.position='none',
+    plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
+
+cluster_zscore_plots <- (((
+  make_minidot_plot(umap_dt, 'Sheih_et_al_IRF1', rescale_t_types = T, reorder_x=T) + 
+    labs(y='cluster z-score') + 
+    theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5))) | 
+  make_minidot_plot(umap_dt, 'Nicolet_et_al_CD29core1', rescale_t_types = T, reorder_x=T) |
+  make_minidot_plot(innateness_scrna_dt[sample(.N)], 'innateness', 
+    rescale_t_types = T, reorder_x=T)))
+
+car_zscore_plots <- (((
+  make_minidot_plot_car(umap_nocd30_dt, 'Sheih_et_al_IRF1', rescale_t_types = T, reorder_x=T) + 
+    labs(y='CAR z-score') + 
+    theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5))) | 
+  make_minidot_plot_car(umap_nocd30_dt, 'Nicolet_et_al_CD29core1', rescale_t_types = T, reorder_x=T) |
+  make_minidot_plot_car(innateness_scrna_dt[sample(.N)], 'innateness', 
+    rescale_t_types = T, reorder_x=T)))
+
+plots$combined_paper_umap <- (
+  (plots$paper_correlation_umap & theme(plot.margin= unit(c(0, 0, 0, 0), "points"))) /
+    cluster_zscore_plots / car_zscore_plots) +
+      plot_layout(heights=c(4,1,1))
+
+paper_umaps_vert <- ((
+  interpolate_score(umap_dt, 500, 'Sheih_et_al_IRF1', pal_name='Greys') + 
+    ggtitle('Clonotypes enriched after\nengraftment in CAR patients', subtitle='Sheih et al. 2020')) / 
+  (interpolate_score(umap_dt, 500, 'Nicolet_et_al_CD29core1', pal_name='Greys') +
+    ggtitle('CD29+ Cytotoxic signature,\npredicts survival in Melanoma', subtitle='Nicolet et al. 2020')) /
+  (interpolate_score(innateness_scrna_dt, 500, 'innateness', pal_name='Greys') + 
+    ggtitle('Lymphocyte Innateness', subtitle='Gutierrez-Arcelus et al. 2019'))) &
+  theme(
+    plot.title = element_text(size=rel(0.8)),
+    plot.subtitle = element_text(size=rel(0.7)),
+    legend.position='none',
+    plot.margin = unit(c(5.5, 5.5, 0, 5.5), "points"))
+
+combined_zscores <- function(datatable, var, datatable2=NULL) {
+  if (is.null(datatable2)) datatable2 <- datatable
+  (make_minidot_plot(datatable, var, rescale_t_types = T, reorder_x=T) + 
+    theme(axis.title.y=element_text(angle = 90, vjust = 0.5, hjust=0.5)) +
+      labs(y='z-score')) |  (
+  make_minidot_plot_car(datatable2, var, rescale_t_types = T, reorder_x=T) + 
+    theme(axis.title.y=element_blank())) 
+}
+
+paper_zscores_vert <- (combined_zscores(umap_dt, 'Sheih_et_al_IRF1', umap_nocd30_dt) / 
+  combined_zscores(umap_dt, 'Nicolet_et_al_CD29core1', umap_nocd30_dt) / 
+  combined_zscores(innateness_scrna_dt, 'innateness'))
+
+plots$paper_umaps_combined_vert <- (paper_umaps_vert | paper_zscores_vert) + plot_layout(widths=c(1,2))
+
+
+
+```
+
 ### Main Text Panel Assembly
 
 ```{r}
@@ -2363,7 +2638,7 @@ plots$fig_assembled_6 <- plot_grid(
   plot_grid(
     #A
     ((plots$subtypes + theme(legend.position='none')) / 
-      (plots$per_phase | plots$per_donor_sep | plots$activation) + 
+      (plots$per_phase | plots$per_donor_sep | plots$activation2) + 
         plot_layout(widths=c(1,4,1))) + plot_layout(heights=c(5,1)),
     #C
     plots$car_dotplot_horiz,
@@ -2380,17 +2655,16 @@ plots$fig_assembled_6 <- plot_grid(
     labels=c('A','C','D')),
   plot_grid(
     plots$combined_gene_heatmap_boxed,
-    plots$combined_paper_umap,
+    plots$paper_umaps_combined_vert,
     ncol=1,
     rel_heights=c(1.2,0.8),
     labels=c('B','E')),
-  rel_widths=c(1.4,1)
+  rel_widths=c(1.3,1)
 )
 
-
 scaling_factor <- 1.6
-ggsave(
-  'scrna_fig.pdf',
+ggsave(here::here(
+  '..','figs','compiled','fig5.pdf'),
   plots$fig_assembled_6, device='pdf',
   width=8.5*scaling_factor,
   height=10*scaling_factor,
@@ -2399,29 +2673,35 @@ ggsave(
 
 ```
 
-## Supp fig, proliferation per subset
-
-```{r}
-ggplot(
-  umap_dt[, list(n_phase = .N), by=.(t_type, Subtype, Phase)][, list(Phase=Phase, pct_phase=n_phase/sum(n_phase)), by=.(t_type, Subtype)]) + 
-  geom_bar(
-    aes(x=t_subtype, fill=Phase, y=pct_phase, group=interaction(t_subtype, Phase)),
-    stat='identity') + 
-  coord_flip()
-```
-
 ## Other plots
 
 ```{r}
 
-rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
-  rna_data <- FetchData(prune_cells(scrna_all),
-    vars=c(names(scrna_all@meta.data), rna_name), slot='counts')
+rna_by_subtype_and_car <- function(
+    rna_name,
+    separate_by_donor=F,
+    slot='counts',
+    assay='RNA',
+    rescale_data=F) {
+  orig_assay <- DefaultAssay(scrna_all)
+  DefaultAssay(scrna_all) <- assay
+  rna_data <- data.table(FetchData(prune_cells(scrna_all),
+    vars=c(names(scrna_all@meta.data), rna_name), slot=slot))
+  
+  stopifnot(names(rna_data)[length(names(rna_data))] == rna_name)
   
   names(rna_data)[length(names(rna_data))] <- 'RNA_count'
   interact <- NULL
   if (separate_by_donor)
     interact <- 'donor'
+  
+  y_axis_name <- 'RNA expression'
+  if (slot == 'counts') y_axis_name <- 'UMIs per cell'
+  if (slot == 'scale.data') y_axis_name <- 'z-score'
+  
+  if (slot == 'scale.data' & rescale_data) {
+    rna_data[, RNA_count := scale(RNA_count), by=c('k_type','donor')]
+  }
     
   by_subset <- ggplot(rna_data,
       aes_string(x='Subtype', y='RNA_count', color='Subtype', shape=interact,
@@ -2432,8 +2712,10 @@ rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
     scale_color_manual(values=all_colors) +
     theme_minimal() +
     coord_flip() +
-    labs(title=paste0(rna_name,' Expression by Subtype'), y='UMIs per cell') +
-    theme(panel.background=element_rect(fill=NA, color='grey50'))
+    labs(title=paste0(rna_name,' Expression by Subtype'), y=y_axis_name) +
+    theme(
+      panel.background=element_rect(fill=NA, color='grey50'),
+      panel.grid=element_blank())
   
   by_car <- ggplot(rna_data, 
       aes_string(x='car', y='RNA_count', color='car', shape=interact,
@@ -2445,7 +2727,16 @@ rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
     theme_minimal() +
     coord_flip() +
     labs(title=paste0(rna_name,' Expression by CAR'), y='UMIs per cell') +
-    theme(panel.background=element_rect(fill=NA, color='grey50'))
+    theme(
+      panel.background=element_rect(fill=NA, color='grey50'),
+      panel.grid=element_blank())
+  
+  DefaultAssay(scrna_all) <- orig_assay
+  
+  if (slot == 'scale.data') {
+    by_car <- by_car + geom_hline(yintercept=0, linetype=3, color='grey30', size=0.6)
+    by_subset <- by_subset + geom_hline(yintercept=0, linetype=3, color='grey30', size=0.6)
+  }
   
   return((by_car + by_subset & theme(legend.position='none')) + plot_layout(widths=c(2,1)))
 }
@@ -2453,4 +2744,67 @@ rna_by_subtype_and_car <- function(rna_name, separate_by_donor=F) {
 # BAFF-R Expression
 rna_by_subtype_and_car('TNFRSF13C', separate_by_donor=T)
 ```
+### Supp Panel Assembly
+
+```{r}
+
+supp_S5_top <- (
+  plots$per_car_umap /
+  plot_grid(
+    plots$matched_clusters,
+    plots$car_dotplot_unstim_vert,
+    ncol=2, nrow=1, rel_widths=c(1,2.5))
+  ) + plot_layout(heights=c(1.2,1))
+scaling_factor <- 1.6
+
+supp_S5_donors <- plot_grid(
+  plots$cd4_pct_barplots & theme(legend.position='none', axis.title.x=element_blank()),
+  plots$cd8_pct_barplots, ncol=1, nrow=2, rel_heights=c(1,1.3))
+
+supp_S5 <- plot_grid(
+  supp_S5_top,
+  plot_grid(
+    (supp_S5_donors | as_grob(plots$combined_adt_plot + theme(legend.position='bottom'))) + 
+      plot_layout(widths=c(3,1))),
+  ncol=1,
+  rel_heights=c(1,1.2))
+
+supp_S5 <- plot_grid(
+  plots$per_car_umap,
+  plot_grid(
+    plot_grid(
+      plot_grid(
+        NULL,
+        plots$car_dotplot_unstim + theme(plot.margin=margin(0,0,0,10, unit='pt')),
+        NULL,
+        plots$matched_clusters + 
+          labs(fill='% Overlap of top 100 DE genes') +
+          theme(
+            legend.position='top',
+            legend.key.height = unit(0.4, 'lines')),
+        NULL,
+        nrow=1,
+        rel_widths=c(0.05,1.1,0.05,0.9,0.10)),
+      supp_S5_donors,
+      ncol=1,
+      rel_heights=c(1.2,2)),
+    plots$combined_adt_plot + 
+      theme(
+        legend.position='bottom',
+        legend.key.height = unit(0.4, 'lines')),
+    ncol=2,
+    rel_widths=c(3,1.2)),
+  plots$rna_umaps,
+  nrow=3,
+  rel_heights=c(1,3,0.8)
+)
+
+ggsave(here::here(
+  '..','figs','compiled','figS5.pdf'),
+  supp_S5, device='pdf',
+  width=8.5*scaling_factor,
+  height=11*scaling_factor,
+  units=c('in'),
+  dpi=300)
 ```
+

@@ -214,7 +214,6 @@ plot_2d_density_vars_split_donor <- function(df, x_var, y_var, tile=F) {
   }
 }
 
-
 plot_2d_density_vars(fcs_melt_sample_dt[day==6], y_var='ccr7_t', x_var='cd45ro_t') +
   labs(x='CD45RO', y='CCR7',title='Day 6 CCR7 vs CD45RO Diff')
 
@@ -255,7 +254,6 @@ fcs_flags[,
       cd62l + 2*cd27)
     )]
 
-
 levels(fcs_flags$cd62_cd45ra_diff) <- c('TEM','TCM','TEMRA','Naive')
 levels(fcs_flags$cd45ra_ccr7_diff) <- c('TEM','TEMRA','TCM','Naive')
 levels(fcs_flags$cd45ro_ccr7_diff) <- c('TEMRA','TEM','Naive','TCM')
@@ -286,8 +284,65 @@ tile_set <- function(df, exh_x, exh_y, days=c(0,6,15,24,33)) {
   )
 }
 
+```
 
-# plot_grid(plot_grid(plotlist=lapply(c(0,6,15), function(day_i) plot_2d_density_vars_split_donor(diff_mdz_dt[k562 == 'cd19-' & t_type == 'cd4' & day==day_i & car %in% c('41BB','BAFF-R','CD28')], y_var='ccr7_t', x_var='cd62l_t', tile=F) + ggtitle(paste('CD4 Day', day_i))), ncol=1),plot_grid(plotlist=lapply(c(0,6,15), function(day_i) plot_2d_density_vars_split_donor(diff_mdz_dt[k562 == 'cd19-' & t_type == 'cd8' & day==day_i & car %in% c('41BB','BAFF-R','CD28')], y_var='ccr7_t', x_var='cd62l_t', tile=F) + ggtitle(paste('CD8 Day', day_i))), ncol=1))
+```{r}
+fcs_flags <- dcast(
+  diff_dt[!is.na(gt_thresh) & outlier_well==F],
+  donor + k562 + day + t_type + car + well + plate + outlier_well + event_id + col + row ~ variable, 
+  value.var='gt_thresh')[
+    !is.na(donor) & !is.na(day)]
+
+names(fcs_flags) <- gsub('(.*)_t','\\1',names(fcs_flags))
+
+fcs_flags[,
+  `:=`(
+    cd62_cd45ro_diff= factor(
+      cd45ro + 2*cd62l),
+    cd62_cd45ra_diff= factor(
+      cd62l + 2*cd45ra),
+    cd45ra_ccr7_diff= factor(
+      cd45ra + 2*ccr7),
+    cd45ro_ccr7_diff= factor(
+      cd45ro + 2*ccr7),
+    cd45ro_cd27_diff= factor(
+      cd45ro + 2*cd27),
+    cd62_cd27_diff= factor(
+      cd62l + 2*cd27)
+  )]
+
+
+levels(fcs_flags$cd62_cd45ra_diff) <- c('TEM','TCM','TEMRA','Naive')
+levels(fcs_flags$cd62_cd45ro_diff) <- c('TEMRA','TEM','Naive','TCM')
+levels(fcs_flags$cd45ra_ccr7_diff) <- c('TEM','TEMRA','TCM','Naive')
+levels(fcs_flags$cd45ro_ccr7_diff) <- c('TEMRA','TEM','Naive','TCM')
+levels(fcs_flags$cd45ro_cd27_diff) <- c(
+  'CD45RO-/CD27-','CD45RO+/CD27-','CD45RO-/CD27+','CD45RO+/CD27+')
+levels(fcs_flags$cd62_cd27_diff) <- c(
+  'CD62L-/CD27-','CD62L+/CD27-','CD62L-/CD27+','CD62L+/CD27+')
+
+diff_marker_dt <- melt.data.table(
+    fcs_flags,
+    measure.vars= c(
+        'cd62_cd45ra_diff', 'cd62_cd45ro_diff', 
+        'cd45ro_ccr7_diff', 'cd45ra_ccr7_diff',
+        'cd45ro_cd27_diff', 'cd62_cd27_diff',
+        'cd62l', 'cd27', 'ccr7', 'cd45ro', 'cd45ra', 'cd95'))
+
+tile_set <- function(df, exh_x, exh_y, days=c(0,6,15,24,33)) {
+  plot_grid(
+    plot_grid(plotlist=lapply(days, function(day_i) 
+      plot_2d_density_vars_split_donor(
+        df[t_type == 'cd4' & day==day_i], 
+        y_var=exh_x, x_var=exh_y, tile=F) + 
+        ggtitle(paste('CD4 Day', day_i))), ncol=1),
+    plot_grid(plotlist=lapply(days, function(day_i) 
+      plot_2d_density_vars_split_donor(
+        df[t_type == 'cd8' & day==day_i], 
+        y_var=exh_x, x_var=exh_y, tile=F) + 
+        ggtitle(paste('CD8 Day', day_i))), ncol=1)
+  )
+}
 
 ```
 
@@ -303,22 +358,23 @@ make_diff_percent_dt <- function(dt, diff_set) {
   subset_dt[, c(diff_set) := factor(get(diff_set))]
   
   subset_dt <- subset_dt[, 
-    melt(table(get(diff_set))),
-    by=c('car', 'donor', 'day', 'k562', 'well', 'plate')][,
+    reshape2::melt(table(get(diff_set))),
+    by=c('car', 'donor', 'day', 'k562', 'well', 'plate', 'type')][,
       frac := value/sum(value),
-      by=c('car', 'donor', 'day', 'k562', 'well', 'plate')]
+      by=c('car', 'donor', 'day', 'k562', 'well', 'plate', 'type')]
   names(subset_dt) <- gsub('V1', 'value', names(subset_dt))
   names(subset_dt) <- gsub('Var1', 'diff', names(subset_dt))
   
   diff_mean_dt <- subset_dt[!is.na(donor), list(
       val_mean= mean(frac), 
       val_sd= sd(frac)), 
-      by=c('car','k562','donor','day','diff')]
+      by=c('car','k562','donor','day','diff','type')]
 
   return(diff_mean_dt)
 }
 
 cd62_cd45ra_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd45ra_diff')
+cd62_cd45ro_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd62_cd45ro_diff')
 cd45ra_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ra_ccr7_diff')
 cd45ro_ccr7_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_ccr7_diff')
 cd45ro_cd27_diff_dt <- make_diff_percent_dt(diff_marker_dt, 'cd45ro_cd27_diff')
@@ -327,11 +383,17 @@ cd95_dt <- make_diff_percent_dt(diff_marker_dt, 'cd95')
 
 
 plot_by_day <- function(diff_mean_dt, title) {
-  return(ggplot(diff_mean_dt) + 
+  return(ggplot(diff_mean_dt[, car := factor(car, levels=c(car_order, 'untrans'))]) + 
       geom_bar(aes(x=as.factor(day), y=val_mean, fill=diff), stat='identity', position='stack') +
-      facet_grid(k562+donor~car) + 
-    theme_minimal(base_size=18) + 
-    labs(x='Day', y='% Subset', title=title))
+      scale_fill_manual(values=hcl.colors(4,'Temps')) +
+      facet_grid(car~k562+type+donor) + 
+      scale_y_continuous(expand=c(0,0), labels=label_percent()) +
+      scale_x_discrete(expand=c(0,0)) +
+      theme_minimal() +
+      theme(
+        panel.grid=element_blank(),
+        panel.border=element_rect(color='black', size=0.2, fill=NA)) +
+      labs(x='Day', y='% Subset', title=title))
 }
 
 line_plot_by_day <- function(diff_mean_dt, title) {
@@ -353,11 +415,12 @@ plot_by_car <- function(diff_mean_dt, title) {
     coord_flip())
 }
 
-plot_by_day(cd62_cd45ra_diff_dt[k562=='cd19+'], 'CD62L vs CD45RA differentiation')
-plot_by_day(cd45ra_ccr7_diff_dt[k562=='cd19+'], 'CD45RA vs CCR7 differentiation')
-plot_by_day(cd45ro_ccr7_diff_dt[k562=='cd19+'], 'CD45RO vs CCR7 differentiation')
-    
-plot_by_car(cd62_cd45ra_diff_dt[k562=='cd19+'], 'CD62L vs CD45RA differentiation')
+#### HERE 5/19/21
+plot_by_day(cd62_cd45ra_diff_dt[k562=='cd19+'], 'CD62L vs CD45RA differentiation') |
+  plot_by_day(cd62_cd45ro_diff_dt[k562=='cd19+'], 'CD62L vs CD45RO differentiation') |
+  plot_by_day(cd45ra_ccr7_diff_dt[k562=='cd19+'], 'CD45RA vs CCR7 differentiation') |
+  plot_by_day(cd45ro_ccr7_diff_dt[k562=='cd19+'], 'CD45RO vs CCR7 differentiation')
+
 plot_by_car(cd45ra_ccr7_diff_dt[k562=='cd19+'], 'CD45RA vs CCR7 differentiation')
 plot_by_car(cd45ro_ccr7_diff_dt[k562=='cd19+'], 'CD45RO vs CCR7 differentiation')
 

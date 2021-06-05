@@ -183,8 +183,46 @@ paired_pct <- fcs_out$fcs_melt_dt[,
     by=c('t_type','plate','car','well','k_type')][,
       pct := N/sum(N), by=c('t_type','plate','car','well','k_type')]
 
-ggplot(paired_pct[pos_gamma == T & pos_29 == T]) +
-  geom_bar(aes(y = pct, x=car, fill=car)) +
+ggplot(paired_pct[pos_gamma == T]) +
+  geom_point(aes(y = pct, x=car, color=pos_29, group=pos_29), position=position_dodge(1)) +
   scale_y_continuous('% of IFNG+ CD29+ cells', label=label_percent()) +
   scale_fill_manual(values=c(car_colors, 'Untr'='grey50')) +
+  facet_wrap(k_type ~ t_type) +
   theme_minimal()
+
+cd29_pct <- ggplot(
+  fcs_pct[
+    variable %in% c('cd29_t') & 
+    plate == 0 &
+    k_type %in% c('neg','pos') &
+    car %in% c('CD28','41BB','BAFF-R','zeta','Untr')]) +
+  geom_bar(aes(y = pct, x=car, fill=car), stat='identity') +
+  scale_y_continuous(
+    '% of CD29 positive cells', label=label_percent(), expand=c(0,0.01),
+    limits=c(0,0.65)) +
+  scale_fill_manual(values=c(car_colors, 'Untr'='grey50'), guide=NULL) +
+  theme_minimal() +
+  theme(
+      panel.grid=element_blank(),
+      panel.background=element_rect(fill=NA))
+
+ifng_29_pct <- ggplot(paired_pct[
+    pos_gamma == T & plate == 0 &
+    t_type == 'cd8' & k_type == 'pos' &
+    car %in% c('CD28','41BB','BAFF-R','zeta','Untr')]) +
+  geom_bar(
+    aes(y = pct, x=car, fill=car, color=car, alpha=pos_29, group=pos_29),
+    stat='identity', position=position_dodge(0.8), width=0.8) +
+  scale_y_continuous(
+    '% of IFNG+ cells', label=label_percent(), expand=c(0,0.01),
+    limits=c(0,0.24)) +
+  scale_alpha_manual('CD29+', values=c(0,1)) +
+  scale_fill_manual('', values=c(car_colors, 'Untr'='grey70'), guide=NULL) +
+  scale_color_manual('', values=c(car_colors, 'Untr'='grey70'), guide=NULL) +
+  guides(alpha=guide_legend(override.aes =list(color='black'))) +
+  theme_minimal() +
+  theme(
+      panel.grid=element_blank(),
+      panel.background=element_rect(fill=NA))
+
+(cd29_pct + labs(title='% CD29+', x='')) | (ifng_29_pct  + labs(title='% IFNG+', x='')) 
