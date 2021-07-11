@@ -41,6 +41,7 @@ source(here::here('r','fig_colors.R'))
 growth_dt <- fread("~/s3-roybal-tcsl/lenti_screen_compiled_data/data/invivo/tcsl164_growth_r.csv")
 growth_dt[, length_1 := as.numeric(length_1)]
 growth_dt <- growth_dt[car != '']
+growth_dt[, c('V7','V8') := NULL]
 
 growth_dt <- rbindlist(
   list(

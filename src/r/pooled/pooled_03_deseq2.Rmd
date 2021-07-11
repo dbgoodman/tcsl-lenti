@@ -2184,9 +2184,15 @@ label_data[car_order %in% (40-top_num):40 & CAR.type == 'other',
   CAR.topbot :='bot']
 label_data[, CAR.topbot := factor(CAR.topbot)]
 
+# add topbot data from labels to prolif data to color lines
+abund_plot_data <- label_data[,
+  list(CAR.align,t.type,CAR.topbot)][
+    prolif_data[order(CAR.type)], on=c('CAR.align','t.type')]
+abund_plot_data[is.na(CAR.topbot), CAR.topbot := 'other']
+
 fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
     y=mean.car.abund.rel.baseline, x=assay,
-    color=CAR.type,
+    color=CAR.topbot,
     group=CAR.align,
     label=CAR.align)) + 
   # line
@@ -2195,8 +2201,8 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
     labels=c('New Receptors', '4-1BB', 'CD28'),
     values=c(0.5,1.5,1.5), guide=F) +
   scale_color_manual('',
-    labels=c('New Receptors', '4-1BB', 'CD28'),
-    values=c('grey30', receptor_cols),
+    labels=c('4-1BB', 'CD28','Top','Bottom','Other'),
+    values=c(receptor_cols, outlier_cols[1], "#40B549", 'grey30'),
     guide=F) +
   #points
   new_scale('size') +
@@ -2228,26 +2234,26 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
   theme(panel.border=element_rect(fill=NA))
 
 
-fig2_abundance_over_time_vert <- ggplot(prolif_data[order(CAR.type)], aes(
+fig2_abundance_over_time_vert <- ggplot(abund_plot_data[rev(order(CAR.topbot))], aes(
     y=mean.car.abund.rel.baseline, x=assay,
-    color=CAR.type,
+    color=CAR.topbot,
     group=CAR.align,
     label=CAR.align)) + 
   # line
-  geom_line(aes(size=CAR.type)) +
+  geom_line(aes(size=CAR.topbot)) +
   scale_size_manual('',
-    labels=c('New Receptors', '4-1BB', 'CD28'),
-    values=c(0.5,1.5,1.5), guide=F) +
+    labels=c('4-1BB', 'CD28','Top','Bottom','Other'),
+    values=c(1.5,1.5,0.5,0.8,0.5), guide=F) +
   scale_color_manual('',
-    labels=c('New Receptors', '4-1BB', 'CD28'),
-    values=c('grey30', receptor_cols),
+    labels=c('4-1BB', 'CD28','Top','Bottom','Other'),
+    values=c(receptor_cols, outlier_cols[1], "#40B549", 'grey40'),
     guide=F) +
   #points
   new_scale('size') +
-  geom_point(aes(size=CAR.type, color=CAR.type, group=CAR.align)) +
+  geom_point(aes(size=CAR.topbot, color=CAR.topbot, group=CAR.align)) +
   scale_size_manual('',
-    labels=c('New Receptors', '4-1BB', 'CD28'),
-    values=c(1,2,2), guide=F) +  
+    labels=c('4-1BB', 'CD28','Top','Bottom','Other'),
+    values=c(2,2,1,1.5,1), guide=F) +
   # text
   new_scale('color') +
   geom_text_repel(data=label_data,

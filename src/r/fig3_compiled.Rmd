@@ -22,6 +22,7 @@ library(scales)
 library(dplyr)
 library(grid)
 library(ggridges)
+library(cowplot)
 
 #rm(list = ls())
 
@@ -237,7 +238,7 @@ pca.pos.sort.size.plot <- ggplot(
       size=(CAR.align %in% names(pca_car_colors)), 
       fill=len/3)) +
   geom_point(pch=21, color='black') +
-  scale_size_manual(guide=F, values=c(4,6)) +
+  scale_size_manual(guide=F, values=c(2,6)) +
   scale_fill_distiller(palette='RdYlBu') +
   geom_text_repel(data=projected.metrics,
     size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
@@ -381,6 +382,7 @@ car.abund.data <- rbind(
   read.counts[k.type == 'pos' & batch != 'post-cytof'], 
   copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'pos'])[k.type != 'NA'][
     CAR.align %in% array.list]
+car.abund.data[CAR.align == 'TNR8', CAR.align := 'CD30']
 
 car.abund.data[, CAR.align.ord := factor(CAR.align, levels=car.abund.order)]
 
@@ -393,7 +395,7 @@ car.abund.plot <- ggplot(car.abund.data,
   scale_x_continuous(breaks=c(0,6,12,18,24), limits=c(0,24.5)) +
   scale_color_manual('', values=brewer.pal(9, 'YlOrRd')[c(4,6)]) +
   facet_wrap(~CAR.align.ord, ncol=8) + scale_linetype_manual(values=c(2,1)) +
-  labs(x='Timepoint (days)', y='Relative Proliferation, log2 FC') + 
+  labs(x='Timepoint (days)', y='Relative Expansion, log2 FC') + 
   geom_hline(linetype=2, yintercept=0) + 
   theme_minimal() +
   theme(
@@ -408,7 +410,8 @@ color_car_strips <- function(plot) {
 
   car.abund.gtable <- ggplot_gtable(ggplot_build(plot))
   strip_both <- which(grepl('strip-', g$layout$name))
-  fills <- car_colors[c(car.abund.order[1], '41BB', car.abund.order[3:7])]
+  fills <- setNames(car_colors, gsub('TNR8','CD30',names(car_colors)))[
+    c(car.abund.order[1], '41BB', car.abund.order[3:7])]
   k <- 1
   
   for (i in strip_both) {
@@ -422,6 +425,117 @@ color_car_strips <- function(plot) {
 fig3_ab <- plot_grid(pca.pos.sort.group.plot + theme(legend.position='none'), color_car_strips(car.abund.plot), 
     rel_widths=c(1,3), ncol=2, labels=c('A','B'))
 ```
+#### Negative Proliferation Traces, for supp
+```{r}
+car.abund.data <- rbind(
+  read.counts[batch != 'post-cytof' & k.type == 'neg'], 
+  copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'neg'])[k.type != 'NA'][
+    CAR.align %in% array.list]
+
+car.abund.data[CAR.align == 'TNR8', CAR.align := 'CD30']
+car.abund.data[, CAR.align.ord := factor(CAR.align, levels=car.abund.order)]
+
+car.abund.plot.neg <- ggplot(car.abund.data,
+    aes(
+      x=day, y=log2(car.abund.rel.baseline),
+      color= interaction(t.type),
+      group= interaction(k.type, t.type, batch, donor))) + 
+  geom_line() + 
+  geom_point() +
+  scale_x_continuous(breaks=c(0,6,12,18,24), limits=c(0,24.5)) +
+  scale_color_manual('', values=brewer.pal(9, 'YlOrRd')[c(4,6)]) +
+  facet_wrap(~CAR.align.ord, ncol=8) + scale_linetype_manual(values=c(2,1)) +
+  labs(x='Timepoint (days)', y='Relative Expansion w/o antigen, log2 FC') + 
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_minimal() +
+  theme(
+    legend.position='bottom',
+    panel.grid = element_blank(),
+    panel.border = element_rect(fill=NA),
+    strip.background=element_rect(linetype=1, color='white', size=3),
+    strip.text = element_text(color='white',face='bold'),
+    plot.margin = unit(c(.08,.01,.005,.1), "npc"))
+
+plot(color_car_strips(car.abund.plot.neg))
+```
+
+#### Both Proliferation Traces (not using)
+```{r}
+car.abund.data <- rbind(
+  read.counts[batch != 'post-cytof'], 
+  copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'neg'],
+  copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'pos'])[k.type != 'NA'][
+    CAR.align %in% array.list]
+
+car.abund.data[CAR.align == 'TNR8', CAR.align := 'CD30']
+car.abund.data[, CAR.align.ord := factor(CAR.align, levels=car.abund.order)]
+
+car.abund.plot.both <- ggplot(car.abund.data,
+    aes(
+      x=day, y=log2(car.abund.rel.baseline),
+      color= interaction(t.type),
+      group= interaction(k.type, t.type, batch, donor),
+      linetype=k.type)) + 
+  geom_line() + 
+  geom_point() +
+  scale_x_continuous(breaks=c(0,6,12,18,24), limits=c(0,24.5)) +
+  scale_color_manual('', values=brewer.pal(9, 'YlOrRd')[c(4,6)]) +
+  facet_wrap(~CAR.align.ord, ncol=8) + scale_linetype_manual(values=c(2,1)) +
+  labs(x='Timepoint (days)', y='Relative Expansion w/o antigen, log2 FC') + 
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_minimal() +
+  theme(
+    legend.position='bottom',
+    panel.grid = element_blank(),
+    panel.border = element_rect(fill=NA),
+    strip.background=element_rect(linetype=1, color='white', size=3),
+    strip.text = element_text(color='white',face='bold'),
+    plot.margin = unit(c(.08,.01,.005,.1), "npc"))
+```
+
+####  Proliferation Trace Ratio (not using)
+```{r}
+car.abund.data <- rbind(
+  read.counts[batch != 'post-cytof'], 
+  copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'neg'],
+  copy(read.counts[batch != 'post-cytof' & assay == 'baseline'])[,k.type := 'pos'])[k.type != 'NA'][
+    CAR.align %in% array.list]
+
+car.abund.data[CAR.align == 'TNR8', CAR.align := 'CD30']
+car.abund.data[, CAR.align.ord := factor(CAR.align, levels=car.abund.order)]
+
+car.abund.plot.ratio <- ggplot(car.abund.data,
+    aes(
+      x=day, y=log2(car.abund.ratio),
+      color= interaction(t.type),
+      group= interaction(k.type, t.type, batch, donor),
+      linetype=k.type)) + 
+  geom_line() + 
+  geom_point() +
+  scale_x_continuous(breaks=c(0,6,12,18,24), limits=c(0,24.5)) +
+  scale_color_manual('', values=brewer.pal(9, 'YlOrRd')[c(4,6)]) +
+  facet_wrap(~CAR.align.ord, ncol=8) + scale_linetype_manual(values=c(2,1)) +
+  labs(x='Timepoint (days)', y='Expansion Ratio w/ vs w/o antigen, log2 FC') + 
+  geom_hline(linetype=2, yintercept=0) + 
+  theme_minimal() +
+  theme(
+    legend.position='bottom',
+    panel.grid = element_blank(),
+    panel.border = element_rect(fill=NA),
+    strip.background=element_rect(linetype=1, color='white', size=3),
+    strip.text = element_text(color='white',face='bold'),
+    plot.margin = unit(c(.08,.01,.005,.1), "npc"))
+
+### all 3 for comparison
+plot_grid(
+    color_car_strips(car.abund.plot.neg + labs(title='CD19- expansion')),
+    color_car_strips(car.abund.plot.both + labs(title='CD19+/- expansion')),
+    color_car_strips(car.abund.plot.ratio + labs(title='Ratio of CD19+/- expansion')),
+    ncol=1
+)
+```
+
+## CTV
 
 ### CTV Traces
 
@@ -645,7 +759,7 @@ plots$ctv_cd19neg_supp <- (
 
 ```
 
-### CD4 CD40 Cumulative Growth
+## CD4 CD40 Cumulative Growth
 ```{r}
 
 cd4_cumulative_growth <- fread(file.path(here::here('..', 'data', 'cd4_cumulative_growth.csv')))
@@ -661,6 +775,10 @@ cd4_expansion_plot <- ggplot(car_expansion[
   scale_shape_discrete('Donor') +
   theme_bw() + labs(x='Days in culture', y='Cumulative Fold Expansion', title='Cumulative CD4 T cell Expansion in culture')
 
+# exponential fit linear model
+summary(lm(formula=doublings~V1+variable+donor,
+  data=car_expansion[measure=='expansion' & variable %in% c('CD40','CD28','41BB')][
+    value > 0, doublings := log(value, base=2)]))
 ```
 ## Exhaustion Plots
 
@@ -840,12 +958,15 @@ if (!exists('supp_day_dt'))
       day %in% c(0,6,15,24,33) &
       k562 == 'cd19+']
 
-stacked_exh_plot <- function(day_dt_subset) {
+stacked_exh_plot <- function(day_dt_subset, horiz=F) {
   
   day_dt_subset <- day_dt_subset[, 
       c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
       by=c('n_pos_marker','t_type','donor','day','k562','car')][,
         t_type := toupper(t_type)]
+  
+  facet_formula <- if(horiz)
+    formula('donor ~ car') else formula('car ~ donor')
   
   day_dt_subset[, car := factor(car)]
   day_dt_subset[, pct := as.numeric(pct)]
@@ -853,7 +974,7 @@ stacked_exh_plot <- function(day_dt_subset) {
   ggplot(unique(day_dt_subset[, list(car, mean_pct, n_pos_marker, day, t_type, donor)])) +
     geom_bar(aes(x=factor(day, levels=rev(levels(factor(day)))), y=mean_pct, fill=n_pos_marker),
       stat='identity', width=1, color='black', size=0.2) +
-    facet_grid(car ~ donor, scales='free') +
+    facet_grid(facet_formula) +
     scale_y_continuous(expand=c(0,0), labels=label_percent()) +
     scale_x_discrete(expand=c(0,0), limits=rev) +
     scale_fill_manual(
@@ -889,6 +1010,31 @@ plots$supp_exh_stacked_bars <- ((
   ) & theme(legend.position='bottom')) + 
   plot_layout(guides='collect')
 
+plots$supp_exh_stacked_bars_horiz <- ((
+  stacked_exh_plot(supp_day_dt[t_type == 'cd4' & day %in% c(0,6,15,24,33)][,
+      donor := factor(paste0('Donor ',donor))],
+    horiz=T) +
+    labs(subtitle='CD4', tag='B') +
+    theme(
+      panel.background = element_rect(fill='grey70'),
+      legend.position='bottom',
+      axis.text.y=element_blank(),
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title=element_blank())
+  ) | (
+  stacked_exh_plot(supp_day_dt[t_type == 'cd8' & day %in% c(0,6,15,24,33)][,
+      donor := factor(paste0('Donor ',donor))],
+    horiz=T) +
+    labs(subtitle='CD8', x='Day') +
+    theme(
+      panel.background = element_rect(fill='grey70'),
+      legend.position='bottom',
+      axis.text.y=element_blank(),
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title.y=element_blank())
+  ) & theme(legend.position='bottom')) + 
+  plot_layout(guides='collect')
+
 indiv_marker_means_supp <- map_day_0(exh_dt)[(
     variable %in% c('tim3_t','lag3_t', 'pd1_t') &
     outlier_well==F &
@@ -903,7 +1049,11 @@ indiv_marker_means_supp[, variable := factor(variable)]
 indiv_marker_means_supp[, variable := factor(variable,
   labels=toupper(gsub('_t','',levels(variable))))]
 
-plot_indiv_marker_t_type <- function(indiv_marker_mean_subset) {
+plot_indiv_marker_t_type <- function(indiv_marker_mean_subset, horiz=F) {
+  
+  facet_formula <- if(horiz)
+    formula('donor ~ variable') else formula('variable ~ donor')
+  
   ggplot(indiv_marker_mean_subset, 
        aes(x=day, color=car, y=mean_val)) + 
   geom_line() +
@@ -914,7 +1064,7 @@ plot_indiv_marker_t_type <- function(indiv_marker_mean_subset) {
       group=interaction(car, day, variable, donor))) +
   geom_point() +
   scale_color_manual(values=c(car_colors, untrans='grey50')) +
-  facet_grid(variable ~ donor, scale='free_y') +
+  facet_grid(facet_formula, scale='free_y') +
   theme_minimal() +
   theme(
     panel.border = element_rect(fill=NA),
@@ -944,6 +1094,28 @@ plots$supp_marker_means <- ((
   ) & theme(legend.position='bottom') & guides(color=guide_legend(title='', nrow=2))) + 
   plot_layout(guides='collect')
 
+supp_marker_means_horiz <- ((
+  plot_indiv_marker_t_type(indiv_marker_means_supp[t_type == 'cd4'][, 
+      donor := factor(paste0('Donor ',donor))][,
+      variable := factor(variable, labels=levels(variable))],
+    horiz=T) +
+    labs(subtitle='CD4', tag='A') +
+    theme(
+      legend.position='none',
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title=element_blank())
+  ) | (
+  plot_indiv_marker_t_type(indiv_marker_means_supp[t_type == 'cd8' & !is.na(donor)][, 
+      donor := factor(paste0('Donor ',donor))],
+      horiz=T) +
+    labs(subtitle='CD8', x='Day') +
+    theme(
+      legend.position='bottom',
+      plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+      axis.title.y=element_blank())
+  ) + theme(legend.position='bottom') & guides(color=guide_legend(title='', nrow=2))) + 
+  plot_layout(guides='collect')
+
 supp_S2_2 <- (
   plots$supp_marker_means &
     theme(legend.position = 'bottom')) | 
@@ -955,6 +1127,13 @@ supp_S2_2 <- (
       keywidth=unit(1, 'lines'),
       keyheight=unit(1, 'lines'))) &
     theme(legend.position = 'bottom'))
+
+supp_S3_AB <- (
+  supp_marker_means_horiz & theme(legend.position = 'bottom')
+  ) / (
+  plots$supp_exh_stacked_bars_horiz & theme(legend.position = 'bottom'))
+
+
 ```
 ## Diff Plots
 
@@ -1037,6 +1216,34 @@ plots$cd27_lines_expanded <- ggplot(
     theme_minimal() +
     theme(panel.border=element_rect(fill=NA), panel.grid=element_blank()) +
     labs(y='CD27 log MFI (AU)', x='Days in culture')
+
+cd27_lines_expanded_vert_func <- function(this_t_type) ggplot(
+    map_day_0(diff_dt)[variable=='cd27_t' & k562 == 'cd19+' & t_type == this_t_type & 
+        value > censor_negative_min][,
+            list(val_sd= sd(value)/sqrt(.N), val_mean= mean(value)),
+        by=.(car, day, donor, variable, k562)][
+                (donor == 2 | (donor == 1 & day < 33))][, donor := paste('Donor',donor)], 
+    aes(x=day, y=val_mean, 
+        ymin=(val_mean-val_sd), 
+        ymax=(val_mean+val_sd), color=car, group=car)) + 
+    geom_point() + 
+    geom_line() + 
+    geom_linerange() +
+    facet_wrap(donor ~ ., scale='free', ncol=1) + 
+    scale_color_manual(
+        values=c(car_colors,'grey50')) +
+    scale_linetype_manual(
+        values=c(1,1,1,1,1,1,1,3,1)) +
+    theme_minimal() +
+    theme(panel.border=element_rect(fill=NA), panel.grid=element_blank()) +
+    labs(y='CD27 MFI (AU)', x='Days in culture')
+
+plots$cd27_lines_combined <- (
+  (cd27_lines_expanded_vert_func('cd4') + theme(
+    legend.position='none', axis.title.x=element_blank()))) /
+  (cd27_lines_expanded_vert_func('cd8') + theme(
+    legend.position='none')
+)
 ```
 
 ### CD27 Expression - Ridges
@@ -1383,7 +1590,7 @@ metab_vert <- ggplot(metab_dt) +
 metab_vert
 ```
 
-## Compile
+## Compile Fig 3
 
 ```{r}
 
@@ -1443,27 +1650,65 @@ fig3_compiled <- plot_grid(
 ggsave(here::here('..','figs','compiled','fig3.pdf'), fig3_compiled, height=12, width=10, useDingbats=FALSE)
 ```
 
-### Compile Supp
+## Compile S2
 
 ```{r}
 
+# figS2_old <- plot_grid(
+#   plot_grid(
+#     supp_S2_1_pca,
+#     (
+#       plots$ctv_supp /
+#       ((supp_S3_2_gfp_myc | metab_vert) + plot_layout(widths=c(2,1)))
+#     ) + plot_layout(heights=c(1,1,1)),
+#     rel_heights=c(0.8,1), ncol=1),
+#   plot_grid(
+#     (supp_S2_2 | plots$diff_supp) + plot_layout(widths=c(1,1,1)),
+#     NULL,
+#     plots$cd27_lines_expanded + theme(legend.position='none'),
+#     ncol=1, rel_heights=c(3,0.1,0.9)),
+#   ncol=2, rel_widths=c(1.15,1)
+# )
+
 figS2_compiled <- plot_grid(
-  plot_grid(
+   plot_grid(
     supp_S2_1_pca,
+    color_car_strips(car.abund.plot.neg + labs(title='CD19- expansion')),
+    ncol=1, rel_heights=c(1.4,0.6)),
     (
       plots$ctv_supp /
-      ((supp_S3_2_gfp_myc | metab_vert) + plot_layout(widths=c(2,1)))
-    ) + plot_layout(heights=c(1,1,1)),
-    rel_heights=c(0.8,1), ncol=1),
-  plot_grid(
-    (supp_S2_2 | plots$diff_supp) + plot_layout(widths=c(1,1,1)),
-    NULL,
-    plots$cd27_lines_expanded + theme(legend.position='none'),
-    ncol=1, rel_heights=c(3,0.1,0.9)),
-  ncol=2, rel_widths=c(1.15,1)
-)
+      ((supp_S3_2_gfp_myc | metab_vert) + plot_layout(widths=c(2,1))) /
+      plot_spacer()
+    ) + plot_layout(heights=c(1,1,1,0.4)),
+   ncol=2)
 
 fig_scaling <- 1.75
 ggsave(here::here('..','figs','compiled','figS2.pdf'), figS2_compiled,
-       height=9.25*fig_scaling, width=8.5*fig_scaling, useDingbats=FALSE)
+       height=6*fig_scaling, width=8.5*fig_scaling, useDingbats=FALSE)
+```
+
+## Compile S3
+
+```{r}
+figS3_compiled <- plot_grid(
+  supp_S3_AB,
+  plot_grid(
+    plots$diff_supp,
+    plot_grid(
+      NULL,
+      plots$cd27_lines_expanded + theme(legend.position='none'),
+      NULL,
+      nrow=3, rel_heights=c(0.4,1,0.4)),
+    ncol=2, rel_widths=c(0.25,0.75)),
+  nrow=2, rel_heights=c(1,1.5))
+
+figS3_compiled_2 <- (
+  supp_S2_2 | plots$diff_supp | plots$cd27_lines_combined) + 
+    plot_layout(widths=c(1,1,1,1.1))
+
+fig_scaling <- 1.4
+ggsave(here::here('..','figs','compiled','figS3.pdf'), figS3_compiled_2,
+       height=8.5*fig_scaling, width=7*fig_scaling, useDingbats=FALSE)
+
+  
 ```

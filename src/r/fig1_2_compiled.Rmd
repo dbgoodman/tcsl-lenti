@@ -221,6 +221,8 @@ plot_indiv_marker_t_type <- function(indiv_marker_mean_subset) {
     strip.background = element_blank())
 }
 
+
+
 plots$marker_means <- (
   plot_indiv_marker_t_type(indiv_marker_means[t_type == 'cd4'][, 
       donor := factor(paste0('Donor ',donor))][,
@@ -367,6 +369,34 @@ sprinter_plot <- ggplot(
   labs(
     y='log2 Early:Late Relative Expansion',
     x='log2 Overall Relative Expansion, d0-14/16')
+```
+
+### Fig 1 Exh panel
+
+```{r}
+# donor 1 CD8 exh data for main text:
+fig1_exh_panel <- stacked_exh_plot(day_dt[t_type == 'cd8' & day %in% c(0,15,24,33) & donor == 1][,
+    donor := factor(paste0('Donor ',donor))]) +
+  labs(x='Day') +
+  scale_y_continuous(expand=c(0,0), labels=label_percent(), breaks=c(0,.5,1)) +
+  guides(fill = guide_legend(
+    title.position = "top", 
+    title.hjust = 0.5,
+    label.position = "bottom")) +
+  theme(
+    legend.position = 'top',
+    strip.text.x = element_blank(),
+    panel.spacing.y = unit(0.8, "lines"),
+    panel.background = element_rect(fill='grey70'),
+    legend.key.size = unit(0.8,'lines'),
+    plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+    axis.title.y=element_blank())
+
+
+ggsave(here::here('..','figs','compiled','fig1_exh.pdf'), fig1_exh_panel,
+       height=4, width=1.5, useDingbats=FALSE)
+
+
 ```
 
 ### Main Fig 2
