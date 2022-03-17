@@ -1,84 +1,336 @@
-library('RColorBrewer')
+library(data.table)
+library(ggplot2)
+library(RColorBrewer)
+library(nlme)
+library(plyr)
+library(cowplot)
+library(ggrepel)
+library(patchwork)
+#library(dplyr)
 
-#display all colors: display.brewer.all(type="seq")
-blues <- brewer.pal(9,'Blues')[c(5,7)] #41bb, cd28
-greens <- brewer.pal(9,'Greens')[c(5,7)] #baffr, taci
-oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
-reds <- brewer.pal(9,'PuRd') #klrg1
-purple <- brewer.pal(9,'Purples')[c(7)] #zeta
-grey <- 'grey30' #unt
-
-colors_light <- toupper(paste0('#',c("978dc6","75abd8","44d9fa","57f2de",
-                             "73f1c3","b9efb2","d7f1aa","f6f3a2","f7de9e","f7c898")))
-colors_mid <- toupper(paste0('#',c("54478c","2c699a","048ba8","0db39e",
-                           "16db93","83e377","b9e769","efea5a","f1c453","f29e4c")))
-colors_dark <- toupper(paste0('#',c("241f3d","132e44","023d4a","064f46",
-                            "096040","267f1a","587f15","85810d","85620b","81460a")))
+point_size= 5
+line_size= 0.8
+errorbar_size= 0.4
 
 # CAR COLORS
 # --------------------------------------------------------------------------------------------------
 
-# new set
-grey <- 'grey10' #zeta
-purples <- brewer.pal(9, 'Purples')[c(5, 7)] #TNR8, CD40
+#source(here::here('r','fig_colors.R'))
 
-# old set
-old_car_colors <- c(
-    '41BB'=blues[1], 'BAFF-R'=greens[1], 
-    'CD28'=blues[2], 'CD40'=oranges[1], 
-    'KLRG1'=reds[7], 'TACI'=greens[2], 
-    'TNR8'=oranges[2], 'zeta'=purple)
+#display all colors: display.brewer.all(type="seq")
+blues <- brewer.pal(9,'Blues')[c(6,8)] #41bb, cd28
+greens <- brewer.pal(9,'Greens')[c(4,6)] #baffr, taci
+oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
+reds <- brewer.pal(9,'PuRd') #klrg1
+grey <- 'grey10' #zeta
+purples <- brewer.pal(9, 'Purples')[c(4, 6)] #TNR8, CD40
 
 #current set
 car_colors <- c(
-    '41BB'=blues[1], 'BAFF-R'=greens[1], 
-    'CD28'=blues[2], 'CD40'=purples[2], 
-    'KLRG1'=reds[5], 'TACI'=greens[2], 
-    'TNR8'=purples[1], 'zeta'=grey)
+  '41BB'=blues[1], 'BAFF-R'=greens[1], 
+  'CD28'=blues[2], 'CD40'=purples[2], 
+  'KLRG1'=reds[5], 'TACI'=greens[2], 
+  'TNR8'=purples[1], 'zeta'=grey)
 
-car_order=c('CD28','41BB','BAFF-R','TACI','CD40','TNR8','KLRG1','zeta')
+#current set
+car_colors <- c(car_colors, 'None'='#999999', 'Unt'='#999999', 'zeta'='black')
 
-show_colors <- function(car_colors, car_order) {
-    ggplot(data.table(
-            car_colors, factor(car_order, levels=car_order))) + 
-        geom_tile(
-            aes(y=factor(car_order, levels=car_order), 
-            fill=car_order, x=1)) + 
-        scale_fill_manual(values=as.character(car_colors))
+car_order=c(
+  'CD28','41BB','BAFF-R','TACI',
+  'CD40','TNR8','KLRG1','zeta',
+  'Unt','None')
+
+car_colors <- car_colors[car_order]
+
+plot_theme <- theme(
+  legend.position = c(.05, .95),
+  legend.justification = c("left", "top"),
+  legend.box.just = "right",
+  legend.box.background = element_rect(fill='white'),
+  legend.title=element_blank(),
+  legend.spacing.y = unit(2, 'pt'),
+  legend.margin = margin(2, 3, 3, 3),
+  legend.key.height=unit(15,'pt'),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.border = element_rect(fill=NA))
+
+point_with_family <- function(layer, family) {
+  old_geom <- layer$geom
+  new_geom <- ggproto(
+    NULL, old_geom,
+    draw_panel = function(self, data, panel_params, coord, na.rm = FALSE) {
+      pts <- ggproto_parent(GeomPoint, self)$draw_panel(
+        data, panel_params, coord, na.rm = na.rm
+      )
+      pts$gp$fontfamily <- family
+      pts
+    },
+    draw_key = function(self, data, params, size) {
+      pts <- ggproto_parent(GeomPoint, self)$draw_key(
+        data, params, size
+      )
+      pts$gp$fontfamily <- family
+      pts
+    }
+  )
+  layer$geom <- new_geom
+  layer
 }
 
-# SCRNA SUBTYPE COLORS
+# ------------------------------------------------------------------------------
+
+# TCSL 166 figs
+
+growth_dt <- fread(paste0(getwd(), "/r/in_vivo/tcsl166_growth.csv"))
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt[, length_2 := as.numeric(length_2)]
+growth_dt <- growth_dt[car != '']
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+  fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Unt','zeta'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+growth_dt_means <- growth_dt[, list(
+  vol_lww = mean(vol_lww, na.rm=T),
+  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
+  vol_lwl = mean(vol_lwl, na.rm=T),
+  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
+  vol_lwlw = mean(vol_lwlw, na.rm=T),
+  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
+  by=c('car','day')]
+
+left_group <- c('None','Unt','41BB','BAFF-R','CD28','TACI')
+right_group <- c('None','Unt','KLRG1','zeta')
+new_group <- c('41BB','BAFF-R','CD40','Unt','None')
+car_linetypes <- setNames(rep(1, length(car_colors)), names(car_colors))
+car_linetypes['None'] <- 2
+
+tumor_new <- ggplot(growth_dt_means[day <50 & car %in% new_group][car == 'Untransduced', car := 'Unt'],
+                  aes(x=day, y=vol_lwl, color=car, linetype=car, label=car)) +
+  geom_line(size=line_size) +
+  point_with_family(
+    geom_point(size=point_size, shape="\u25CF", show.legend=F),
+    "Arial Unicode MS") + 
+  geom_errorbar(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F, size=errorbar_size, width=0.3) + 
+  scale_linetype_manual("", values=car_linetypes[new_group]) +
+  scale_color_manual("", values=car_colors[new_group]) +
+  
+  #labels
+  coord_cartesian(xlim= c(2,48), clip = "off") +
+  geom_text_repel(data=unique(growth_dt_means[day < 50 & car %in% new_group][day == max(day)]),
+                  force        = 3,
+                  nudge_x      = 2,
+                  direction    = "y",
+                  vjust        = 0.5,
+                  hjust        = 0,
+                  segment.size = 0,
+                  xlim = c(52, Inf),
+                  fontface     = 'bold'
+  ) +
+  
+  theme_minimal() + 
+  plot_theme + 
+  theme(legend.position = "none", plot.margin = unit(c(0.1, 2.5, 0.1, 0.1), "cm")) +
+  labs(y=bquote('Tumor Volume'~(mm^3)), x='Day')
+
 # --------------------------------------------------------------------------------------------------
-all_colors <- list(
-    'NAIVE-CD62L'=colors_mid[1],
-    #'NAIVE-CD7'=colors_mid[2],
-    'NAIVE-CD7'='#A084AF',
-    'STAT1-IRF1'=colors_mid[4],
-    'STIM-INACT'=colors_mid[4],
-    'STIM-TC2'=colors_dark[10],
-    'TH2'=colors_dark[10],
-    'STIM-UNTR'=colors_mid[3],
-    'MEM-CD29'=colors_light[3],
-    'STIM-IFNG'=colors_mid[6],
-    'STIM-GNLY'=colors_mid[8],
-    'STIM-OXPHOS'=colors_mid[9],
-    'STIM-GLYC'='#ED5F1C') #brewer.pal(9,'Reds')[6]) #colors_mid[10]
 
-# SCRNA PHASE COLORS
+growth_dt <- fread(paste0(getwd(), "/r/in_vivo/tcsl179_growth.csv"))
+growth_dt <- growth_dt[!(is.na(day))]
+growth_dt[, car := gsub('NT', 'None', car)]
+growth_dt[, c('car1','car2') := tstrsplit(car, '-')]
+
+#remove baffr-41bb #3
+growth_dt <- growth_dt[mouse_number != '809-3']
+
+#make numeric mouse id
+growth_dt <- growth_dt[growth_dt[day==6, list(mouse_number, mouse_id= seq((.N))), by='car'], on=c('mouse_number','car')]
+
+stderr <- function(x, na.rm=FALSE) {
+  if (na.rm) x <- na.omit(x)
+  sqrt(var(x)/length(x))
+}
+
+ggplot(growth_dt) + geom_line(aes(x=day, y=Area1, color=car, group=mouse_number)) + facet_grid(~car)
+
+growth_mean_dt <- growth_dt[,
+  list(
+    car1= car1[1], car2= car2[1], 
+    area_mean = mean(Area1), 
+    area_sd = sd(Area1), area_se = stderr(Area1)),
+  by=c('day','car')]
+
+
+plot_car_group <- function(growth_mean_dt, group1) {
+  
+  ggplot(growth_mean_dt[car %in% group1 & day < 43],
+         aes(x=day, y=area_mean, group=car, color=car1, 
+             ymin=area_mean-area_se, ymax=area_mean+area_se,
+             label=car)) +
+    
+    # errorbars
+    geom_errorbar(show.legend=F, width=0.3, size=errorbar_size) +
+    
+    geom_errorbar(data=growth_mean_dt[car %in% group1 & !is.na(car2) & day < 43], 
+      size=errorbar_size, linetype=2, show.legend=F, width=0.3, aes(color=car2)) + 
+    
+    # solid line for singles
+    geom_line(data=growth_mean_dt[car %in% group1 & car != 'None'], size=line_size) + 
+    
+    geom_line(data=growth_mean_dt[car %in% group1 & car == 'None'], size=line_size, linetype=2) + 
+    
+    # hashed line for doubles
+    geom_line(data=growth_mean_dt[car %in% group1 & !is.na(car2) & day < 43], 
+      aes(color=car2), linetype=2, size=line_size,  show.legend=F) + 
+    
+    # full circle for single cars
+    point_with_family(
+      geom_point(data=growth_mean_dt[car %in% group1 & is.na(car2) & day < 43],
+      size=point_size, shape="\u25CF", aes(color=car1), show.legend=F),
+      "Arial Unicode MS") + 
+  
+    # left half circle for double cars
+    point_with_family(
+      geom_point(data=growth_mean_dt[car %in% group1 & !is.na(car2) & day < 43],
+      size=point_size, shape="\u25D7", aes(color=car1),  show.legend=F),
+      "Arial Unicode MS") + 
+    
+    # right half circle for double cars
+    point_with_family(
+      geom_point(data=growth_mean_dt[car %in% group1 & !is.na(car2) & day < 43], 
+      size=point_size, shape="\u25D6", aes(color=car2), show.legend=F),
+      "Arial Unicode MS") + 
+  
+    #black border 
+    # point_with_family(
+    #   geom_point(data=growth_mean_dt[car %in% group1 & day < 43], size=point_size,
+    #   shape="\u25CB", color='black',  show.legend=F),
+    #   "Arial Unicode MS") + 
+    
+    #labels
+    coord_cartesian(xlim= c(2,33), clip = "off") +
+    geom_text_repel(data=unique(growth_mean_dt[day < 43 & car %in% group1][day == max(day)]),
+      force        = 3,
+      nudge_x      = 2,
+      direction    = "y",
+      vjust        = 0.5,
+      hjust        = 0,
+      segment.size = 0,
+      xlim = c(35, Inf),
+      fontface     = 'bold'
+    ) +
+  
+    scale_color_manual("", values=rename(car_colors, c('BAFF-R'='BAFFR'))[group1]) +
+    theme_minimal() + 
+    plot_theme + 
+    theme(legend.position = "none", plot.margin = unit(c(0.1, 2, 0.1, 0.1), "cm")) +
+    labs(y=bquote('Tumor Volume'~(mm^3)), x='Day')
+}
+
+single_bb_baffr <- plot_car_group(growth_mean_dt[day < 43], c('41BB','BAFFR','CD40','Unt','None'))
+single_bb_baffr
+doubles_bb_baffr <- plot_car_group(
+  growth_mean_dt[day < 43],
+  c('41BB','BAFFR','CD40','BAFFR-41BB','CD40-41BB','Unt','None')) +
+  theme(plot.margin = unit(c(0.1, 3, 0.1, 0.1), "cm"))
+  
+doubles_28_40 <- plot_car_group(growth_mean_dt[day < 43], c('CD28','CD40','CD40-CD28','Unt','None'))
+
+ggsave(
+  here::here('..','figs','editor_rebuttal','combined_in_vivo-rebuttal.png'),
+  (tumor_new / plot_spacer()) | (single_bb_baffr / doubles_bb_baffr),
+  device='png', height=7.5, width=9.5, units='in')
+
+
+# STATS
 # --------------------------------------------------------------------------------------------------
+# cars <- c('BAFFR','41BB','Unt','NT','BAFFR-41BB')
+# growth_test_group <- growth_dt[day < 43 & car %in% cars, list(Area1, mouse_id, car, day, mouse_number)]
+# growth_test_group[, lArea1 := log(Area1+0.1)]
+# 
+# with(growth_test_group, {
+#   interaction.plot (day, factor(car), Area1, lty=c(1:2),lwd=2,ylab="mean of Area", xlab="Day", trace.label="car")
+#   nestinginfo <- groupedData(Area1 ~ car | mouse_number, data= growth_test_group)
+#   fit.compsym <- gls(Area1 ~ factor(car)*factor(day), data=nestinginfo, corr=corCompSymm(, form= ~ 1 | mouse_number))
+#   fit.nostruct <- gls(Area1 ~ factor(car)*factor(day), data=nestinginfo, corr=corSymm(, form= ~ 1 | mouse_number), weights = varIdent(form = ~ 1 | day))
+#   fit.ar1 <- gls(Area1 ~ factor(car)*factor(day), data=nestinginfo, corr=corAR1(, form= ~ 1 | mouse_number))
+#   fit.ar1het <- gls(Area1 ~ factor(car)*factor(day), data=nestinginfo, corr=corAR1(, form= ~ 1 | mouse_number), weights=varIdent(form = ~ 1 | day))
+#   
+#   # compare models for AIC and loglik
+#   print(anova(fit.compsym, fit.nostruct, fit.ar1, fit.ar1het)) #compares the models
+# 
+#   print(anova(fit.nostruct))
+#   print(anova(fit.compsym))
+#   print(anova(fit.ar1het))
+# })
 
-phase_colors <- list(
-    'S'='#B27FBE',
-    'G1'='#6CA6DC',
-    'G2M'='#EF5F9A')
+# Unstructured Variance/Covariance Structure gave lowest AIC and loglik, 
+# so using that
+compute_pairwise_mixed_effects <- function(data) {
+  glsControl(maxIter=1000, msMaxIter=1000, tolerance=1e-3)
+  with(data, tryCatch({
+    
+    print(unique(car))
+    nestinginfo <- groupedData(Area1 ~ car | mouse_number,data=data)
+    
+    # unstructured covariance matrix has slightly lower AIC,
+    # but does not converge for all/most pairs, so using symmetric
+    # matrix instead. This one has fewer dfs and so is likely a better
+    # choice anyway.
+    
+    # fit.nostruct <- gls(Area1 ~ factor(car)*day, 
+    #   data=nestinginfo, 
+    #   corr=corSymm(, form= ~ 1 | mouse_number),
+    #   weights = varIdent(form = ~ 1 | day))
+    
+    fit.compsym <- gls(Area1 ~ factor(car)*factor(day), 
+      data=nestinginfo,
+      corr=corCompSymm(, form= ~ 1 | mouse_number))
+        
+    return(list(cars=unique(car), model=fit.compsym))},
+    
+    error=function(cond) {
+      
+      message("Here's the original error message:")
+      message(cond)
+      return(NA)
 
+    }))
+}
 
-# OTHER_PALETTES
-# --------------------------------------------------------------------------------------------------
+models <- apply(growth_dt[day < 43, combn(unique(car),2)], 2, 
+    function(x) compute_pairwise_mixed_effects(
+      growth_dt[day < 43 & car %in% x]))
+p_values <- data.table(t(sapply(models,
+    function(model_i) c(model_i$cars, anova(model_i$model)$`p-value`[4]))))
 
+names(p_values) <- c('car_1','car_2','pvalue')
 
-outlier_cols <- brewer.pal(11, 'PiYG')[c(2,11)]
+p_values[, pvalue := as.numeric(pvalue)]
+p_values[, car_1 := factor(car_1, levels=growth_dt[, unique(car)])]
+p_values[, car_2 := factor(car_2, levels=growth_dt[, unique(car)])]
 
-outlier_cols_light <- brewer.pal(11, 'PiYG')[c(4,8)]
+p_values[, signif := ''][
+  pvalue < 0.05, signif := '*'][
+    pvalue < 0.001, signif := '**'][
+      pvalue < 0.00001, signif := '***']
 
-cd19_val <- brewer.pal(11,'PRGn')[c(3,10)]
+ggplot(p_values) + 
+  geom_tile(aes(x=car_1, y=car_2, fill=-log10(pvalue))) + 
+  geom_text(data=p_values[pvalue < 0.05], 
+    aes(x=car_1, y=car_2, label=signif), color='white', size=10, vjust=0.9) +
+  theme_classic() +
+  scale_fill_distiller(palette='Oranges',direction=1) +
+  theme(legend.position='left')

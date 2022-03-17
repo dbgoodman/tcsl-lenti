@@ -5,8 +5,9 @@ require(here)
 require(flowCore)
 require(flowWorkspace)
 
-source(here::here('r','fig_colors.R'))
-
+#setwd('/Volumes/HFSE/Box/tcsl/tcsl-lenti/src')
+#source(here::here('r','fig_colors.R'))
+source('/Volumes/HFSE/Box/tcsl/tcsl-lenti/src/r/fig_colors.R')
 
 platemap <- fread(
   text='well	car	k_type
@@ -28,7 +29,8 @@ B08	Zeta	neg
 B09	Untr	neg
 B10	Untr	bead')
 
-cd29_data_dir <- "/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl170"
+#cd29_data_dir <- "/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/fcs/tcsl170"
+cd29_data_dir <- "/Volumes/HFSE/Box/tcsl/lenti_screen_compiled_data/data/fcs/tcsl170"
 
 load_fcs <- function(diff_dir, channel_map) {
   diff_fcs_dir <- file.path(diff_dir)
