@@ -46,6 +46,7 @@ source(here::here('r','fig_colors.R'))
 
 if (reload_data | !exists('total_combined'))
   load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+  load(file.path(data.output.dir, 'pooled_cytokine_repeat_data.Rdata'))
 
 if (reload_data | !exists('ctv_gated_means_dt'))
   load(file=file.path(data.output.dir, 'ctv_plot_data.Rdata'))
@@ -102,17 +103,219 @@ cd8_marker_pos_threshold <- list(
 censor_negative_min = -1500
 ```
 
-## Fig 3 PCA
+## Fig 3 PCA - 5/19/22 updated to include new cytokines for revision
 
 ```{r}
+data.output.dir <- file.path(s3.data.dir)
 
-total_combined[CAR.align == 'TNR8', CAR.align := 'CD30']
-total_combined[CAR.align == 'HAVCR1b', CAR.align := 'TIM1']
+make_pca_combined_scores <- function() {
+
+  # recalculate new cytokines to include neg
+  old.read.counts <- read.counts[assay %in% c('IL2','IFNy')]
+  old.read.counts[assay == 'IFNy', assay := 'ifng']
+  old.read.counts[assay == 'IL2', assay := 'il2']
+  
+  old.read.counts[assay == 'ifng', sort.cond := ifelse(bin == 'A', 'neg','ifng')]
+  old.read.counts[assay == 'il2', sort.cond := ifelse(bin == 'A', 'neg','il2')]
+  
+  old.read.counts <- old.read.counts[, list(
+      CAR.align,
+      cell.count,
+      bin.pct,
+      car.bin.pct,
+      car.bin.cells= cell.count*car.bin.read.pct),
+    by=.(donor, assay, bin, sort.cond, k.type, t.type)]
+  
+  old.read.counts <- old.read.counts[, list(
+    cell.count= cell.count[1],
+    car.bin.cells = sum(car.bin.cells),
+    bin.pct= bin.pct[1],
+    car.bin.pct.incl= sum(car.bin.pct),
+    car.bin.pct= sum(car.bin.pct)),
+    by=.(sort.cond, CAR.align, donor, assay, t.type, k.type)]
+  
+  old.read.counts[, sort.group := paste(donor, assay, t.type, k.type, sep='_')]
+  old.read.counts[, car.sort.group.cells := sum(car.bin.cells), 
+      by=.(CAR.align, sort.group)]
+  
+  shared_cols <- intersect(
+    names(old.read.counts), 
+    names(cyto.read.counts.summed))
+  
+  cyto.read.counts.all <- rbind(
+    cyto.read.counts.summed[, ..shared_cols],
+    old.read.counts[, ..shared_cols])
+  
+  cyto.ranked.all <- cyto.read.counts.all[
+    assay %in% c('il2.ifng', 'il2','ifng') &
+    sort.cond %in% c('il2','ifng') &
+    car.sort.group.cells > 500]
+  
+  cyto.ranked.all[, value.scale := scale(
+    log(car.bin.pct.incl)), by=.(sort.cond, donor, t.type, k.type)]
+  
+  cyto.ranked.all[CAR.align == 'HAVCR1b', CAR.align := 'TIM1']
+  cyto.ranked.all[CAR.align == 'BTLA.a', CAR.align := 'BTLA']
+  cyto.ranked.all[, assay := factor(sort.cond, labels=c('IFNy','IL2'))]
+  cyto.ranked.all <- cyto.ranked.all[CAR.align %ni% c('BTLA.b','BTLA.a')]
+  
+  cyto.ranked.all[, group := paste(sort.cond,t.type,k.type)]
+  cyto.ranked.all[, comparison := 'pct_pos']
+  cyto.ranked.all[, combined_var := paste(comparison, sort.cond)]
+  cyto.ranked.all[, car.axis := paste(CAR.align,t.type,k.type, sep='|'), by=.(t.type)]
+  
+  cyto.ranked.all[, value.t.type := stouffer.z(value.scale), by=.(CAR.align, t.type)]
+  cyto.ranked.all[, value.assay := stouffer.z(value.scale), by=.(CAR.align, assay)]
+  cyto.ranked.all[, value.ta := stouffer.z(value.scale), by=.(CAR.align, t.type, assay)]
+  cyto.ranked.all[, value.overall := stouffer.z(value.scale), by=.(CAR.align)]
+  
+  cyto.ranked.all[, p.adj.t := p.adjust(2*pnorm(abs(value.t.type), lower.tail=F), "BH"),
+    by=.(CAR.align, t.type)]
+  
+  cyto.ranked.all[, p.adj.a := p.adjust(2*pnorm(abs(value.overall), lower.tail=F), "BH"),
+    by=.(CAR.align, assay)]
+  
+  cyto.ranked.all[, p.adj.ta := p.adjust(2*pnorm(abs(value.ta), lower.tail=F), "BH"),
+    by=.(CAR.align, t.type, assay)]
+  
+  cyto.ranked.all[, p.adj.o := p.adjust(2*pnorm(abs(value.overall), lower.tail=F), "BH"),
+    by=.(CAR.align)]
+
+  ### Combined columns, also pvalue
+  shared_cols <- c(intersect(
+    intersect(
+      intersect(names(rel_abund_means),names(cd69.ranked)),
+      intersect(names(cyto.ranked.all),names(car_score_means))),
+    names(deseq2_combined)), 'padj')
+  
+  pca_combined <- unique(rbind(
+    #deseq2 measurements for CTV1
+    deseq2_combined[, shared_cols, with=F],
+    
+    #new and old cytokine combined with z-scores and p-values
+    unique(copy(cyto.ranked.all)[, padj := p.adj.ta][, 
+      c('donor', shared_cols), with=F]),
+    
+    #cd69 from both donors
+    copy(cd69.ranked)[, padj := p.adj.t][
+      comparison == 'rlog_car_score', shared_cols, with=F],
+    
+    #car scores for CTV
+    copy(car_score_means)[, padj := p.adj.t][, 
+      comparison := 'rlog_car_score'][,
+        c('batch', 'donor', shared_cols), with=F],
+    
+    #relative abundance/expansion
+    copy(rel_abund_means)[, padj := p.adj.t][
+      comparison == 'abund_rel_baseline',
+        c('batch', 'donor', shared_cols), with=F],
+    
+    fill=T))
+  
+  pca_combined <- pca_combined[
+   !((grepl('[ABCD]+\\.[ABCD]+',comparison) | grepl('rlog',comparison)) &
+     assay == 'CTV3')]
+  
+  return(pca_combined)
+}
 
 cast_metrics <- dcast(
-  total_combined[!((grepl('[ABCD]+\\.[ABCD]+',comparison) | grepl('rlog',comparison)) & assay == 'CTV3')],
-  CAR.align ~ group + assay + k.type + t.type + comparison, 
-  value.var='value.scale')
+  make_pca_combined_scores()[!is.na(value.scale)][,
+    value.scale := ifelse(is.na(value.scale), 0, value.scale)],
+  CAR.align ~ batch + donor + assay + k.type + t.type + comparison, 
+  value.var='value.scale', fill=0)
+
+combined_pca <- prcomp(cast_metrics[,-1])
+
+# calculate pca stats
+pca.dt <- data.table(pc = data.table(colnames(combined_pca$rotation))[, 
+    PC := as.integer(gsub("[A-Z]", "", V1))][, PC], 
+    sd = combined_pca$sdev, 
+    var = combined_pca$sdev^2, 
+    var.norm = combined_pca$sdev^2/sum(combined_pca$sdev^2), 
+    var.acc = cumsum(combined_pca$sdev^2/sum(combined_pca$sdev^2)))
+
+melt.pca.dt <- melt(
+  pca.dt, measure.vars = c("var.norm", "var.acc"), variable.name = "metric")
+
+pca.stats.plot <- ggplot(melt.pca.dt) +
+  geom_line(aes(x = pc, y = value, color = metric)) +
+  geom_point(aes(x = pc, y = value, color = metric)) +
+  scale_x_continuous(limits = c(1, NA)) +
+  labs(title = "Fraction of Variance Captured by Principal Components, Every Sort Group", 
+       x = "Principal Component", y = "Fraction of Variance") +
+  theme_bw()
+
+# project data onto principal components
+projected.metrics <- scale(cast_metrics[, setdiff(names(cast_metrics), 
+  c("CAR.align")), with = FALSE],
+  combined_pca$center, combined_pca$scale) %*% combined_pca$rotation
+
+projected.metrics <- cbind.data.frame(CAR.align=cast_metrics[, CAR.align],
+  projected.metrics)
+
+projected.metrics <- data.table(merge(projected.metrics, 
+  unique(
+    copy(read.counts)[
+      CAR.align == 'TNR8', CAR.align := 'CD30'][
+      CAR.align == 'HAVCR1b', CAR.align := 'TIM1'][
+        , .(CAR.align, len)]), 
+  by = "CAR.align"))
+
+pca_car_colors <- copy(car_colors)
+names(pca_car_colors) <- gsub('TNR8', 'CD30', names(pca_car_colors))
+
+projected.metrics[CAR.align == '4-1BB', CAR.align := '41BB']
+projected.metrics[, CAR.annot := 'none']
+projected.metrics[CAR.align %in% names(pca_car_colors), CAR.annot := CAR.align]
+projected.metrics[, CAR.annot := factor(
+  CAR.annot, levels=c(names(pca_car_colors)[1:7], 'none'))]
+
+types <- fread(text="
+  CAR.align,Activity,Family
+  CRTAM,Costimulatory,IgSF
+  CD28,Costimulatory,IgSF
+  ICOS,Costimulatory,IgSF
+  CXADR,Costimulatory,IgSF
+  CD244,Costimulatory,IgSF
+  CD7,Costimulatory,IgSF
+  NTB-A,Costimulatory,IgSF
+  CD200R,Costimulatory,IgSF
+  NKR-P1A,Costimulatory,IgSF
+  GITR,Costimulatory,TNFRSF Type 5
+  CD30,Costimulatory,TNFRSF Type 5
+  41BB,Costimulatory,TNFRSF Type 5
+  CD40,Costimulatory,TNFRSF Type L
+  CD96,Unknown,IgSF
+  CD300a,Unknown,CD300
+  CD300f,Unknown,CD300
+  CD2,Mixed,IgSF
+  TIM1,Mixed,TIM
+  NKG2D,Mixed,Lectin
+  CD72,Mixed,Lectin
+  DC-SIGN,Mixed,Lectin
+  Siglec-3,Mixed,Lectin
+  TACI,Mixed,TNFRSF Type S
+  BAFF-R,Mixed,TNFRSF Type S
+  BCMA,Mixed,TNFRSF Type S
+  LAG3,Inhibitory,IgSF
+  CRACC,Inhibitory,IgSF
+  TIGIT,Inhibitory,IgSF
+  BTLA,Inhibitory,IgSF
+  LAIR1,Inhibitory,IgSF
+  PD1,Inhibitory,IgSF
+  CTLA4,Inhibitory,IgSF
+  ILT2,Inhibitory,IgSF
+  ILT3,Inhibitory,IgSF
+  ILT4,Inhibitory,IgSF
+  KLRG1,Inhibitory,IgSF
+  KIR3DL1,Inhibitory,IgSF
+  KIR2DL1,Inhibitory,IgSF
+  HAVCR2,Inhibitory,TIM
+  TLT-1,Inhibitory,TREM")
+
+#pct explained
+pct_exp <- scales::label_percent()(pca.dt[pc %in% c(1,2), var.norm])
 
 combined_pca <- prcomp(cast_metrics[,-1])
 
@@ -208,7 +411,7 @@ types <- fread(text="
 pct_exp <- scales::label_percent()(pca.dt[pc %in% c(1,2), var.norm])
 ```
 
-### PCA Plots
+### PCA Plots - 5/19/22 updated to include new cytokines for revision
 
 ```{r}
 # by name

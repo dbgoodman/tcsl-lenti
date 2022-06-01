@@ -1,0 +1,1047 @@
+---
+title: "pooled_04_cytokine_repeats.Rmd"
+author: "dbg_csa"
+date: "5/4/2022"
+output: html_document
+---
+
+## Loading
+```{r setup, include=FALSE}
+library(patchwork)
+library(ggplot2)
+library(data.table)
+library(ggrepel)
+
+theme_set(theme_bw())
+
+#sudo ln -s /Users/dbg/Library/Group\ Containers/G69SCX94XU.duck/Library/Application\ Support/duck/Volumes/s3.amazonaws.com\ –\ S3 /Volumes/S3
+s3.data.dir <- '/Volumes/s3/roybal-tcsl/lenti_screen_compiled_data/data'
+tcsl.dir <- file.path(s3.data.dir, 'ngs')
+dataset.name <- '2019.01.31.illumina_06'
+data.dir <- file.path(tcsl.dir, '..')
+output.dir <- file.path(here::here('..','figs','pooled'))
+metadata.filename <- file.path(tcsl.dir, 
+    dataset.name, paste0(dataset.name, '_layout.csv'))
+car.seq.filename <- file.path(tcsl.dir, dataset.name, 'fa/ref.csv')
+remove.cars <- c('*','41BB.wt','CD28.wt','ICOS.wt','TIIM1')
+
+car.seq <- fread(car.seq.filename, header=F)
+names(car.seq) <- c('CAR.align','seq')
+car.seq[, len := nchar(seq)]
+car.len <- car.seq[, list(CAR.align, len)]
+
+# load data
+load(file.path(data.dir, 'pooled_read_counts.Rdata'))
+
+# load functions
+#function.dir <- here::here('r','pooled','functions')
+#source(file.path(function.dir, 'calculate_PCA.r'))
+#source(file.path(function.dir, 'calculate_bin_corr.r'))
+#source(file.path(function.dir, 'calculate_lm.r'))
+
+# pvalue threshold
+padj.thresh <- .05
+
+#^ from illumina06
+#######################
+
+cytokine_fn <- '/Volumes/HFSE/Box/tcsl/ngs_data/2022.03.07.illumina_15/uniq/merged_table.csv'
+metadata_fn <- '/Volumes/HFSE/Box/tcsl/ngs_data/2022.03.07.illumina_15/metadata.csv'
+
+# load and melt counts
+cyto.read.counts <- melt(
+  fread(cytokine_fn)[, V1 := NULL],
+  id.vars = c('CAR_align'),
+  variable.name='sample.num',
+  value.name='counts')[sample.num != 'Undetermined'][,
+    sample.num := as.numeric(sample.num)]
+setnames(cyto.read.counts, 'CAR_align','CAR.align')
+
+# new 04.04.22 (novaseq additional reads)
+cytokine_fn2 <- '/Volumes/HFSE/Box/tcsl/ngs_data/2022.03.07.illumina_15/uniq2/merged_table.csv'
+
+cyto.read.counts2 <- melt(
+  fread(cytokine_fn2, header=T)[, V1 := NULL],
+  id.vars = c('CAR_align'),
+  variable.name='sample.num',
+  value.name='counts')[sample.num != 'Undetermined'][,
+    sample.num := as.numeric(sample.num)]
+setnames(cyto.read.counts2, 'CAR_align','CAR.align')
+
+
+# python code divides count by two for paired reads, we filter earlier and take
+# only R1, so we need to re-multiply by 2
+cyto.read.counts[, counts := counts*2]
+cyto.read.counts2[, counts := counts*2]
+
+cyto.read.counts.combined <- rbind(
+ copy(cyto.read.counts[, run := 'mini']),
+ copy(cyto.read.counts2[, run := 'nova'])) 
+
+# add metadata
+cyto.read.counts.combined <- cyto.read.counts.combined[
+  fread(metadata_fn)[!is.na(sample.num)], on='sample.num']
+
+# add sort group 
+cyto.read.counts.combined[, sort.group := paste(donor, assay, t.type, k.type, sep='_')]
+
+# add novaseq counts to orig as x.y
+cyto.read.counts.orig <- copy(cyto.read.counts)
+cyto.read.counts.orig <- merge(cyto.read.counts2, cyto.read.counts.orig,
+  by=c('CAR.align','sample.num'), all=T, suffixes=c('.novaseq', '.miniseq'))
+# add metadata
+cyto.read.counts.orig <- cyto.read.counts.orig[
+  fread(metadata_fn)[!is.na(sample.num)], on='sample.num']
+# add sort group 
+cyto.read.counts.orig[, sort.group := paste(donor, assay, t.type, k.type, sep='_')]
+
+
+# car lengths
+car.seq <- fread(car.seq.filename, header=F)
+names(car.seq) <- c('CAR.align','seq')
+car.seq[, len := nchar(seq)]
+car.len <- car.seq[, list(CAR.align, len)]
+cyto.read.counts.combined <- cyto.read.counts.combined[
+  car.len, on='CAR.align']
+
+# rename CARs based on costim table
+csv.dir <- file.path(tcsl.dir, '..','csv')
+domain_names <- fread(file.path(csv.dir, 'costim_table.csv'), fill=T)[,
+  list(CAR.orig=r_name, CAR.new=real_name)]
+
+# rename btla to btla.a and btla.b
+domain_names[CAR.new == 'BTLA', CAR.new := paste0('BTLA',c('.a','.b'))]
+
+cyto.read.counts.combined <- merge(cyto.read.counts.combined, domain_names,
+  by.x='CAR.align', by.y='CAR.orig', all=T)
+
+#rename CARs, save old name as CAR.orig
+cyto.read.counts.combined[, CAR.orig := CAR.align]
+cyto.read.counts.combined[, CAR.align := CAR.new]
+
+cyto.read.counts.combined <- cyto.read.counts.combined[!is.na(CAR.new)]
+
+# bin is sort condition
+cyto.read.counts.combined[, bin := sort.cond]
+cyto.read.counts.orig[, bin := sort.cond]
+```
+
+## Sample Quality
+```{r}
+
+ggplot(cyto.read.counts.combined) + 
+  geom_col(aes(x=reorder(CAR.align, counts), fill=run, y=log10(counts))) + 
+  facet_wrap(~sample.num+interaction(bin,sort.group), ncol=4) +
+  geom_hline(aes(yintercept=1), linetype=2) +
+  scale_x_discrete(guide = guide_axis(angle = 90)) 
+
+mapped_only_plot <- ggplot(
+  cyto.read.counts.combined[,
+    list(mean_log10_reads= mean(counts, na.rm=T)), 
+    by=c('sort.group','bin','sample.num','run')]) +
+  geom_col(
+    aes(
+      x=reorder(interaction(sort.group, bin, sample.num), mean_log10_reads),
+      y=mean_log10_reads, fill=run)) +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  scale_y_log10() +
+  labs(x='log-Mean Reads per CAR, by Sample', y='log-Mean Read Counts')
+
+mapped_totals_plot <- ggplot(
+  cyto.read.counts.orig[,
+    CAR.masked := (CAR.align %in% c('41BB.wt','CD28.wt','*'))][,
+      list(count.sum= sum(counts.miniseq, na.rm=T)),
+      by=.(sort.group, bin, sample.num,CAR.masked)]) +
+  geom_col(
+    aes(
+      x=reorder(interaction(sort.group, bin, sample.num), count.sum),
+      y=count.sum, fill=!CAR.masked)) + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(x='Sample, ordered by total reads', y='Total Reads', fill='Reads Mapped?')
+
+mapped_totals_plot <- ggplot(
+  cyto.read.counts.orig[,
+    CAR.masked := factor(
+      ((CAR.align=='*')+ 2*(CAR.align %in% c('41BB.wt','CD28.wt'))),
+      labels=c('Mapped','Unmapped','Contaminant'))][,
+      list(count.sum= sum(counts.miniseq, na.rm=T)),
+      by=.(sort.group, bin, sample.num,CAR.masked)]) +
+  geom_col(
+    aes(
+      x=reorder(interaction(sort.group, bin, sample.num), count.sum),
+      y=count.sum, fill=CAR.masked), position='stack') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(x='Sample, ordered by total reads', y='Total Reads', fill='Reads Mapped?')
+
+# pct masked vs cell count
+cyto.read.pct.masked <- unique(
+  cyto.read.counts.orig[!is.na(counts.miniseq)][,
+    CAR.masked := factor(
+      ((CAR.align=='*')+ 2*(CAR.align %in% c('41BB.wt','CD28.wt'))),
+      labels=c('Mapped','Unmapped','Contaminant'))][,
+      list(
+        cell.count, count.sum= sum(counts.miniseq, na.rm=T),
+        pct.masked= sum(counts.miniseq[CAR.masked!='Mapped'])/sum(counts.miniseq),
+        pct.contam= sum(counts.miniseq[CAR.masked=='Contaminant'])/sum(counts.miniseq),
+        pct.unmapped= sum(counts.miniseq[CAR.masked=='Unmapped'])/sum(counts.miniseq)),
+      by=.(sort.group, bin, sample.num)])
+
+mapped_pct_plot <- ggplot(cyto.read.pct.masked) + 
+  geom_label(aes(x=pct.masked, y=cell.count, label=sample.num)) +
+  scale_y_log10() +
+  scale_x_continuous(label=scales::percent) +
+  labs(
+    x='Percent of Unmapped/Contaminant Reads',
+    y='log10 Cell Count of Sample')
+
+contam_pct_plot <- ggplot(cyto.read.pct.masked) + 
+  geom_label(aes(x=pct.contam, y=cell.count, label=sample.num), color='blue') +
+  scale_y_log10() +
+  scale_x_continuous(label=scales::percent) +
+  labs(
+    x='Percent of Contaminant Reads',
+    y='log10 Cell Count of Sample')
+
+unmapped_pct_plot <- ggplot(cyto.read.pct.masked) + 
+  geom_label(aes(x=pct.unmapped, y=cell.count, label=sample.num), color='green') +
+  scale_y_log10() +
+  scale_x_continuous(label=scales::percent) +
+  labs(
+    x='Percent of Unmapped Reads',
+    y='log10 Cell Count of Sample')
+
+mapped_totals_plot /
+(mapped_pct_plot | contam_pct_plot | unmapped_pct_plot)
+```
+
+## Stats for Repooling 03.22.22
+```{r}
+
+repool_df <- cyto.read.counts.orig[!is.na(counts.miniseq)][,
+    CAR.masked := factor(
+      ((CAR.align=='*')+ 2*(CAR.align %in% c('41BB.wt','CD28.wt'))),
+      labels=c('Mapped','Unmapped','Contaminant'))][,
+      list(seq.sample= seq.sample[1], count.sum= sum(counts.miniseq), pcr2.ng.ul=pcr2.ng.ul[1]),
+      by=.(sort.group, bin, sample.num,CAR.masked)][CAR.masked == 'Mapped']
+
+# rank counts lowest to highest
+repool_df[, rank := rank(count.sum)]
+
+# take bottom 23 (incl sample 7)
+repool_num = 23
+repool_df[rank <= repool_num, rel_pool_mass := sum(count.sum)/count.sum]
+repool_df[rank <= repool_num, rel_pool_mass := rel_pool_mass/min(rel_pool_mass, na.rm=T)]
+
+ggplot(repool_df) +
+  geom_col(
+    aes(
+      x=reorder(interaction(sort.group, bin, sample.num), count.sum),
+      y=count.sum, fill=CAR.masked), position='stack') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  geom_vline(xintercept=repool_num+0.5, linetype=2) +
+  labs(x='Sample, ordered by total reads', y='Total Reads', fill='Reads Mapped?')
+
+# set max mass ratio at 80x
+repool_df[rank <= repool_num, rel_pool_mass := pmin(rel_pool_mass, 80, na.rm=T)]
+
+# set absolute mass to 2 µL of lowest concentration sample
+ul_sample_add <- 2
+repool_df[rank <= repool_num, abs_pool_mass := min(pcr2.ng.ul) * rel_pool_mass * 
+    ul_sample_add/(rel_pool_mass[which.min(pcr2.ng.ul)])]
+
+# absolute volume of sample if undiluted
+repool_df[rank <= repool_num, abs_pool_vol := abs_pool_mass/pcr2.ng.ul]
+
+# volume of diluted sample, if applicable (if less than sample add vol)
+repool_df[, vol_of_diluted := ifelse(abs_pool_vol > 2, abs_pool_vol, 2)]
+
+# amount of h2o to add to diluted samples
+repool_df[vol_of_diluted == 2, h2o_add := 
+  ((ul_sample_add*pcr2.ng.ul)/(abs_pool_mass/2) - ul_sample_add)]
+
+# check final masses
+repool_df[, final_conc := ifelse(!is.na(h2o_add),
+  (pcr2.ng.ul * ul_sample_add) / (ul_sample_add + h2o_add),
+  pcr2.ng.ul)]
+repool_df[, final_mass := final_conc * vol_of_diluted]
+repool_df[, check := final_mass == abs_pool_mass]
+
+fwrite(repool_df[rank <= 23],
+  '/Volumes/HFSE/Box/tcsl/ngs_data/2022.03.07.illumina_15/uniq/repool_table.csv')
+
+repooled.samples <- repool_df[rank <= 23]$sample.num
+
+```
+
+## Integrate nova and mini data
+
+The rarest cars per sample appear to be higher in frequency in the novaseq - (more points in the upper left triangle). This is true across almost all samples, and esepcially non-repooled ones. Let's compare the sort data between nova and mini for samples where most/all CARs are present for both.
+
+```{r}
+
+ggplot(
+  cyto.read.counts.combined[counts > 0, sum(run=='nova') - sum(run=='mini'), 
+    by=c('sample.num')]) + 
+  geom_col(aes(x=reorder(sample.num,V1), y=V1, fill=factor(sign(V1)))) + 
+  labs(x='Samples', y='Nova-Mini',
+       title='Red: More CARs in Mini, Blue: More CARs in Nova',
+       subtitle='Compare for samples in middle') + 
+  geom_hline(yintercept=c(-6,6), linetype=2)
+
+# add 3-way flag called run_choice: 'mini','nova','both'
+cyto.read.counts.combined[, 
+    run_choice := factor(ifelse(
+      abs(sum(run=='nova' & counts > 0) - sum(run=='mini' & counts > 0)) <= 6,
+      0, 
+      sign(sum(run=='nova' & counts > 0) - sum(run=='mini' & counts > 0))),
+      levels=c(-1,0,1),
+      labels=c('mini','both','nova')),
+    by=c('sample.num')]
+
+```
+
+## Calc Bin Pcts
+```{r}
+
+# replace miniseq data for repooled samples only
+# cyto.read.counts <- rbind(
+#   cyto.read.counts.combined[sample.num %in% repooled.samples & run == 'nova'],
+#   cyto.read.counts.combined[!(sample.num %in% repooled.samples) & run == 'mini'])
+
+calc_bin_stats <- function(cyto.read.counts) {
+  cyto.read.counts[,
+    bin.pct := cell.count/sum(cell.count), 
+      by = .(CAR.align, sort.group)]
+
+  # get bin percent estimates
+  cyto.read.counts[, 
+    bin.reads := sum(counts, na.rm=T),
+      by=c('sample.num')]
+  
+  cyto.read.counts[, 
+    car.bin.read.pct := counts/bin.reads,
+      by=c('sort.group','bin')]
+  
+  # car bin read pcts should sum to 1
+  cyto.read.counts[bin.reads > 0, 
+    stopifnot(all.equal(sum(car.bin.read.pct), 1, tolerance= 1e-5)),
+      by=c('sort.group','bin')]
+  
+  # bin pcts should sum to 1
+  cyto.read.counts[, stopifnot(all.equal(sum(bin.pct), 1)),
+              by=c('sort.group','CAR.align')]
+  
+  # get car absolute pct estimates
+  cyto.read.counts[, 
+    car.abs.pct := car.bin.read.pct*(bin.pct), 
+      by=c('sort.group')]
+  
+  # absolute pct estimates should sum to 1
+  #cyto.read.counts[, (sum(car.abs.pct), 1)-1, by=c('sort.group')]
+  #very slightly off, 1/1000, need to fix tolerance
+  
+  # get car abund
+  cyto.read.counts[, car.abund := sum(car.abs.pct),
+    by=c('sort.group','CAR.align')]
+  
+  # CAR abundances should sum to 1
+  cyto.read.counts[,
+    stopifnot(all.equal(sum(car.abund), 1)), 
+      by=c('sort.group','bin')]
+  
+  cyto.read.counts[, car.bin.pct := car.abs.pct/car.abund]
+  
+  # other metrics
+  cyto.read.counts[, rel.car.pct := (bin.pct - mean(bin.pct)) / mean(bin.pct),
+      by=c('sort.group','CAR.align')]
+  cyto.read.counts[, sort.reads := sum(counts),
+      by=c('sort.group','CAR.align')]
+  cyto.read.counts[, mean.car.abund := mean(car.abund), 
+    by=c('CAR.align')]
+  cyto.read.counts[, rel.car.abund := car.abund/mean(car.abund), 
+    by=c('CAR.align')]
+  cyto.read.counts[, car.bin.cells := car.bin.read.pct * cell.count]
+  cyto.read.counts[, car.sort.group.cells := sum(car.bin.cells), 
+    by=.(CAR.align, sort.group)]
+  return(cyto.read.counts)
+}
+
+add_dpos_incl <- function(cyto.read.counts) {
+  # include dpos in ifng and il2
+  
+  #il2
+  cyto.read.counts[, car.bin.pct.incl := car.bin.pct, by=.(sort.group, CAR.align)]
+  cyto.read.counts[, car.bin.pct.incl := ifelse(
+      bin=='il2', 
+      car.bin.pct[bin=='il2']+car.bin.pct[bin=='dpos'],
+      car.bin.pct.incl), 
+    by=.(sort.group, CAR.align)]
+  
+  #ifng
+  cyto.read.counts[, car.bin.pct.incl := ifelse(
+      bin=='ifng', 
+      car.bin.pct[bin=='ifng']+car.bin.pct[bin=='dpos'],
+      car.bin.pct.incl), 
+    by=.(sort.group, CAR.align)]
+  
+  return(cyto.read.counts)
+}
+
+min.sort.reads <- 200
+
+cyto.read.counts.mini <- add_dpos_incl(calc_bin_stats(
+  cyto.read.counts.combined[
+    run_choice == run | (run_choice == 'both' & run == 'mini')]))
+
+cyto.read.counts.nova <- add_dpos_incl(calc_bin_stats(
+  cyto.read.counts.combined[
+    run_choice == run | (run_choice == 'both' & run == 'nova')]))
+
+# summary of read counts per sample per run
+run.count.comparison <- merge(
+  cyto.read.counts.mini[,
+    list(run_choice=run_choice[1], mini.counts= sum(counts, na.rm=T)),
+    by=.(donor, sort.cond, sort.group)], 
+  cyto.read.counts.nova[,
+    list(run_choice=run_choice[1], nova.counts= sum(counts, na.rm=T)),
+    by=.(donor, sort.cond, sort.group)])
+
+ggplot(
+    melt(run.count.comparison, measure.vars=c('mini.counts','nova.counts'))) +
+  geom_col(aes(x=sort.cond, y=log10(value), fill=variable), position='dodge') +
+  facet_wrap(sort.group~interaction(donor, run_choice), scales='free')
+
+# merge and replot bin pcts
+run.count.comparison[, mini.greater := mini.counts < nova.counts]
+
+
+cyto.read.counts.combined[, counts.sum := ifelse(
+  run_choice == 'both', 
+  sum(counts, na.rm=T),
+  counts[run_choice == run]),
+  by=.(CAR.align, sample.num)]
+
+
+```
+
+## NovaSeq Repool Comparison (4.4.22)
+
+```{r}
+
+ggplot(cyto.read.counts.orig[,
+    CAR.masked := factor(
+      ((CAR.align=='*')+ 2*(CAR.align %in% c('41BB.wt','CD28.wt'))),
+      labels=c('Mapped','Unmapped','Contaminant'))][
+        CAR.masked == 'Mapped'][,
+          list(miniseq= sum(counts.miniseq*2, na.rm=T), 
+               novaseq= sum(counts.novaseq*2, na.rm=T)),
+          by=sample.num], 
+    aes(x=miniseq, y=novaseq, label=sample.num,
+        color=sample.num %in% repool_df[rank <= 23]$sample.num)) + 
+  geom_point() + 
+  scale_x_log10() +
+  scale_y_log10() + 
+  geom_text_repel() + 
+  geom_abline(linetype=2) + 
+  labs(y='4.1.22 Novaseq Reads', x='3.16.22 Miniseq Reads',
+       color='Repooled for NovaSeq')
+
+
+ggplot(
+  dcast(merge(run.count.comparison, cyto.read.counts.combined)[,
+    `:=`(log_counts= log10(counts), pct= counts / sum(counts)),
+      by=c('run','sample.num')][,
+        run_count_diff := log_counts[run=='nova'] - 
+          log_counts[run=='mini'], by=c('CAR.align','sample.num')], 
+  CAR.align + sample.num + run_count_diff + mini.greater ~ run , value.var='pct')) +
+  geom_point(
+    aes(x=mini, y=nova, color=sample.num %in% repooled.samples,
+        shape=factor(sign(run_count_diff)), size=abs(run_count_diff))) +
+  facet_wrap(~reorder(sample.num, sample.num %in% repooled.samples)) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_size(range=c(0.5,3)) +
+  geom_abline() +
+  labs(x='Miniseq Read Fraction', y='Novaseq Read Fraction',
+       color='Repooled Sample', shape='sign(Novaseq - Miniseq) read count',
+       size='log10(abs(Novaseq - Miniseq)) read count')
+
+# facet T/F - more reads in miniseq?
+# for green (fewer than 6 car dropouts in each), combine reads without scaling. 
+ggplot(
+  dcast(merge(run.count.comparison, cyto.read.counts.combined)[,
+    `:=`(log_counts= log10(counts), pct= counts / sum(counts)),
+      by=c('run','sample.num')][,
+        run_count_diff := log_counts[run=='nova'] - 
+          log_counts[run=='mini'], by=c('CAR.align','sample.num')], 
+  CAR.align + sample.num + run_count_diff + mini.greater + run_choice ~ run , value.var='pct')) +
+  geom_point(
+    aes(x=mini, y=nova, color=run_choice)) +
+  facet_wrap(~reorder(interaction(sample.num,mini.greater), sample.num %in% repooled.samples)) +
+  scale_x_log10() +
+  scale_y_log10() +
+  geom_abline() +
+  labs(x='Miniseq Read Fraction', y='Novaseq Read Fraction',
+       color='Run choice based on # CAR dropouts (<6)', 
+       shape='sign(Novaseq - Miniseq) read count',
+       size='log10(abs(Novaseq - Miniseq)) read count')
+
+# compare to baseline
+ggplot(
+  dcast(cyto.read.counts.combined[, `:=`(log_counts= log10(counts), pct= counts / sum(counts)), by=c('run','sample.num')][, pct_v_baseline := pct / pct[bin=='baseline'], by=.(CAR.align, run, donor, t.type, k.type)], CAR.align + sample.num ~ run , value.var='pct_v_baseline')) +
+  geom_point(
+    aes(x=mini, y=nova, color=sample.num %in% repooled.samples)) +
+  facet_wrap(~reorder(sample.num, sample.num %in% repooled.samples)) +
+  scale_x_log10() +
+  scale_y_log10() +
+  geom_abline() +
+  labs(x='Miniseq Read Fraction', y='Novaseq Read Fraction',
+       color='Repooled Sample', shape='sign(Novaseq - Miniseq) read count',
+       size='log10(abs(Novaseq - Miniseq)) read count')
+
+# compare number of cells
+ggplot(cyto.read.counts.nova[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')]) + geom_col(aes(y=log10(car.bin.cells), x=CAR.align, fill=(car.bin.pct))) + facet_grid(sort.cond~donor) + geom_hline(aes(yintercept=log10(100)))+ coord_flip() + scale_fill_distiller(palette='Spectral')
+
+# bin cell count vs sort-group cell counts
+ggplot(cyto.read.counts.mini[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')][, bin.v.dneg := car.bin.cells/car.bin.cells[bin=='dneg'], by=.(CAR.align,sort.group,donor)]) + geom_point(aes(x=log10(car.sort.group.cells), y=log10(car.bin.pct), color=len)) + facet_grid(sort.cond~donor, scales='free') + scale_fill_distiller(palette='Spectral') + ggplot(cyto.read.counts.nova[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')][, bin.v.dneg := car.bin.cells/car.bin.cells[bin=='dneg'], by=.(CAR.align,sort.group,donor)]) + geom_point(aes(x=log10(car.sort.group.cells), y=log10(car.bin.pct), color=len)) + facet_grid(sort.cond~donor, scales='free') + scale_fill_distiller(palette='Spectral') + geom_abline()
+
+cyto.read.counts.summed <- add_dpos_incl(calc_bin_stats(
+  cyto.read.counts.combined[
+    run_choice == run | (run_choice == 'both' & run == 'mini')][,
+      counts := counts.sum]))
+
+ggplot(cyto.read.counts.mini[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')][, bin.v.dneg := car.bin.cells/car.bin.cells[bin=='dneg'], by=.(CAR.align,sort.group,donor)]) + geom_point(aes(x=log10(car.sort.group.cells), y=log10(car.bin.pct), color=len)) + facet_grid(sort.cond~donor, scales='free') + scale_fill_distiller(palette='Spectral') + ggplot(cyto.read.counts.nova[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')][, bin.v.dneg := car.bin.cells/car.bin.cells[bin=='dneg'], by=.(CAR.align,sort.group,donor)]) + geom_point(aes(x=log10(car.sort.group.cells), y=log10(car.bin.pct), color=len)) + facet_grid(sort.cond~donor, scales='free') + scale_fill_distiller(palette='Spectral') + geom_abline() + ggplot(cyto.read.counts.summed[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')][, bin.v.dneg := car.bin.cells/car.bin.cells[bin=='dneg'], by=.(CAR.align,sort.group,donor)]) + geom_point(aes(x=log10(car.sort.group.cells), y=log10(car.bin.pct), color=len)) + facet_grid(sort.cond~donor, scales='free') + scale_fill_distiller(palette='Spectral') + geom_abline()
+
+ggplot(cyto.read.counts.summed[sort.group %in% c('67_il2.ifng_CD8_pos', '68_il2.ifng_CD8_pos')][, bin.v.dneg := car.bin.cells/car.bin.cells[bin=='dneg'], by=.(CAR.align,sort.group,donor)], aes(x=log10(car.sort.group.cells), y=log10(car.bin.pct), color=len, label=CAR.align)) + geom_point() + facet_grid(sort.cond~donor, scales='free') + scale_fill_distiller(palette='Spectral') + geom_vline(xintercept=log10(500)) + geom_text_repel()
+
+```
+
+## Plot Bin Pcts
+```{r}
+
+dcast(rbind(cyto.read.counts.nova[, run_group := 'nova'], cyto.read.counts.mini[, run_group := 'mini'])[sort.reads > min.sort.reads & CAR.align != 'BTLA' & 
+        car.sort.group.cells > 500][,
+        `:=`(
+          min_counts= min(counts, na.rm=T),
+          min_cells= min(car.sort.group.cells, na.rm=T)),
+        by=c('k.type','assay','t.type','CAR.align','bin','run_group')],
+      k.type+assay+t.type+bin+CAR.align+min_counts+min_cells+donor~run_group, value.var='car.bin.pct.incl')
+
+indiv_run_plots <- function(cyto.read.counts) {
+  
+  plotlist = list()
+  
+  plotlist[['car.by.reads']] <- ggplot(cyto.read.counts) + 
+    geom_point(aes(
+      x=reorder(CAR.align, sort.reads),
+      y=log10(sort.reads),
+      color=donor,
+      shape=sort.reads < min.sort.reads)) + 
+    facet_wrap(~donor+assay+t.type+k.type, nrow=2) +
+    geom_hline(yintercept=log10(min.sort.reads), linetype=2) +
+    coord_flip()
+  
+  
+  plotlist[['car.by.abund']] <- ggplot(
+    unique(cyto.read.counts[sort.reads > min.sort.reads,
+      mean.car.abund, by=CAR.align])) + 
+    geom_bar(
+        aes(
+            y=mean.car.abund,
+            x=reorder(CAR.align,mean.car.abund, na.rm=T)),
+        stat='identity') +
+    coord_flip() +
+    labs(title='Mean CAR abundances as fraction of sort')
+  
+  plotlist[['bin.pcts']] <- ggplot(
+    cyto.read.counts[!(bin %in% c('neg','baseline','dneg')) & 
+      sort.reads > min.sort.reads]) +
+    geom_point(
+      aes(y=car.bin.pct, x=reorder(CAR.align,sort.reads), color=bin)) +
+    facet_grid(k.type~assay+t.type+donor, scales='free') +
+    coord_flip()
+  
+  # compare donors
+  compare_donors <- dcast(
+    cyto.read.counts[!(bin %in% c('neg','baseline','dneg')) & 
+      sort.reads > min.sort.reads & CAR.align != 'BTLA' & 
+        car.sort.group.cells > 500][,
+        `:=`(
+          min_counts= min(counts, na.rm=T),
+          min_cells= min(car.sort.group.cells, na.rm=T)),
+        by=c('k.type','assay','t.type','CAR.align','bin')], 
+    k.type+assay+t.type+bin+CAR.align+min_counts+min_cells~donor,
+    value.var='car.bin.pct.incl')
+  
+  compare_donors <- compare_donors[,
+    `:=`(top_67= rank(-`67`) < 5,
+         top_68= rank(-`68`) < 5,
+         favorites= CAR.align %in% c(
+           'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+    by=.(k.type, assay, t.type, bin)]
+  
+  compare_donors[, label := ifelse(top_67 | top_68 | favorites,  CAR.align, '')]
+  
+  plotlist[['bin.pcts.donor.comp']] <- ggplot(
+    compare_donors, aes(x=`67`, y=`68`, color=log10(min_cells), label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+t.type+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+  
+  plotlist[['bin.pcts.donor.comp.il2']] <- ggplot(
+    compare_donors[bin=='il2'], aes(x=`67`, y=`68`, color=bin, label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+t.type+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+  
+  plotlist[['bin.pcts.donor.comp.il2.ifng']] <- ggplot(
+    compare_donors[assay=='il2.ifng'][,
+        `:=`(top_67= rank(-`67`) < 10,
+             top_68= rank(-`68`) < 10,
+             favorites= CAR.align %in% c(
+               'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+        by=.(k.type, assay, t.type, bin)][,
+          label := ifelse(top_67 | top_68 | favorites,  CAR.align, '')],
+      aes(x=`67`, y=`68`, color=bin, label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+t.type+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+  
+  return(plotlist)
+}
+
+#compare runs (mini vs nova)
+cyto.read.counts.runcomp <- dcast(
+  rbind(cyto.read.counts.nova[, run_group := 'nova'],
+        cyto.read.counts.mini[, run_group := 'mini'])[
+          sort.reads > min.sort.reads & CAR.align != 'BTLA' &
+          !(bin %in% c('neg','baseline','dneg')) &
+          car.sort.group.cells > 500][,
+        `:=`(
+          min_counts= min(counts, na.rm=T),
+          min_cells= min(car.sort.group.cells, na.rm=T)),
+        by=c('k.type','assay','t.type','CAR.align','bin','donor')],
+  k.type+assay+t.type+bin+CAR.align+donor+min_counts+min_cells~run_group,
+  value.var='car.bin.pct')
+
+cyto.read.counts.runcomp <- cyto.read.counts.runcomp[,
+  `:=`(top_mini= rank(-`mini`) < 5,
+       top_nova= rank(-`nova`) < 5,
+       favorites= CAR.align %in% c(
+         'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+  by=.(k.type, assay, t.type, bin, donor)][, 
+    label := ifelse(top_mini | top_nova | favorites,  CAR.align, '')]
+
+# ggplot(
+#     cyto.read.counts.runcomp, aes(x=`mini`, y=`nova`, label=label)) + 
+#     geom_point() + 
+#     facet_wrap(k.type~assay+t.type+bin+donor, scales='free') +
+#     geom_text_repel() + 
+#     scale_x_continuous(labels=scales::percent) +
+#     scale_y_continuous(labels=scales::percent)
+```
+
+
+## Plot Bin Pcts - combined read counts
+```{r}
+indiv_run_plots <- function(cyto.read.counts) {
+  
+  plotlist = list()
+  
+  plotlist[['car.by.reads']] <- ggplot(cyto.read.counts) + 
+    geom_point(aes(
+      x=reorder(CAR.align, sort.reads),
+      y=log10(sort.reads),
+      color=donor,
+      shape=sort.reads < min.sort.reads)) + 
+    facet_wrap(~donor+assay+t.type+k.type, nrow=2) +
+    geom_hline(yintercept=log10(min.sort.reads), linetype=2) +
+    coord_flip()
+  
+  
+  plotlist[['car.by.abund']] <- ggplot(
+    unique(cyto.read.counts[sort.reads > min.sort.reads,
+      mean.car.abund, by=CAR.align])) + 
+    geom_bar(
+        aes(
+            y=mean.car.abund,
+            x=reorder(CAR.align,mean.car.abund, na.rm=T)),
+        stat='identity') +
+    coord_flip() +
+    labs(title='Mean CAR abundances as fraction of sort')
+  
+  plotlist[['bin.pcts']] <- ggplot(
+    cyto.read.counts[!(bin %in% c('neg','baseline','dneg')) & 
+      sort.reads > min.sort.reads]) +
+    geom_point(
+      aes(y=car.bin.pct, x=reorder(CAR.align,sort.reads), color=bin)) +
+    facet_grid(k.type~assay+t.type+donor, scales='free') +
+    coord_flip()
+  
+  # compare donors
+  compare_donors <- dcast(
+    cyto.read.counts[!(bin %in% c('neg','baseline','dneg')) & 
+      sort.reads > min.sort.reads & 
+        car.sort.group.cells > 500][,
+        `:=`(
+          min_counts= min(counts, na.rm=T),
+          min_cells= min(car.sort.group.cells, na.rm=T)),
+        by=c('k.type','assay','t.type','CAR.align','bin')], 
+    k.type+assay+t.type+bin+CAR.align+min_counts+min_cells~donor,
+    value.var='car.bin.pct.incl')
+  
+  compare_donors <- compare_donors[,
+    `:=`(top_67= rank(-`67`) < 5,
+         top_68= rank(-`68`) < 5,
+         favorites= CAR.align %in% c(
+           'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+    by=.(k.type, assay, t.type, bin)]
+  
+  compare_donors[, label := ifelse(top_67 | top_68 | favorites,  CAR.align, '')]
+  
+  plotlist[['bin.pcts.donor.comp']] <- ggplot(
+    compare_donors, aes(x=`67`, y=`68`, color=min_cells, label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+t.type+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+  
+  plotlist[['bin.pcts.donor.comp.il2']] <- ggplot(
+    compare_donors[bin=='il2'], aes(x=`67`, y=`68`, color=bin, label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+t.type+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+  
+  plotlist[['bin.pcts.donor.comp.il2.ifng']] <- ggplot(
+    compare_donors[assay=='il2.ifng'][,
+        `:=`(top_67= rank(-`67`) < 10,
+             top_68= rank(-`68`) < 10,
+             favorites= CAR.align %in% c(
+               'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+        by=.(k.type, assay, t.type, bin)][,
+          label := ifelse(top_67 | top_68 | favorites,  CAR.align, '')],
+      aes(x=`67`, y=`68`, color=bin, label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+t.type+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+  
+  return(plotlist)
+}
+
+#compare runs (mini vs nova)
+cyto.read.counts.runcomp <- dcast(
+  rbind(cyto.read.counts.nova[, run_group := 'nova'],
+        cyto.read.counts.mini[, run_group := 'mini'])[
+          sort.reads > min.sort.reads & CAR.align != 'BTLA' &
+          !(bin %in% c('neg','baseline','dneg')) &
+          car.sort.group.cells > 500][,
+        `:=`(
+          min_counts= min(counts, na.rm=T),
+          min_cells= min(car.sort.group.cells, na.rm=T)),
+        by=c('k.type','assay','t.type','CAR.align','bin','donor')],
+  k.type+assay+t.type+bin+CAR.align+donor+min_counts+min_cells~run_group,
+  value.var='car.bin.pct')
+
+cyto.read.counts.runcomp <- cyto.read.counts.runcomp[,
+  `:=`(top_mini= rank(-`mini`) < 5,
+       top_nova= rank(-`nova`) < 5,
+       favorites= CAR.align %in% c(
+         'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+  by=.(k.type, assay, t.type, bin, donor)][, 
+    label := ifelse(top_mini | top_nova | favorites,  CAR.align, '')]
+
+# ggplot(
+#     cyto.read.counts.runcomp, aes(x=`mini`, y=`nova`, label=label)) + 
+#     geom_point() + 
+#     facet_wrap(k.type~assay+t.type+bin+donor, scales='free') +
+#     geom_text_repel() + 
+#     scale_x_continuous(labels=scales::percent) +
+#     scale_y_continuous(labels=scales::percent)
+
+run_plots <- indiv_run_plots(
+  cyto.read.counts.summed[
+    sort.reads > min.sort.reads & car.sort.group.cells > 500][,
+      `:=`(
+        min_counts= min(counts, na.rm=T),
+        min_cells= min(car.sort.group.cells, na.rm=T))])
+
+compare_48 <- dcast(
+  cyto.read.counts.summed[!(bin %in% c('neg','baseline','dneg')) & 
+    sort.reads > min.sort.reads & 
+      car.sort.group.cells > 500][,
+      `:=`(
+        min_counts= min(counts, na.rm=T),
+        min_cells= min(car.sort.group.cells, na.rm=T)),
+      by=c('k.type','assay','donor','CAR.align','bin')], 
+  k.type+assay+donor+bin+CAR.align+min_counts+min_cells~t.type,
+  value.var='car.bin.pct.incl')
+
+compare_48 <- compare_48[,
+  `:=`(top_4= rank(-CD4) < 5,
+       top_8= rank(-CD8) < 5,
+       favorites= CAR.align %in% c(
+         'BAFF-R','NTB-A','TACI','4-1BB','CD28','CD40','CD2')), 
+  by=.(k.type, assay, donor, bin)]
+
+compare_48[, label := ifelse(top_8 | top_4 | favorites,  CAR.align, '')]
+
+ggplot(
+    compare_48[!is.na(CD4) & !is.na(CD8)],
+      aes(x=CD4, y=CD8, color=bin, label=label)) + 
+    geom_point() + 
+    facet_wrap(k.type~assay+donor+bin, scales='free') +
+    geom_text_repel() + 
+    scale_x_continuous(labels=scales::percent) +
+    scale_y_continuous(labels=scales::percent)
+
+```
+
+```{r}
+
+# ggplot(dcast(cyto.read.counts.summed[sort.group %in% c("67_baseline_CD8_neg","67_baseline_CD8_pos")], assay+t.type+bin+CAR.align~k.type, value.var='car.abund'), aes(x=log10(neg), y=log10(pos), label=CAR.align)) + geom_point() + geom_text_repel() + geom_abline()
+# 
+# ggplot(dcast(cyto.read.counts.summed[sort.group %in% c("68_baseline_CD8_neg","68_baseline_CD8_pos")], assay+t.type+bin+CAR.align~k.type, value.var='car.abund'), aes(x=log10(neg), y=log10(pos), label=CAR.align)) + geom_point() + geom_text_repel() + geom_abline()
+# 
+# ggplot(dcast(cyto.read.counts.summed[sort.group %in% c("68_baseline_CD8_neg","67_baseline_CD8_neg")], assay+t.type+bin+CAR.align~donor, value.var='car.abund'), aes(x=log10(`67`), y=log10(`68`), label=CAR.align)) + geom_point() + geom_text_repel() + geom_abline()
+# 
+# ggplot(dcast(cyto.read.counts.summed[sort.group %in% c("68_baseline_CD8_pos","67_baseline_CD8_pos")], assay+t.type+bin+CAR.align~donor, value.var='car.abund'), aes(x=log10(`67`), y=log10(`68`), label=CAR.align)) + geom_point() + geom_text_repel() + geom_abline()
+```
+
+### Combine with Old Donor
+
+```{r}
+old <- new.env()
+load(file.path(data.dir, 'pooled_read_counts.Rdata'), envir=old)
+old.read.counts <- old$read.counts[assay %in% c('IL2','IFNy')]
+
+old.read.counts[assay == 'IFNy', assay := 'ifng']
+old.read.counts[assay == 'IL2', assay := 'il2']
+
+old.read.counts[assay == 'ifng', sort.cond := ifelse(bin == 'A', 'neg','ifng')]
+old.read.counts[assay == 'il2', sort.cond := ifelse(bin == 'A', 'neg','il2')]
+
+old.read.counts <- old.read.counts[, list(
+    CAR.align,
+    cell.count,
+    bin.pct,
+    car.bin.pct,
+    car.bin.cells= cell.count*car.bin.read.pct),
+  by=.(donor, assay, bin, sort.cond, k.type, t.type)]
+
+old.read.counts <- old.read.counts[, list(
+  cell.count= cell.count[1],
+  car.bin.cells = sum(car.bin.cells),
+  bin.pct= bin.pct[1],
+  car.bin.pct.incl= sum(car.bin.pct),
+  car.bin.pct= sum(car.bin.pct)),
+  by=.(sort.cond, CAR.align, donor, assay, t.type, k.type)]
+
+old.read.counts[, sort.group := paste(donor, assay, t.type, k.type, sep='_')]
+old.read.counts[, car.sort.group.cells := sum(car.bin.cells), 
+    by=.(CAR.align, sort.group)]
+
+shared_cols <- intersect(
+  names(old.read.counts), 
+  names(cyto.read.counts.summed))
+
+cyto.read.counts.all <- rbind(
+  cyto.read.counts.summed[, ..shared_cols],
+  old.read.counts[, ..shared_cols])
+```
+
+## IL2 & IFNG plots with old donor added
+
+```{r}
+
+il2.ifng.plots <- list()
+
+# IFNG and IL2 donor vs donor each (the lazy ugly way)
+il2.ifng.plots$between.donors <- ((ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & t.type == 'CD4' & assay %in% c('il2.ifng', 'ifng') & car.sort.group.cells > 500], sort.cond+CAR.align+t.type+k.type~donor, value.var = 'car.bin.pct.incl')[sort.cond == 'ifng'], aes(x=`67`, y=`d1`)) + geom_point() + geom_text_repel(aes(label=CAR.align))) + (ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & t.type == 'CD4' & assay %in% c('il2.ifng', 'ifng') & car.sort.group.cells > 500], sort.cond+CAR.align+t.type+k.type~donor, value.var = 'car.bin.pct.incl')[sort.cond == 'ifng'], aes(x=`68`, y=`d1`)) + geom_point() + geom_text_repel(aes(label=CAR.align))) + (ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & t.type == 'CD4' & assay %in% c('il2.ifng', 'ifng') & car.sort.group.cells > 500], sort.cond+CAR.align+t.type+k.type~donor, value.var = 'car.bin.pct.incl')[sort.cond == 'ifng'], aes(x=`68`, y=`67`)) + geom_point() + geom_text_repel(aes(label=CAR.align))) + plot_annotation(
+  title = 'IFNy Donor vs Donor')) /
+  ((ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & t.type == 'CD4' & assay %in% c('il2.ifng', 'il2') & car.sort.group.cells > 500], sort.cond+CAR.align+t.type+k.type~donor, value.var = 'car.bin.pct.incl')[sort.cond == 'il2'], aes(x=`67`, y=`d1`)) + geom_point() + geom_text_repel(aes(label=CAR.align))) + (ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & t.type == 'CD4' & assay %in% c('il2.ifng', 'il2') & car.sort.group.cells > 500], sort.cond+CAR.align+t.type+k.type~donor, value.var = 'car.bin.pct.incl')[sort.cond == 'il2'], aes(x=`68`, y=`d1`)) + geom_point() + geom_text_repel(aes(label=CAR.align))) + (ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & t.type == 'CD4' & assay %in% c('il2.ifng', 'il2') & car.sort.group.cells > 500], sort.cond+CAR.align+t.type+k.type~donor, value.var = 'car.bin.pct.incl')[sort.cond == 'il2'], aes(x=`68`, y=`67`)) + geom_point() + geom_text_repel(aes(label=CAR.align))) + plot_annotation(
+  title = 'IL2 Donor vs Donor'))
+
+#within donor, 4v8
+il2.ifng.plots$within.donor.4v8 <- ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & assay %in% c('il2.ifng', 'ifng','il2') & car.sort.group.cells > 500 & sort.cond %in% c('ifng','il2')], donor+CAR.align+k.type+sort.cond~t.type, value.var = 'car.bin.pct.incl')[], aes(x=`CD4`, y=`CD8`)) + geom_point() + geom_text_repel(aes(label=CAR.align)) + facet_wrap(sort.cond~donor, scales='free')
+
+#within donor, il2.v.ifng
+il2.ifng.plots$within.donor.il2vifng <- ggplot(dcast(cyto.read.counts.all[k.type == 'pos' & assay %in% c('il2.ifng', 'ifng','il2') & car.sort.group.cells > 500 & sort.cond %in% c('ifng','il2')], donor+CAR.align+t.type+k.type~sort.cond, value.var = 'car.bin.pct.incl')[], aes(x=`ifng`, y=`il2`)) + geom_point() + geom_text_repel(aes(label=CAR.align)) + facet_wrap(t.type~donor, scales='free')
+
+
+
+cyto.ranked.all <- cyto.read.counts.all[
+  k.type == 'pos' & assay %in% c('il2.ifng', 'il2','ifng') &
+  sort.cond %in% c('il2','ifng') &
+  car.sort.group.cells > 400]
+
+#individual ifng/il2
+ggplot(cyto.ranked.all[,
+    `:=`(
+      sort.group.cond.rank= rank(-car.bin.pct.incl),
+      CAR.align.sort.cond= factor(
+        paste(CAR.align,
+          paste(sort.cond, sep='_'), sep='|'))),
+    by=.(sort.cond, sort.group)]) + 
+  geom_point(
+    aes(x=reorder(CAR.align.sort.cond,-sort.group.cond.rank),
+        y=sort.group.cond.rank, color=donor, shape=t.type), 
+    position='dodge') + 
+  scale_x_discrete(label=function(str) gsub('\\|.*','',str)) +
+  facet_wrap( ~ sort.cond, scales='free') + coord_flip()
+
+#cd4/cd8 separate combined ifng/il2
+ggplot(cyto.ranked.all[,
+    `:=`(
+      sort.group.cond.rank= rank(-car.bin.pct.incl),
+      CAR.align.sort.cond= factor(
+        paste(CAR.align,
+          paste(t.type, sep='_'), sep='|'))),
+    by=.(sort.cond, sort.group)]) + 
+  geom_point(
+    aes(x=reorder(CAR.align.sort.cond,-sort.group.cond.rank),
+        y=sort.group.cond.rank, color=donor, shape=sort.cond), 
+    position='dodge') + 
+  scale_x_discrete(label=function(str) gsub('\\|.*','',str)) +
+  facet_wrap(t.type ~ sort.cond, scales='free') + coord_flip()
+
+#cd4/cd8 combined ifng/il2
+ggplot(cyto.ranked.all[,
+    `:=`(
+      sort.group.cond.rank= rank(-car.bin.pct.incl),
+      CAR.align.sort.cond= factor(
+        paste(CAR.align,
+          paste(t.type, sep='_'), sep='|'))),
+    by=.(sort.cond, sort.group)]) + 
+  geom_point(
+    aes(x=reorder(CAR.align.sort.cond,-sort.group.cond.rank),
+        y=sort.group.cond.rank, color=donor, shape=sort.cond), 
+    position='dodge') + 
+  scale_x_discrete(label=function(str) gsub('\\|.*','',str)) +
+  facet_wrap(t.type ~ ., scales='free') + coord_flip()
+
+#cd4/cd8 combined ifng/il2 separate donor
+ggplot(cyto.ranked.all[,
+    `:=`(
+      sort.group.cond.rank= rank(-car.bin.pct.incl),
+      CAR.align.sort.cond= factor(
+        paste(CAR.align,
+          paste(sort.cond, t.type, sep='_'), sep='|'))),
+    by=.(sort.cond, sort.group)]) + 
+  geom_point(
+    aes(x=reorder(CAR.align.sort.cond,-sort.group.cond.rank),
+        y=sort.group.cond.rank, color=donor, shape=t.type), 
+    position='dodge') + 
+  scale_x_discrete(label=function(str) gsub('\\|.*','',str)) +
+  facet_wrap(t.type ~ sort.cond, scales='free') + coord_flip()
+
+
+#all combined ifng/il2
+ggplot(cyto.ranked.all[car.sort.group.cells > 600][,
+    `:=`(
+      sort.group.cond.rank= rank(-car.bin.pct.incl),
+      CAR.align.sort.cond= factor(CAR.align)),
+    by=.(sort.cond, sort.group)]) + 
+  geom_jitter(height=0, 
+    aes(x=reorder(CAR.align.sort.cond,-sort.group.cond.rank),
+        y=sort.group.cond.rank, color=donor, shape=interaction(t.type, sort.cond))) + 
+  coord_flip()
+
+#total cytokine secretion
+ggplot(cyto.ranked.all[car.sort.group.cells > 600][,
+    `:=`(
+      sort.group.cond.rank= rank(-car.bin.pct.incl),
+      CAR.align.sort.cond= factor(CAR.align)),
+    by=.(sort.cond, sort.group)]) + 
+  geom_boxplot(
+    aes(x=reorder(CAR.align.sort.cond,-sort.group.cond.rank),
+        y=sort.group.cond.rank), outlier.size = NULL) + 
+  coord_flip() + 
+  labs(
+    title='CARS ranked by overall IFNg/IL2 secretion',
+    subtitle='3 Donors for CD4, 2 Donors for CD8; at least 600 cells per sort') +
+  theme(panel.grid=element_blank())
+
+
+### Two Sample Wilcoxon Tests with Benjamini-Hochberg Correction
+library(rstatix)
+
+do_wilcox_test <- function(df) {
+  wilcox_test(df,
+    sort.group.cond.rank ~ CAR.align,
+    ref.group='all',
+    alternative='g') %>%
+  adjust_pvalue(method = "BH") %>%
+  add_significance("p.adj")
+}
+
+car_ranks <- cyto.ranked.all[car.sort.group.cells > 500][,
+      `:=`(
+        sort.group.cond.rank= rank(-car.bin.pct.incl),
+        CAR.align.sort.cond= factor(CAR.align)),
+      by=.(sort.cond, sort.group)]
+
+wilcoxon_stats <- rbind(
+  data.table(do_wilcox_test(car_ranks))[, cond := 'All Conditions'][, group := 'all'],  
+  car_ranks[,
+      do_wilcox_test(.SD),
+      by='sort.cond'][, group := 'Per Cytokine'] %>% 
+    setnames(., 'sort.cond', 'cond'),
+  car_ranks[,
+      do_wilcox_test(.SD),
+      by='donor'][, group := 'Per Donor'] %>%
+    setnames(., 'donor', 'cond'),
+  car_ranks[,
+      do_wilcox_test(.SD),
+      by='t.type'][, group := 'Per T Cell Subset'] %>%
+    setnames(., 't.type', 'cond'))
+
+significance_rankings <- ggplot(wilcoxon_stats) + 
+  geom_tile(aes(x=reorder(group2,-log(p.adj)), y=cond, fill=-log(p.adj)), size=2) +
+  geom_tile(
+    data=wilcoxon_stats[p.adj.signif != 'ns'], 
+    aes(x=reorder(group2,-log(p.adj)), y=cond),
+    color='white', fill=NA, size=2) +
+  coord_flip() +
+  scale_fill_distiller(palette='Oranges', direction=1) + theme_minimal() +
+  theme(panel.grid=element_blank(), panel.spacing = unit(0, "lines")) + 
+  facet_grid(~group, scales='free') + 
+  labs(
+    title= 'CAR cytokine secretion rankings and significance',
+    subtitle='Mann-Whitney w/ Benjamini-Hochberg correction (one-sided)',
+    caption='White border: adjusted p-value < 0.05. Missing tile: Removed CARs with <500 cells/sort.',
+    fill='-log(p)',
+    x='Costimulatory domain',
+    y='Cytokine Condition')
+
+t.type_ranks <- dcast(car_ranks, CAR.align+donor+sort.cond ~ t.type,
+  value.var='sort.group.cond.rank')
+donor_ranks <- dcast(car_ranks, CAR.align+t.type+sort.cond ~ donor,
+  value.var='sort.group.cond.rank')
+sort.cond_ranks <- dcast(car_ranks, CAR.align+t.type+donor ~ sort.cond, 
+  value.var='sort.group.cond.rank')
+
+cor(na.omit(donor_ranks[, list(`67`, `68`, `d1`)]), method='spearman')
+cor(na.omit(t.type_ranks[, list(CD4, CD8)]), method='spearman')
+cor(na.omit(sort.cond_ranks[, list(ifng, il2)]), method='spearman')
+```
+
+
+```{r}
+
+
+data.output.dir <- file.path(s3.data.dir)
+save(list=c('cyto.read.counts.summed'),
+  file=file.path(data.output.dir, 'pooled_cytokine_repeat_data.Rdata'))
+
+```

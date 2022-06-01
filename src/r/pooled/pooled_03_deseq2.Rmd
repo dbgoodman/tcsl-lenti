@@ -28,11 +28,19 @@ rm(list = ls())
 
 setDTthreads(8)
 
-data.output.dir <- file.path(here::here(
-  '..','..',
-  's3-roybal-tcsl',
-  'lenti_screen_compiled_data','data'))
+# data.output.dir <- file.path(here::here(
+#   '..','..',
+#   's3-roybal-tcsl',
+#   'lenti_screen_compiled_data','data'))
+
+s3.data.dir <- '/Volumes/s3/roybal-tcsl/lenti_screen_compiled_data/data'
+
+data.output.dir <- file.path(s3.data.dir)
+load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+data.output.dir <- file.path(s3.data.dir)
 load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
+data.output.dir <- file.path(s3.data.dir)
+
 
 # set this to true to re-run, else will load from s3
 rerun_deseq <- F
@@ -515,7 +523,7 @@ if (rerun_deseq) {
   
   # A/B/AB/ABCD vs baseline
   test_ref_sets$ref <- c(test_ref_sets$ref, as.list(rep('baseline',3)))
-  test_ref_sets$test <- c(test_ref_sets$test, list('A','B',c('A','B','C','D')))
+  test_ref_sets$test <- c(test_ref_sets$test, list('A',c('A','B'),c('A','B','C','D')))
   test_ref_sets$interaction <- c(test_ref_sets$interaction, as.list(rep(T, 3)))
   
   all.deseq.results.dt <- data.table()
@@ -830,6 +838,8 @@ plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
 
 }
 ```
+
+# map abundance relative to previous timepoint
 
 ```{r, fig.width=22.5, fig.height=7.5}
 read.counts[, car.abund.log := log10(car.abund)]
@@ -1505,10 +1515,10 @@ ggplotly(make_pos_neg(all.deseq.results.dt[
 # Figure 2 Panels
 ```{r}
 
-data.output.dir <- file.path(here::here(
-  '..','..',
-  's3-roybal-tcsl',
-  'lenti_screen_compiled_data','data'))
+# data.output.dir <- file.path(here::here(
+#   '..','..',
+#   's3-roybal-tcsl',
+#   'lenti_screen_compiled_data','data'))
 
 load(
   file=file.path(data.output.dir, 'pooled_deseq2_data.Rdata'))
@@ -1659,7 +1669,7 @@ cast_4v8[, assay := factor(assay,
 
 # label significant hits
 cast_4v8[, CAR.type.size := CAR.type]
-cast_4v8[CAR.type == 'other' & 
+cast_4v8[
     ((padj.disp_CD4 > -log10(0.05) & log2FoldChange_CD4 > 0) | 
     (padj.disp_CD8 > -log10(0.05) & log2FoldChange_CD8 > 0)), 
   CAR.type.size := 'other_sig']
@@ -1713,14 +1723,13 @@ cast_4v8[, assay := factor(assay,
 
 # label significant hits
 cast_4v8[, CAR.type.size := CAR.type]
-cast_4v8[CAR.type == 'other' & 
+cast_4v8[
     ((padj.disp_CD4 > -log10(0.05) & log2FoldChange_CD4 > 0) | 
     (padj.disp_CD8 > -log10(0.05) & log2FoldChange_CD8 > 0)), 
   CAR.type.size := 'other_sig']
 
 cast_4v8[, CAR.label.sig := '']
-cast_4v8[CAR.type.size != 'other',
-    CAR.label.sig := CAR.align]
+cast_4v8[CAR.type.size != 'other', CAR.label.sig := CAR.align]
 
 cast_4v8[, mean_lfc := rowMeans(cbind(log2FoldChange_CD4, log2FoldChange_CD8))]
 cast_4v8[, rel_8 := log2FoldChange_CD8 - log2FoldChange_CD4]
@@ -1730,7 +1739,7 @@ cast_4v8[CAR.type.size == 'other_sig' & xor(padj.disp_CD4 > -log10(0.05),
 
 prolif_4v8_rel <- ggplot(cast_4v8[order(CAR.type)], 
   aes(y=rel_8, x=mean_lfc,
-      color=CAR.type.size,
+      color=CAR.type,
       label=CAR.label.sig,
       size=CAR.type.size)) + 
   annotate(geom='label', x=-Inf, y=Inf, label='CD8 Skewed', 
@@ -1740,11 +1749,11 @@ prolif_4v8_rel <- ggplot(cast_4v8[order(CAR.type)],
   geom_point() +
   facet_grid(. ~  assay, scales='free_x') +
   scale_color_manual('',
-    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
-    values=c('grey50', receptor_cols, outlier_cols[2], outlier_cols[2]), guide=F) +
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c('grey50', receptor_cols), guide=F) +
   scale_size_manual('',
     labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
-    values=c(0.8,2.5,2.5,1,2.5), guide=F) +
+    values=c(0.8,2.5,2.5,2.5,2.5), guide=F) +
   scale_x_continuous(limits=c(-3.25,3.25), breaks=c(-3:3)) +
   scale_y_continuous(limits=c(-2.25,1.9)) +
   geom_hline(yintercept=0, linetype='dashed', alpha=.7) +
@@ -1757,7 +1766,7 @@ prolif_4v8_rel <- ggplot(cast_4v8[order(CAR.type)],
 
 prolif_4v8_rel_vert <- ggplot(cast_4v8[order(CAR.type)], 
   aes(y=rel_8, x=mean_lfc,
-      color=CAR.type.size,
+      color=CAR.type,
       label=CAR.label.sig,
       size=CAR.type.size)) + 
   annotate(geom='label', x=-Inf, y=Inf, label='CD8 Skewed', 
@@ -1767,11 +1776,11 @@ prolif_4v8_rel_vert <- ggplot(cast_4v8[order(CAR.type)],
   geom_point() +
   facet_grid(assay ~ ., scales='free_x') +
   scale_color_manual('',
-    labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
-    values=c('grey50', receptor_cols, outlier_cols[2], outlier_cols[2]), guide=F) +
+    labels=c('New Receptors', '4-1BB', 'CD28'),
+    values=c('grey20', receptor_cols), guide=F) +
   scale_size_manual('',
     labels=c('New Receptors', '4-1BB', 'CD28', 'New Receptors', 'New Receptors'),
-    values=c(0.8,2.5,2.5,1,2.5), guide=F) +
+    values=c(0.8,0.8,0.8,2.5,2.5), guide=F) +
   scale_x_continuous(limits=c(-3.25,3.25), breaks=c(-3:3)) +
   scale_y_continuous(limits=c(-2.25,1.9)) +
   geom_hline(yintercept=0, linetype='dashed', alpha=.7) +
@@ -2234,7 +2243,8 @@ fig2_abundance_over_time <- ggplot(prolif_data[order(CAR.type)], aes(
   theme(panel.border=element_rect(fill=NA))
 
 
-fig2_abundance_over_time_vert <- ggplot(abund_plot_data[rev(order(CAR.topbot))], aes(
+fig2_abundance_over_time_vert <- ggplot(
+  abund_plot_data[rev(order(CAR.topbot))], aes(
     y=mean.car.abund.rel.baseline, x=assay,
     color=CAR.topbot,
     group=CAR.align,
@@ -2769,13 +2779,14 @@ ggplot(dcast(deseq2_combined[k.type == 'pos' & ((comparison %in% c('ABCD.baselin
 
 ### Save workspace for later analyses
 ```{r}
-data.output.dir <- file.path(here::here(
-  '..','..',
-  's3-roybal-tcsl',
-  'lenti_screen_compiled_data','data'))
-save(list=ls(),
-  file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
-#load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+# data.output.dir <- file.path(here::here(
+#   '..','..',
+#   's3-roybal-tcsl',
+#   'lenti_screen_compiled_data','data'))
+# save(list=ls(),
+#   file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+data.output.dir <- file.path(s3.data.dir)
 ```
 
 
@@ -2802,6 +2813,7 @@ ggplot(dcast(plot_set, car.lbl+k.type+t.type + donor + CAR.align + batch ~ assay
 
 #significant correlation between later expansion and total expansion:
 dcast(plot_set, car.lbl+k.type+t.type + donor + CAR.align + batch ~ assay, value.var=c('rlog_car_score','car.abund.rel.baseline','car.abund.rel.prev'))[k.type=='pos' & t.type == 'CD8'][, wilcox.test(log(car.abund.rel.prev_CTV1/car.abund.rel.prev_CTV2), log(car.abund.rel.baseline_CTV2))]
+
 
 summary(dcast(plot_set, car.lbl+k.type+t.type + donor + CAR.align + batch ~ assay, value.var=c('rlog_car_score','car.abund.rel.baseline','car.abund.rel.prev'))[k.type=='pos' & t.type == 'CD8'][, late_v_early := log2(car.abund.rel.prev_CTV1/car.abund.rel.prev_CTV2)][, lm(late_v_early ~ 0+CAR.align)])
 
@@ -2849,19 +2861,19 @@ total_exp_avg <- ggplot(total_exp_lm_dt, aes(x=Estimate, y=-log10(p.val), label=
 
 ##gradient
 
-ggplot() + 
-  annotation_custom(rasterGrob(t(grad), 
-                        width=unit(1,"npc"), 
-                        height=unit(1,"npc"))) +
-  scale_x_continuous(limits = c(0,1)) +
-  scale_y_continuous(limits = c(0,1)) +
-  theme_bw() + theme(axis.ticks = element_blank()) + 
-  theme(
-    axis.text.x = element_text(size=9, angle = 90, vjust = 0.5, hjust=1),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"))
+# ggplot() + 
+#   annotation_custom(rasterGrob(t(grad), 
+#                         width=unit(1,"npc"), 
+#                         height=unit(1,"npc"))) +
+#   scale_x_continuous(limits = c(0,1)) +
+#   scale_y_continuous(limits = c(0,1)) +
+#   theme_bw() + theme(axis.ticks = element_blank()) + 
+#   theme(
+#     axis.text.x = element_text(size=9, angle = 90, vjust = 0.5, hjust=1),
+#     panel.grid.major = element_blank(),
+#     panel.grid.minor = element_blank(),
+#     strip.background = element_blank(),
+#     panel.border = element_rect(colour = "black"))
 
 sprinter_dt <- merge(
   total_exp_lm_dt,

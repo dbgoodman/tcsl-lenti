@@ -22,7 +22,14 @@ greens <- brewer.pal(9,'Greens')[c(4,6)] #baffr, taci
 oranges <- brewer.pal(9,'Oranges')[c(4,6)] #cd40, tnr8
 reds <- brewer.pal(9,'PuRd') #klrg1
 grey <- 'grey10' #zeta
-purples <- brewer.pal(9, 'Purples')[c(5, 7)] #TNR8, CD40
+purples <- brewer.pal(9, 'Purples')[c(4, 6)] #TNR8, CD40
+
+#current set
+car_colors <- c(
+  '41BB'=blues[1], 'BAFF-R'=greens[1], 
+  'CD28'=blues[2], 'CD40'=purples[2], 
+  'KLRG1'=reds[5], 'TACI'=greens[2], 
+  'TNR8'=purples[1], 'zeta'=grey)
 
 #current set
 car_colors <- c(car_colors, 'None'='#999999', 'Unt'='#999999', 'zeta'='black')
@@ -85,29 +92,11 @@ growth_dt <- rbindlist(
 growth_dt[, car := mapvalues(
   factor(car),
   from=levels(factor(car)), 
-  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Untransduced','zeta'))]
+  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Unt','zeta'))]
 
 growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
 growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
 growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
-
-ggplot(growth_dt,
-       aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
-  geom_line() +
-  facet_wrap(~car)
-
-supp_invivo_burden <- ggplot(growth_dt[day < 45 & car != 'None'],
-                             aes(
-                               x=day,
-                               y=vol_lwl,
-                               color=factor(car,levels=c(car_order,'Untransduced')),
-                               group=interaction(car,cage,mouse))) +
-  geom_line() +
-  facet_wrap(~car) +
-  scale_color_manual(values=c(car_colors, 'Untransduced'='grey50')) +
-  theme_minimal() + theme(legend.position = 'none') +
-  geom_vline(xintercept=-Inf) +
-  geom_hline(yintercept=-Inf)
 
 growth_dt_means <- growth_dt[, list(
   vol_lww = mean(vol_lww, na.rm=T),
@@ -118,43 +107,14 @@ growth_dt_means <- growth_dt[, list(
   vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
   by=c('car','day')]
 
-all_cars <- ggplot(growth_dt_means[day <=45],
-                   aes(x=day, y=vol_lwl, color=car, linetype=car)) +
-  geom_line(legend=F) + geom_point(show.legend=F) +
-  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
-  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='None')*1) +
-  scale_color_manual("", values=c('Unt'='#666666', 'None'='#666666', car_colors)) +
-  labs(color="g", linetype="g") + theme_minimal()
-
 left_group <- c('None','Unt','41BB','BAFF-R','CD28','TACI')
 right_group <- c('None','Unt','KLRG1','zeta')
-new_group <- c('41BB','BAFF-R','CD40','Unt','')
+new_group <- c('41BB','BAFF-R','CD40','Unt','None')
 car_linetypes <- setNames(rep(1, length(car_colors)), names(car_colors))
 car_linetypes['None'] <- 2
 
-tumor_a <- ggplot(growth_dt_means[day <=50 & car %in% left_group][car == 'Untransduced', car := 'Unt'],
-                  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
-  geom_line() + 
-  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
-  scale_linetype_manual("", values=car_linetypes[left_group]) +
-  scale_color_manual("", values=car_colors[left_group]) +
-  theme_minimal() + 
-  plot_theme + 
-  labs(y=bquote('Tumor Volume'~(mm^3)), x='')
-
-tumor_b <- ggplot(growth_dt_means[day <=50 & car %in% right_group][car == 'Untransduced', car := 'Unt'],
-                  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
-  geom_line() + 
-  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
-  scale_linetype_manual("", values=car_linetypes[right_group]) +
-  scale_color_manual("", values=car_colors[right_group]) +
-  theme_minimal() + 
-  plot_theme + 
-  theme(plot.margin=margin(3,3,3,20)) +
-  labs(y=bquote('Tumor Volume'~(mm^3)), x='Days post tumor injection')
-
 tumor_new <- ggplot(growth_dt_means[day <50 & car %in% new_group][car == 'Untransduced', car := 'Unt'],
-                  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+                  aes(x=day, y=vol_lwl, color=car, linetype=car, label=car)) +
   geom_line(size=line_size) +
   point_with_family(
     geom_point(size=point_size, shape="\u25CF", show.legend=F),
@@ -162,27 +122,30 @@ tumor_new <- ggplot(growth_dt_means[day <50 & car %in% new_group][car == 'Untran
   geom_errorbar(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F, size=errorbar_size, width=0.3) + 
   scale_linetype_manual("", values=car_linetypes[new_group]) +
   scale_color_manual("", values=car_colors[new_group]) +
+  
+  #labels
+  coord_cartesian(xlim= c(2,48), clip = "off") +
+  geom_text_repel(data=unique(growth_dt_means[day < 50 & car %in% new_group][day == max(day)]),
+                  force        = 3,
+                  nudge_x      = 2,
+                  direction    = "y",
+                  vjust        = 0.5,
+                  hjust        = 0,
+                  segment.size = 0,
+                  xlim = c(52, 60),
+                  fontface     = 'bold'
+  ) +
+  
   theme_minimal() + 
   plot_theme + 
-  labs(y=bquote('Tumor Volume'~(mm^3)), x='')
-
-
-in_vivo_tumor_growth <- plot_grid(
-  NULL,
-  tumor_a,
-  tumor_b,
-  rel_heights=c(0.2, 0.5, 0.5),
-  labels=c('F','G','H'), ncol=1, align='v',axis='tb')
-
-in_vivo_tumor_growth
-
+  theme(legend.position = "none", plot.margin = unit(c(0.1, 2, 0.1, 0.1), "cm")) +
+  labs(y=bquote('Tumor Volume'~(mm^3)), x='Day')
 
 # --------------------------------------------------------------------------------------------------
 
-#setwd('/Volumes/HFSE/Box/tcsl/invivo/tcsl179')
-
 growth_dt <- fread(paste0(getwd(), "/r/in_vivo/tcsl179_growth.csv"))
 growth_dt <- growth_dt[!(is.na(day))]
+growth_dt[, car := gsub('NT', 'None', car)]
 growth_dt[, c('car1','car2') := tstrsplit(car, '-')]
 
 #remove baffr-41bb #3
@@ -206,7 +169,7 @@ growth_mean_dt <- growth_dt[,
   by=c('day','car')]
 
 
-plot_car_group <- function(growth_mean_df, group1) {
+plot_car_group <- function(growth_mean_dt, group1) {
   
   ggplot(growth_mean_dt[car %in% group1 & day < 43],
          aes(x=day, y=area_mean, group=car, color=car1, 
@@ -220,7 +183,9 @@ plot_car_group <- function(growth_mean_df, group1) {
       size=errorbar_size, linetype=2, show.legend=F, width=0.3, aes(color=car2)) + 
     
     # solid line for singles
-    geom_line(size=line_size) + 
+    geom_line(data=growth_mean_dt[car %in% group1 & car != 'None'], size=line_size) + 
+    
+    geom_line(data=growth_mean_dt[car %in% group1 & car == 'None'], size=line_size, linetype=2) + 
     
     # hashed line for doubles
     geom_line(data=growth_mean_dt[car %in% group1 & !is.na(car2) & day < 43], 
@@ -253,29 +218,33 @@ plot_car_group <- function(growth_mean_df, group1) {
     #labels
     coord_cartesian(xlim= c(2,33), clip = "off") +
     geom_text_repel(data=unique(growth_mean_dt[day < 43 & car %in% group1][day == max(day)]),
-      force        = 5,
+      force        = 3,
       nudge_x      = 2,
       direction    = "y",
       vjust        = 0.5,
       hjust        = 0,
-      segment.size = 0.2,
-      xlim = c(37, 45),
+      segment.size = 0,
+      xlim = c(35, 38),
       fontface     = 'bold'
     ) +
   
-    scale_color_manual("", values=car_colors[group1]) +
+    scale_color_manual("", values=rename(car_colors, c('BAFF-R'='BAFFR'))[group1]) +
     theme_minimal() + 
     plot_theme + 
-    theme(legend.position = "none", plot.margin = unit(c(0.1, 3, 0.1, 0.1), "cm")) +
+    theme(legend.position = "none", plot.margin = unit(c(0.1, 2, 0.1, 0.1), "cm")) +
     labs(y=bquote('Tumor Volume'~(mm^3)), x='Day')
 }
 
-single_bb_baffr <- plot_car_group(growth_mean_df, c('41BB','BAFFR','CD40','Unt','NT'))
+single_bb_baffr <- plot_car_group(growth_mean_dt[day < 43], c('41BB','BAFFR','CD40','Unt','None'))
 single_bb_baffr
-doubles_bb_baffr <- plot_car_group(growth_mean_df, c('41BB','BAFFR','CD40','BAFFR-41BB','CD40-41BB','Unt','NT'))
-doubles_28_40 <- plot_car_group(growth_mean_df, c('CD28','CD40','CD40-CD28','Unt','NT'))
+doubles_bb_baffr <- plot_car_group(
+  growth_mean_dt[day < 43],
+  c('41BB','BAFFR','CD40','BAFFR-41BB','CD40-41BB','Unt','None')) +
+  theme(plot.margin = unit(c(0.1, 3, 0.1, 0.1), "cm"))
+  
+doubles_28_40 <- plot_car_group(growth_mean_dt[day < 43], c('CD28','CD40','CD40-CD28','Unt','None'))
 
-
+ggsave(here::here('..','figs','editor_rebuttal','single_bb_baffr.pdf'), (tumor_new | single_bb_baffr), device='pdf', height=5, width=10, units='in') 
 
 ###### STATS
 #https://www.datanovia.com/en/lessons/repeated-measures-anova-in-r

@@ -27,10 +27,10 @@ library(patchwork)
 
 setDTthreads(8)
 
-data.output.dir <- file.path(here::here(
-  '..','..',
-  's3-roybal-tcsl',
-  'lenti_screen_compiled_data','data'))
+# change this for local/aws:
+s3.data.dir <- '/Volumes/s3/roybal-tcsl/lenti_screen_compiled_data/data'
+
+data.output.dir <- file.path(s3.data.dir)
 
 # set this to true to re-run, else will load from s3
 rerun_deseq <- F
@@ -52,7 +52,6 @@ map_day_0 <- function(df) {
 }
 
 load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
-
 ```
 
 ## Load Exhaustion Data 
@@ -61,7 +60,7 @@ load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
 data_dir <- here::here('..','data')
 
 if (reload_data | !exists('exh_dt'))
-  load(file.path(data_dir, 'exh.Rdata'))
+  load(file.path(s3.data.dir, 'exh.Rdata'))
 
 exh_dt[, car := factor(car, levels=c(car_order,'untrans'))]
 
@@ -258,6 +257,14 @@ supp_S1_1 <- (
     theme(legend.position = 'bottom'))
 ```
 
+### Add repeat cytokine data to original
+
+```{r}
+
+load(file.path(data.output.dir, 'pooled_cytokine_repeat_data.Rdata'))
+
+```
+
 ### Sprinter vs Marathoner Comparison
 
 ```{r}
@@ -399,7 +406,7 @@ ggsave(here::here('..','figs','compiled','fig1_exh.pdf'), fig1_exh_panel,
 
 ```
 
-### Main Fig 2
+### Main Fig 2 - old
 
 ```{r}
 plot_a <- plot_grid(
