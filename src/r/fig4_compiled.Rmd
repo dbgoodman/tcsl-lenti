@@ -20,16 +20,20 @@ library(ggrepel)
 library(plyr)
 library(ggpubr)
 library(cowplot)
+library(rstatix)
 
 output_dir <- file.path(here::here('..','figs'))
 
 data_dir <- here::here('..','data')
 
-data.output.dir <- file.path(here::here(
-  '..','..',
-  's3-roybal-tcsl',
-  'lenti_screen_compiled_data','data'))
+# data.output.dir <- file.path(here::here(
+#   '..','..',
+#   's3-roybal-tcsl',
+#   'lenti_screen_compiled_data','data'))
 
+s3.data.dir <- '/Volumes/s3/roybal-tcsl/lenti_screen_compiled_data/data'
+data.output.dir <- s3.data.dir
+  
 load(file=file.path(data.output.dir, 'incucyte_plot_data.Rdata'))
 
 # add 'd' in front of days
@@ -175,18 +179,18 @@ cd8_mean_dt <- incucyte_new_dt[
     by=c('day_f','car_f','t_type')]
 
 killing_plots_combined_all <- combine_plots(
-  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
-  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
+  plot_set_time(copy(cd4_mean_dt)[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
+  plot_set_time(copy(cd8_mean_dt)[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
   0.2)
 
 killing_plots_combined_all <- combine_plots(
-  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
-  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
+  plot_set_time(copy(cd4_mean_dt)[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type),
+  plot_set_time(copy(cd8_mean_dt)[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type),
   0.2, use_leg=F)
 
 killing_plots_combined_all_vert_old <- combine_plots_vert(
-  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet='x'),
-  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet='x'),
+  plot_set_time(copy(cd4_mean_dt)[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet='x'),
+  plot_set_time(copy(cd8_mean_dt)[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet='x'),
   0.2, use_leg=F)
 
 ```
@@ -221,7 +225,7 @@ plot_killing_cd4_log <- ggplot(incucyte_new_dt[
     k562=='mkate_cd19' & noise == F & t_type == 'CD4' & measurement == chosen_measure & 
     car!='none' & day_f %in% paste0('d',cd4_days) & donor %in% c(1,2)], 
   aes(x=Elapsed, y=mean_value_none_rollmean10, group=interaction(car, day_f,donor), fill=day_f)) + 
-  geom_line(aes(color=car)) + 
+  geom_line(aes(color=car), size=1.2) + 
   facet_grid(donor~day_f, scales='free_y') + 
   theme_minimal(base_size=12) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
   theme(plot.title = element_text(size = 15)) + 
@@ -243,7 +247,7 @@ plot_killing_cd8_log <- ggplot(incucyte_new_dt[k562=='mkate_cd19' & !noise & t_t
     car != 'none' & day_f %in% paste0('d',cd8_days)  & donor %in% c(1,2)][,
       donor := factor(donor, labels=c('Donor 1',' Donor 2'))], 
   aes(x=Elapsed, y=mean_value_none_rollmean10, group=interaction(car, day_f,donor), fill=day_f)) + 
-  geom_line(aes(color=car)) + 
+  geom_line(aes(color=car), size=1.2) + 
   facet_grid(donor~day_f, scales='free_y') + 
   theme_minimal(base_size=12) + geom_vline(xintercept=0) + geom_hline(yintercept=0) +
   theme(plot.title = element_text(size = 15)) + 
@@ -260,13 +264,13 @@ plot_killing_cd8_log <- ggplot(incucyte_new_dt[k562=='mkate_cd19' & !noise & t_t
   theme(panel.border = element_rect(fill=NA))
 
 killing_plots_combined_all_vert <- combine_plots_vert(
-  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet=NULL) +
+  plot_set_time(cd4_mean_dt[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet=NULL, pt_size = 3.5) +
    theme(
      strip.text.y=element_blank(),
      plot.margin=margin(10,10,-20,10),
      panel.spacing.x=unit(-0.5,'pt')) + 
   labs(y='% Tumor Cells Killed'),
-  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet=NULL) +
+  plot_set_time(cd8_mean_dt[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet=NULL, pt_size = 3.5) +
    theme(
      strip.text.y=element_blank(),
      plot.margin=margin(10,25,-20,-6),
@@ -292,7 +296,7 @@ in_vitro_killing <- plot_grid(
         axis.text.y=element_blank(),
         plot.margin=margin(5.5,5.5,5.5,-5.5)),
     rel_widths=c(0.53,0.47)),
-  ncol=1, rel_heights=c(0.4,0.6))
+  ncol=1, rel_heights=c(0.4,0.6), labels=c('D','E'))
 
 in_vitro_killing
 ```
@@ -432,123 +436,49 @@ cd4_all_combined <-  plot_grid(
   ncol=1, rel_heights=c(1,2))
 ```
 
-### In Vivo Killing
+# killing ranking stats   
 
 ```{r}
-growth_dt <- fread("~/s3-roybal-tcsl/lenti_screen_compiled_data/data/invivo/tcsl166_growth.csv")
-growth_dt[, length_1 := as.numeric(length_1)]
-growth_dt[, length_2 := as.numeric(length_2)]
-growth_dt <- growth_dt[car != '']
 
-growth_dt <- rbindlist(
-  list(
-    growth_dt,
-    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
-    fill=T)
+endpoint_killing <- unique(rbind(
+    cd4_mean_dt[, `:=`(Elapsed=80)], 
+    cd8_mean_dt[, `:=`(Elapsed=32)])[,
+        list(k562, day, t_type, donor, car, mean_value_none = as.numeric(mean_value_none),
+         std_dev_value_none, day=as.numeric(day), Elapsed)])[,
+  list(car, mean_value_none), by=.(day, t_type, donor)]
 
-growth_dt[, car := mapvalues(
-  factor(car),
-  from=levels(factor(car)), 
-  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Untransduced','zeta'))]
+car_killing_order <- endpoint_killing[, levels(reorder(car, -mean_value_none))]
 
-growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
-growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
-growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+endpoint_killing_stats <- data.table(
+  endpoint_killing[, car := factor(car, levels=car_killing_order)][] %>% 
+    pairwise_wilcox_test(mean_value_none ~ car))
 
-ggplot(growth_dt,
-  aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
-  geom_line() +
-  facet_wrap(~car)
+endpoint_killing_stats[, group1 := factor(group1, levels=car_killing_order)]
+endpoint_killing_stats[, group2 := factor(group2, levels=car_killing_order[-1])]
 
-supp_invivo_burden <- ggplot(growth_dt[day < 45 & car != 'None'],
+endpoint_killing_stat_plot <- ggplot(endpoint_killing_stats, 
     aes(
-      x=day,
-      y=vol_lwl,
-      color=factor(car,levels=c(car_order,'Untransduced')),
-      group=interaction(car,cage,mouse))) +
-  geom_line() +
-  facet_wrap(~car) +
-  scale_color_manual(values=c(car_colors, 'Untransduced'='grey50')) +
-  theme_minimal() + theme(legend.position = 'none') +
-  geom_vline(xintercept=-Inf) +
-  geom_hline(yintercept=-Inf)
-
-growth_dt_means <- growth_dt[, list(
-  vol_lww = mean(vol_lww, na.rm=T),
-  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
-  vol_lwl = mean(vol_lwl, na.rm=T),
-  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
-  vol_lwlw = mean(vol_lwlw, na.rm=T),
-  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
-  by=c('car','day')]
-
-all_cars <- ggplot(growth_dt_means[day <=45],
-  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
-  geom_line(legend=F) + geom_point(show.legend=F) +
-  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
-  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='None')*1) +
-  scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
-  labs(color="g", linetype="g") + theme_minimal()
-
-left_group <- c('None','Untransduced','41BB','BAFF-R','CD28','TACI')
-right_group <- c('None','Untransduced','KLRG1','zeta')
-car_linetypes <- 1+(levels(growth_dt_means[,car])=='None')*1
-names(car_linetypes) <- levels(growth_dt_means[,car])
-
-plot_theme <- theme(
-      legend.position = c(.05, .95),
-      legend.justification = c("left", "top"),
-      legend.box.just = "right",
-      legend.box.background = element_rect(fill='white'),
-      legend.title=element_blank(),
-      legend.spacing.y = unit(2, 'pt'),
-      legend.margin = margin(2, 3, 3, 3),
-      legend.key.height=unit(15,'pt'),
-      panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank(),
-      panel.border = element_rect(fill=NA))
-
-
-tumor_a <- ggplot(growth_dt_means[day <=50 & car %in% left_group][car == 'Untransduced', car := 'Unt'],
-        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
-      geom_line() + 
-      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
-      scale_linetype_manual("", values=rename(car_linetypes, replace = c("Untransduced" = "Unt"))) +
-      scale_color_manual("", values=c('Unt'='#666666', 'None'='#666666', car_colors)) +
-      theme_minimal() + 
-      plot_theme + 
-      labs(y=bquote('Tumor Volume'~(mm^3)), x='')
-
-tumor_b <- ggplot(growth_dt_means[day <=50 & car %in% right_group][car == 'Untransduced', car := 'Unt'],
-        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
-      geom_line() + 
-      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
-      scale_linetype_manual("", values=rename(car_linetypes, replace = c("Untransduced" = "Unt"))) +
-      scale_color_manual("", values=c('Unt'='#666666', 'None'='#666666', car_colors)) +
-      theme_minimal() + 
-      plot_theme + 
-      theme(plot.margin=margin(3,3,3,20)) +
-      labs(y=bquote('Tumor Volume'~(mm^3)), x='Days post tumor injection')
-
-in_vivo_tumor_growth <- plot_grid(
-    NULL,
-    tumor_a,
-    tumor_b,
-    rel_heights=c(0.2, 0.5, 0.5),
-    labels=c('F','G','H'), ncol=1, align='v',axis='tb')
-
-in_vivo_tumor_growth
-
-## STATS (after discussion with CSA, 5/12/21)
-
-# first car is baseline, others are compared to it
-cars_stats <- c('zeta', 'KLRG1')
-
-summary(
-  lm(
-    data=growth_dt[car %in% cars_stats][, car :=factor(car, levels= cars_stats)],
-    formula=vol_lwl ~ day + car))
-
+      x=group1,
+      y=group2,
+      fill=-log10(p.adj),
+      label=p.adj.signif)) + 
+  geom_tile(color='white') + 
+  scale_fill_distiller(palette='RdPu', direction=1,
+    guide=guide_colorbar(
+      barheight=0.7,
+      direction = "horizontal",
+      title.position = "top")) + 
+  geom_text() + 
+  coord_cartesian(clip = 'off') +
+  annotate(geom='point', x=0.2, y=1:7, color=car_colors[car_killing_order[2:8]]) +
+  annotate(geom='point', pch=17,
+    y=0.2, x=1:7, color=car_colors[car_killing_order[1:7]]) +
+  labs(x='', y='Overall Cytotoxicity Rank', fill='-log10(p), MWU') +
+  theme_minimal() +
+  theme(panel.grid=element_blank(),
+        legend.position=c(1,0.05),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        legend.justification=c(1,0))
 ```
 ### cytokines
 
@@ -556,10 +486,11 @@ summary(
 
 parent_folder = here::here('..')
 #flow.dt <- fread("/Users/camilliaazimi/Box\ Sync/tcsl/flow/TCSL105\ ALL\ FILES/Cytokines/tcsl105cytokines.csv")
-
-cytokine_fn <- "~/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/tcsl105_cytokines.csv"
+#cytokine_fn <- "~/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/tcsl105_cytokines.csv"
+cytokine_fn <- paste0(s3.data.dir, "/csv/tcsl105_cytokines.csv")
 
 flow.dt <- fread(cytokine_fn)
+
 #getting rid of outliers with the next line
 flow.dt <- flow.dt[outlier == FALSE]
 
@@ -657,9 +588,13 @@ cytokines_all
 plots <- list()
 
 #to make a data table with my csv 
+# signaling.dt <- fread(paste0(
+#   '/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/',
+#   'tcsl148.csv'))
+
 signaling.dt <- fread(paste0(
-  '/home/ec2-user/s3-roybal-tcsl/lenti_screen_compiled_data/data/csv/',
-  'tcsl148.csv'))
+  s3.data.dir,'/csv/tcsl148.csv'))
+
 
 #to make 0 hours no stimulation bar copy onto all of the stimulation types 
 # (even though it did not get + or - stim)
@@ -696,7 +631,7 @@ car_labels <- c('41BB','BAFF-R','BAFF-R H159Y', 'CD28', 'CD40', 'KLRG1',
 car_names <- c('41BB','Baffr','Baffr mut', 'CD28', 'CD40', 'KLRG1', 
                 'TACI', 'TNR8', 'Unt', 'Zeta')
 
-car_colors_signaling <- c(car_colors_orig[c(1:2,2,3:8,8)])
+car_colors_signaling <- car_colors_orig[gsub('\\s+.*','',car_labels)]
 names(car_colors_signaling) <- car_labels
 
 car_linetypes <- c(1,1,3,1,1,1,1,1,3,1)
@@ -706,7 +641,7 @@ plot.signaling.dt <- map_day_0_sig(signaling.dt)
 
 plot.signaling.dt[, car_lab := factor(CAR, levels=car_names, labels=car_labels)]
 plot.signaling.dt[, stim_lab := factor(Stimulation, 
-  levels=c('+','-','none'), labels=c('CD19+','CD19-','none'))]
+  levels=c('-','+','none'), labels=c('CD19-','CD19+','none'))]
 
 plots$combined_sig_plot <- ggplot(plot.signaling.dt[CAR != 'none' & stim_lab != 'none'], 
       aes(x=Hours, y=combo_mcherry_pct_v_unt, color=car_lab, linetype=car_lab)) + 
@@ -727,9 +662,9 @@ plots$combined_sig_plot <- ggplot(plot.signaling.dt[CAR != 'none' & stim_lab != 
         strip.background = element_blank())
 
 plots$combined_sig_plot_nomut <- ggplot(plot.signaling.dt[
-        !(CAR %in% c('Baffr mut','Unt','none'))], 
+        !(CAR %in% c('Baffr mut','Unt','none')) & grepl('CD19', stim_lab)], 
       aes(x=Hours, y=combo_mcherry_pct_v_unt, color=car_lab, linetype=car_lab)) + 
-    facet_grid(line_lab ~ stim_lab, scales='free', drop=T) +
+    facet_grid(stim_lab ~ line_lab, scales='free', drop=T) +
     geom_line(size=1) + 
     geom_point(size=2) +
     scale_color_manual('', values=setNames(car_colors_signaling, car_labels)) +
@@ -969,7 +904,38 @@ fig4_compiled_v4<- plot_grid(
     labs(title='Jurkat Signaling Reporter Assay'),
   nrow=3, rel_heights=c(0.18,0.6,0.25), labels=c('A','','G'))
 
-ggsave(here::here('..','figs','compiled','fig4.pdf'), fig4_compiled_v4, height=12, width=10, useDingbats=FALSE)
+fig4_compiled_v5 <- plot_grid(
+  
+  #top row legend
+  plot_grid(
+    NULL,
+    get_legend(plot_killing_cd8_log+guides(col = guide_legend(nrow = 4))), 
+    ncol=2, rel_widths=c(0.5,0.5), labels=c('A','B')),
+  
+  #2nd row cytokines
+  cytokines_d1_d10_horiz +
+    theme(
+      panel.spacing.x=unit(1,'lines'),
+      plot.margin=margin(5,15,5,10, unit='pt')),
+  
+  #3rd row in vitro killing
+  in_vitro_killing,
+  
+  #4th row significance and reporters
+  plot_grid(
+    endpoint_killing_stat_plot,
+    plots$combined_sig_plot_nomut + 
+      theme(
+        legend.position='none',
+        plot.title=element_text(size=12, hjust = 0),
+        panel.spacing.x=unit(2,'lines'),
+        plot.margin=margin(5,35,10,15, unit='pt')) +
+      labs(title='Jurkat Signaling Reporter Assay'),
+    ncol=2, rel_widths=c(1.5,2.5), labels=c('F','G')),
+  
+  nrow=4, rel_heights=c(.12,.18,.4,.3), labels=c('','C','',''))
+
+ggsave(here::here('..','figs','compiled','fig4.newdraft.pdf'), fig4_compiled_v5, height=12, width=11, useDingbats=FALSE)
 
 
 ```
@@ -1107,5 +1073,125 @@ fig_s4_compiled <- (
 fig_scaling <- 1.4
 ggsave(here::here('..','figs','compiled','figS4.pdf'), fig_s4_compiled,
        height=9*fig_scaling, width=8.5*fig_scaling, useDingbats=FALSE)
+
+```
+
+### In Vivo Killing
+
+```{r}
+#growth_dt <- fread("~/s3-roybal-tcsl/lenti_screen_compiled_data/data/invivo/tcsl166_growth.csv")
+growth_dt <- fread(paste0(s3.data.dir, "/invivo/tcsl166_growth.csv"))
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt[, length_2 := as.numeric(length_2)]
+growth_dt <- growth_dt[car != '']
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Untransduced','zeta'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+ggplot(growth_dt,
+  aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
+  geom_line() +
+  facet_wrap(~car)
+
+supp_invivo_burden <- ggplot(growth_dt[day < 45 & car != 'None'],
+    aes(
+      x=day,
+      y=vol_lwl,
+      color=factor(car,levels=c(car_order,'Untransduced')),
+      group=interaction(car,cage,mouse))) +
+  geom_line() +
+  facet_wrap(~car) +
+  scale_color_manual(values=c(car_colors, 'Untransduced'='grey50')) +
+  theme_minimal() + theme(legend.position = 'none') +
+  geom_vline(xintercept=-Inf) +
+  geom_hline(yintercept=-Inf)
+
+growth_dt_means <- growth_dt[, list(
+  vol_lww = mean(vol_lww, na.rm=T),
+  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
+  vol_lwl = mean(vol_lwl, na.rm=T),
+  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
+  vol_lwlw = mean(vol_lwlw, na.rm=T),
+  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
+  by=c('car','day')]
+
+all_cars <- ggplot(growth_dt_means[day <=45],
+  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+  geom_line(legend=F) + geom_point(show.legend=F) +
+  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='None')*1) +
+  scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
+  labs(color="g", linetype="g") + theme_minimal()
+
+left_group <- c('None','Untransduced','41BB','BAFF-R','CD28','TACI')
+right_group <- c('None','Untransduced','KLRG1','zeta')
+car_linetypes <- 1+(levels(growth_dt_means[,car])=='None')*1
+names(car_linetypes) <- levels(growth_dt_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.spacing.y = unit(2, 'pt'),
+      legend.margin = margin(2, 3, 3, 3),
+      legend.key.height=unit(15,'pt'),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill=NA))
+
+
+tumor_a <- ggplot(growth_dt_means[day <=50 & car %in% left_group][car == 'Untransduced', car := 'Unt'],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=rename(car_linetypes, replace = c("Untransduced" = "Unt"))) +
+      scale_color_manual("", values=c('Unt'='#666666', 'None'='#666666', car_colors)) +
+      theme_minimal() + 
+      plot_theme + 
+      labs(y=bquote('Tumor Volume'~(mm^3)), x='')
+
+tumor_b <- ggplot(growth_dt_means[day <=50 & car %in% right_group][car == 'Untransduced', car := 'Unt'],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=rename(car_linetypes, replace = c("Untransduced" = "Unt"))) +
+      scale_color_manual("", values=c('Unt'='#666666', 'None'='#666666', car_colors)) +
+      theme_minimal() + 
+      plot_theme + 
+      theme(plot.margin=margin(3,3,3,20)) +
+      labs(y=bquote('Tumor Volume'~(mm^3)), x='Days post tumor injection')
+
+in_vivo_tumor_growth <- plot_grid(
+    NULL,
+    tumor_a,
+    tumor_b,
+    rel_heights=c(0.2, 0.5, 0.5),
+    labels=c('F','G','H'), ncol=1, align='v',axis='tb')
+
+in_vivo_tumor_growth
+
+## STATS (after discussion with CSA, 5/12/21)
+
+# first car is baseline, others are compared to it
+cars_stats <- c('zeta', 'KLRG1')
+
+summary(
+  lm(
+    data=growth_dt[car %in% cars_stats][, car :=factor(car, levels= cars_stats)],
+    formula=vol_lwl ~ day + car))
 
 ```

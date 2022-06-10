@@ -225,7 +225,8 @@ barplot_stacked_plot_horiz <- ggplot(subset_barplot_reads) +
     stat='identity', width=1) +
   scale_fill_brewer(palette = "YlGn") +
   facet_wrap(t.type ~ ., scales = 'free_x', nrow=1) +
-  labs(y='% sorted into each bin', x='CAR Costimulatory Domains, ranked') +
+    labs(y='% of cells sorted into proliferative bins', 
+       x='CAR Costimulatory Domains, ranked') +
   scale_x_discrete(expand = c(0, 0), labels=remove_t_type_sep_col) +
   scale_y_continuous(limits = c(-0.0175,1), expand = expansion(mult = c(0, 0)), 
                      breaks=c(0, .5, 1), labels=percent) +
@@ -240,12 +241,13 @@ barplot_stacked_plot_horiz <- ggplot(subset_barplot_reads) +
     strip.background = element_blank(),
     panel.background = element_blank(),
     panel.border = element_blank()) +
-  geom_point(aes(x=CAR.ranked.sep, y=-0.0175, color=CAR.align),
+  geom_point(data=subset_barplot_reads[CAR.align %in% c('4-1BB','CD28')],
+    aes(x=CAR.ranked.sep, y=-0.0175, color=CAR.align),
       pch=17,
       size=2.8) +
-  scale_color_manual(values=c(other_car_colors, car_colors, '4-1BB'=car_colors[['41BB']]), guide='none')
-
-  
+  scale_color_manual(, 
+    values=c(other_car_colors, car_colors, 
+    '4-1BB'=car_colors[['41BB']]), guide='none')
 
 ggsave(here::here('..','figs','pooled','fig2a_stackbar_single_donor_horiz.pdf'), 
        barplot_stacked_plot_horiz, height=6, width=9, useDingbats=FALSE)
@@ -2364,7 +2366,7 @@ prolif_4v8_rel_vert <- ggplot(cast_4v8_abund[
   geom_text_repel(size=3, point.padding=0.125, segment.color='grey', max.overlaps=20) +
   theme_minimal() + 
   labs(y='log2 CD8:CD4 ratio', 
-       x='Mean Proliferation or Expansion, log2 mean FC') +
+       x='Mean proliferation/expansion, log2 mean FC') +
   theme(panel.border=element_rect(fill=NA)) +
   guides(size=F)
 

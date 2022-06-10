@@ -28,11 +28,16 @@ library(cowplot)
 
 setDTthreads(8)
 
-data.output.dir <- file.path(here::here(
-  '..','..',
-  's3-roybal-tcsl',
-  'lenti_screen_compiled_data','data'))
+# data.output.dir <- file.path(here::here(
+#   '..','..',
+#   's3-roybal-tcsl',
+#   'lenti_screen_compiled_data','data'))
+
+s3.data.dir <- '/Volumes/s3/roybal-tcsl/lenti_screen_compiled_data/data'
+data.output.dir <- file.path(s3.data.dir)
+
 load(file=file.path(data.output.dir, 'pooled_analysis_data.Rdata'))
+data.output.dir <- file.path(s3.data.dir)
 
 # set this to true to re-run, else will load from s3
 rerun_deseq <- F
@@ -44,21 +49,28 @@ array.list <- c('BAFF-R','CD30','4-1BB','TACI','CD28','KLRG1','CD40')
 # load colors
 source(here::here('r','fig_colors.R'))
 
+
 if (reload_data | !exists('total_combined'))
   load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
+  data.output.dir <- file.path(s3.data.dir)
+
   load(file.path(data.output.dir, 'pooled_cytokine_repeat_data.Rdata'))
+  data.output.dir <- file.path(s3.data.dir)
 
 if (reload_data | !exists('ctv_gated_means_dt'))
   load(file=file.path(data.output.dir, 'ctv_plot_data.Rdata'))
+  data.output.dir <- file.path(s3.data.dir)
+
 ```
 
 ## Load Exhaustion Data 
 ```{r}
-data_dir <- here::here('..','data')
+data.output.dir <- file.path(s3.data.dir)
 
 if (reload_data | !exists('exh_dt'))
-  load(file.path(data_dir, 'exh.Rdata'))
-
+  load(file.path(data.output.dir, 'exh.Rdata'))
+  data.output.dir <- file.path(s3.data.dir)
+  
 exh_dt[, car := factor(car, levels=c(car_order,'untrans'))]
 
 # some replicates appear to be incorrect - possibly due to evaporation or error in measurement.
@@ -414,152 +426,152 @@ pct_exp <- scales::label_percent()(pca.dt[pc %in% c(1,2), var.norm])
 ### PCA Plots - 5/19/22 updated to include new cytokines for revision
 
 ```{r}
-# by name
-pca.pos.sort.group.plot <- ggplot(projected.metrics,
-    aes(x = -PC1, y = -PC2, label = CAR.align,
-      size=(CAR.align %in% names(pca_car_colors)),
-      color=CAR.annot)) +
-  geom_point() +
-  geom_text_repel(data=projected.metrics[CAR.annot != 'none'],
-    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
-  scale_size_discrete(guide=F) +
-  scale_color_manual('',
-    labels=c(names(pca_car_colors)[1:7], 'other costims'),
-    values=c(pca_car_colors[1:7], 'grey')) +
-  labs(
-    x=paste0('PC1 (',pct_exp[1],')'),
-    y=paste0('PC2 (',pct_exp[2],')')) +
-  theme_bw() +
-  theme(axis.text = element_blank(), panel.grid=element_blank())
-
-# by size
-pca.pos.sort.size.plot <- ggplot(
-    projected.metrics[,
-      CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
-    aes(
-      x = -PC1, y = -PC2, label = CAR.label, 
-      size=(CAR.align %in% names(pca_car_colors)), 
-      fill=len/3)) +
-  geom_point(pch=21, color='black') +
-  scale_size_manual(guide=F, values=c(2,6)) +
-  scale_fill_distiller(palette='RdYlBu') +
-  geom_text_repel(data=projected.metrics,
-    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
-  labs(
-    x=paste0('PC1 (',pct_exp[1],')'),
-    y=paste0('PC2 (',pct_exp[2],')')) +
-  theme_bw() +
-  theme(
-    axis.text = element_blank(),
-    panel.grid=element_blank(),
-    legend.key.width=unit(0.4, 'lines'))
-
-# by type
-pca_type_combined <- merge(types, projected.metrics, by='CAR.align', all=T)
-
-pca.pos.sort.type.plot <- ggplot(pca_type_combined[,
-  CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
-    aes(x = -PC1, y = -PC2, label = CAR.label, shape=Activity, fill=Family,
-      size=(CAR.align %in% names(pca_car_colors)))) +
-  geom_point() +
-  scale_shape_manual(values=c(24,25,23,21)) +
-  scale_size_manual(guide=F, values=c(2,5)) +
-  guides(
-    fill = guide_legend(override.aes = list(shape = 21, size=5)),
-    shape = guide_legend(override.aes = list(size=5))) +
-  scale_fill_manual(values=c(
-    setNames(
-      brewer.pal(12,'Paired')[c(5,3,7,9,10)],
-      c('CD300','IgSF','Lectin','TIM','TREM')),
-    setNames(
-      brewer.pal(5,'Blues')[c(2,3,4)],
-      paste('TNFRSF Type',c('5','L','S'))
-    ))) +
-  geom_text_repel(data=pca_type_combined,
-    size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
-  labs(
-    x=paste0('PC1 (',pct_exp[1],')'),
-    y=paste0('PC2 (',pct_exp[2],')')) +
-  theme_bw() +
-  theme(axis.text = element_blank(), panel.grid=element_blank())
-
-#explain components
-# map component names back to variables
-comp_names <- unique(cbind(
-    total_combined[,paste(group, assay, k.type, t.type, comparison, sep='_')],
-    total_combined[,paste(group, assay, k.type, t.type, comparison, sep='|')]))
-indiv_components <- data.table(matrix(unlist(strsplit(comp_names[,2], '\\|')), ncol=5, byrow=T))
-names(indiv_components) <- c('group', 'assay', 'k.type', 't.type', 'comparison')
-indiv_components <- data.table(measure=comp_names[,1], indiv_components)
-
-component_rotations <- indiv_components[
-  melt.data.table(data.table(combined_pca$rotation, keep.rownames=T), id.vars='rn'),
-  on=c(measure='rn')]
-
-indiv_component_plot <- ggplot(
-  component_rotations[
-    variable %in% c('PC1','PC2')][,
-      list(diff_1v2= value[variable == 'PC1'] - value[variable == 'PC2']),
-      by=.(assay, comparison, k.type, t.type)][, assay_group := assay][
-        assay %in% c('CD69','IFNy','IL2'), assay_group := 'markers'][,
-          list(value= sum(diff_1v2)), by=.(t.type, k.type, assay, assay_group)]) + 
-  geom_bar(aes(x=assay, y=value, fill=assay_group), color='grey50', stat='identity') +
-  facet_grid(k.type + assay_group ~ t.type, scales='free', space='free') +
-  geom_hline(yintercept=0) +
-  coord_flip() +
-  labs(x='Pooled Assay Scores, grouped', y='<- More PC2     More PC1 ->')
-
-plot_rotations <- component_rotations[variable %in% c('PC1','PC2')][,
-  `:=`(min_val= min(value), max_val=max(value)), by=.(k.type, assay, t.type, comparison)][,
-    measure_group := assay][
-      grep('baseline', comparison), measure_group := 'expansion'][
-        assay %in% c('CD69','IFNy','IL2'), measure_group := 'markers']
-
-ggplot(plot_rotations) +
-  geom_point(aes(x=interaction(assay,comparison), y=-value, color=variable)) +
-  geom_linerange(data=plot_rotations[variable=='PC1'], aes(x=interaction(assay,comparison),
-      ymin=-min_val, ymax=-max_val, color=ifelse(min_val == value, 'PC1','PC2'))) +
-  facet_grid(k.type + measure_group ~ t.type, scales='free', space='free') +
-  geom_hline(yintercept=0) + coord_flip()
-
-
-plot_summary <- copy(plot_rotations)[
-  measure_group == 'markers', measure_group := assay][
-  measure_group == 'expansion', measure_group := paste(assay, measure_group, sep='.')][,
-  list(val_mean=mean(-value)), by=.(measure_group, k.type, t.type, variable)]
-
-plot_summary[, measure_group := factor(
-  measure_group,
-  levels=c('IL2','IFNy','CD69','CTV3.expansion',
-           'CTV2.expansion','CTV1.expansion','CTV2','CTV1'),
-  labels=c('IL2','IFNy','CD69','Expansion:\nd0-d24','Expansion:\nd0-d16',
-           'Expansion:\nd0-d4','Proliferation:\nd9-d16','Proliferation:\nd0-d3/4'))]
-
-pca_factors <- ggplot(plot_summary[, k.type := factor(k.type, labels=c('CD19-','CD19+'))]) + 
-  geom_bar(
-    aes(x=measure_group, y=val_mean, fill=variable),
-    stat='identity', position=position_dodge(0.7), color='grey30', size=0.5, alpha=0.8, width=0.7) +
-  facet_grid(k.type~t.type, scales='free_y', space='free_y') +
-  geom_hline(yintercept=0, size=0.5, linetype=2) +
-  scale_y_continuous(breaks=c(-0.10, 0, 0.10)) +
-  coord_flip() +
-  labs(x='Measurement (mean DESeq2 LFC)',y="Principal Component\nContribution (rotation)") +
-  theme_minimal() +
-  theme(
-    panel.border=element_rect(color='black', fill=NA),
-    panel.grid=element_blank())
-
-ratio.values <- pca_type_combined[, (max(PC1)-min(PC1))/(max(PC2)-min(PC2))]
-
-
-supp_S2_1_pca <- (
-  (pca_factors + theme(legend.position='bottom') + labs(fill='')) | 
-  (
-    (pca.pos.sort.type.plot + coord_fixed(ratio.values)) /
-    (pca.pos.sort.size.plot + coord_fixed(ratio.values) + labs(fill='Domain Length (aa)')) +
-    plot_layout(guides='collect')
-  )
-) + plot_layout(widths=c(0.6,1))
+# # by name
+# pca.pos.sort.group.plot <- ggplot(projected.metrics,
+#     aes(x = -PC1, y = -PC2, label = CAR.align,
+#       size=(CAR.align %in% names(pca_car_colors)),
+#       color=CAR.annot)) +
+#   geom_point() +
+#   geom_text_repel(data=projected.metrics[CAR.annot != 'none'],
+#     size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+#   scale_size_discrete(guide=F) +
+#   scale_color_manual('',
+#     labels=c(names(pca_car_colors)[1:7], 'other costims'),
+#     values=c(pca_car_colors[1:7], 'grey')) +
+#   labs(
+#     x=paste0('PC1 (',pct_exp[1],')'),
+#     y=paste0('PC2 (',pct_exp[2],')')) +
+#   theme_bw() +
+#   theme(axis.text = element_blank(), panel.grid=element_blank())
+# 
+# # by size
+# pca.pos.sort.size.plot <- ggplot(
+#     projected.metrics[,
+#       CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
+#     aes(
+#       x = -PC1, y = -PC2, label = CAR.label,
+#       size=(CAR.align %in% names(pca_car_colors)),
+#       fill=len/3)) +
+#   geom_point(pch=21, color='black') +
+#   scale_size_manual(guide=F, values=c(2,6)) +
+#   scale_fill_distiller(palette='RdYlBu') +
+#   geom_text_repel(data=projected.metrics,
+#     size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+#   labs(
+#     x=paste0('PC1 (',pct_exp[1],')'),
+#     y=paste0('PC2 (',pct_exp[2],')')) +
+#   theme_bw() +
+#   theme(
+#     axis.text = element_blank(),
+#     panel.grid=element_blank(),
+#     legend.key.width=unit(0.4, 'lines'))
+# 
+# # by type
+# pca_type_combined <- merge(types, projected.metrics, by='CAR.align', all=T)
+# 
+# pca.pos.sort.type.plot <- ggplot(pca_type_combined[,
+#   CAR.label := ifelse(CAR.annot == 'none', '', as.character(CAR.align))],
+#     aes(x = -PC1, y = -PC2, label = CAR.label, shape=Activity, fill=Family,
+#       size=(CAR.align %in% names(pca_car_colors)))) +
+#   geom_point() +
+#   scale_shape_manual(values=c(24,25,23,21)) +
+#   scale_size_manual(guide=F, values=c(2,5)) +
+#   guides(
+#     fill = guide_legend(override.aes = list(shape = 21, size=5)),
+#     shape = guide_legend(override.aes = list(size=5))) +
+#   scale_fill_manual(values=c(
+#     setNames(
+#       brewer.pal(12,'Paired')[c(5,3,7,9,10)],
+#       c('CD300','IgSF','Lectin','TIM','TREM')),
+#     setNames(
+#       brewer.pal(5,'Blues')[c(2,3,4)],
+#       paste('TNFRSF Type',c('5','L','S'))
+#     ))) +
+#   geom_text_repel(data=pca_type_combined,
+#     size=4, color='grey20', box.padding = 0.5, segment.alpha=0) +
+#   labs(
+#     x=paste0('PC1 (',pct_exp[1],')'),
+#     y=paste0('PC2 (',pct_exp[2],')')) +
+#   theme_bw() +
+#   theme(axis.text = element_blank(), panel.grid=element_blank())
+# 
+# #explain components
+# # map component names back to variables
+# comp_names <- unique(cbind(
+#     total_combined[,paste(assay, k.type, t.type, comparison, sep='_')],
+#     total_combined[,paste(assay, k.type, t.type, comparison, sep='|')]))
+# indiv_components <- data.table(matrix(unlist(strsplit(comp_names[,2], '\\|')), ncol=4, byrow=T))
+# names(indiv_components) <- c('assay', 'k.type', 't.type', 'comparison')
+# indiv_components <- data.table(measure=comp_names[,1], indiv_components)
+# 
+# component_rotations <- indiv_components[
+#   melt.data.table(data.table(combined_pca$rotation, keep.rownames=T), id.vars='rn'),
+#   on=c(measure='rn')]
+# 
+# indiv_component_plot <- ggplot(
+#   component_rotations[
+#     variable %in% c('PC1','PC2')][,
+#       list(diff_1v2= value[variable == 'PC1'] - value[variable == 'PC2']),
+#       by=.(assay, comparison, k.type, t.type)][, assay_group := assay][
+#         assay %in% c('CD69','IFNy','IL2'), assay_group := 'markers'][,
+#           list(value= sum(diff_1v2)), by=.(t.type, k.type, assay, assay_group)]) +
+#   geom_bar(aes(x=assay, y=value, fill=assay_group), color='grey50', stat='identity') +
+#   facet_grid(k.type + assay_group ~ t.type, scales='free', space='free') +
+#   geom_hline(yintercept=0) +
+#   coord_flip() +
+#   labs(x='Pooled Assay Scores, grouped', y='<- More PC2     More PC1 ->')
+# 
+# plot_rotations <- component_rotations[variable %in% c('PC1','PC2')][,
+#   `:=`(min_val= min(value), max_val=max(value)), by=.(k.type, assay, t.type, comparison)][,
+#     measure_group := assay][
+#       grep('baseline', comparison), measure_group := 'expansion'][
+#         assay %in% c('CD69','IFNy','IL2'), measure_group := 'markers']
+# 
+# ggplot(plot_rotations) +
+#   geom_point(aes(x=interaction(assay,comparison), y=-value, color=variable)) +
+#   geom_linerange(data=plot_rotations[variable=='PC1'], aes(x=interaction(assay,comparison),
+#       ymin=-min_val, ymax=-max_val, color=ifelse(min_val == value, 'PC1','PC2'))) +
+#   facet_grid(k.type + measure_group ~ t.type, scales='free', space='free') +
+#   geom_hline(yintercept=0) + coord_flip()
+# 
+# 
+# plot_summary <- copy(plot_rotations)[
+#   measure_group == 'markers', measure_group := assay][
+#   measure_group == 'expansion', measure_group := paste(assay, measure_group, sep='.')][,
+#   list(val_mean=mean(-value)), by=.(measure_group, k.type, t.type, variable)]
+# 
+# plot_summary[, measure_group := factor(
+#   measure_group,
+#   levels=c('IL2','IFNy','CD69','CTV3.expansion',
+#            'CTV2.expansion','CTV1.expansion','CTV2','CTV1'),
+#   labels=c('IL2','IFNy','CD69','Expansion:\nd0-d24','Expansion:\nd0-d16',
+#            'Expansion:\nd0-d4','Proliferation:\nd9-d16','Proliferation:\nd0-d3/4'))]
+# 
+# pca_factors <- ggplot(plot_summary[, k.type := factor(k.type, labels=c('CD19-','CD19+'))]) +
+#   geom_bar(
+#     aes(x=measure_group, y=val_mean, fill=variable),
+#     stat='identity', position=position_dodge(0.7), color='grey30', size=0.5, alpha=0.8, width=0.7) +
+#   facet_grid(k.type~t.type, scales='free_y', space='free_y') +
+#   geom_hline(yintercept=0, size=0.5, linetype=2) +
+#   scale_y_continuous(breaks=c(-0.10, 0, 0.10)) +
+#   coord_flip() +
+#   labs(x='Measurement (mean DESeq2 LFC)',y="Principal Component\nContribution (rotation)") +
+#   theme_minimal() +
+#   theme(
+#     panel.border=element_rect(color='black', fill=NA),
+#     panel.grid=element_blank())
+# 
+# ratio.values <- pca_type_combined[, (max(PC1)-min(PC1))/(max(PC2)-min(PC2))]
+# 
+# 
+# supp_S2_1_pca <- (
+#   (pca_factors + theme(legend.position='bottom') + labs(fill='')) |
+#   (
+#     (pca.pos.sort.type.plot + coord_fixed(ratio.values)) /
+#     (pca.pos.sort.size.plot + coord_fixed(ratio.values) + labs(fill='Domain Length (aa)')) +
+#     plot_layout(guides='collect')
+#   )
+# ) + plot_layout(widths=c(0.6,1))
 
 ```
 
@@ -612,7 +624,7 @@ car.abund.plot <- ggplot(car.abund.data,
 color_car_strips <- function(plot) {
 
   car.abund.gtable <- ggplot_gtable(ggplot_build(plot))
-  strip_both <- which(grepl('strip-', g$layout$name))
+  strip_both <- which(grepl('strip-', car.abund.gtable$layout$name))
   fills <- setNames(car_colors, gsub('TNR8','CD30',names(car_colors)))[
     c(car.abund.order[1], '41BB', car.abund.order[3:7])]
   k <- 1
