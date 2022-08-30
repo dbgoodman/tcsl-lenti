@@ -1,3 +1,0 @@
-ident_a,ident_b,gse,ID,Description,setSize,enrichmentScore,NES,pvalue,p.adjust,qvalues,rank,leading_edge,core_enrichment
-TACI,CD28_4-1BB_Zeta,gse_bp,GO:0044237,cellular metabolic process,4,1,1.85318274649758,0.0476190476190476,0.0476190476190476,0.487062404870624,4,"tags=100%, list=50%, signal=100%",IGFBP2/STAT1/TNFRSF4/HOPX
-TACI,CD28_4-1BB_Zeta,gse_bp,GO:0044260,cellular macromolecule metabolic process,4,1,1.85318274649758,0.0476190476190476,0.0476190476190476,0.487062404870624,4,"tags=100%, list=50%, signal=100%",IGFBP2/STAT1/TNFRSF4/HOPX

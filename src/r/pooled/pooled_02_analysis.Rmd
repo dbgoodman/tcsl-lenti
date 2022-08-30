@@ -4266,8 +4266,6 @@ ggdraw(plot_dendroheat)
 
 ### Patent Version
 
-
-
 ```{r}
 data.output.dir <- file.path(here::here(
   '..','..',

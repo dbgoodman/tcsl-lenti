@@ -46,9 +46,11 @@ array.list <- c('BAFF-R','CD30','4-1BB','TACI','CD28','KLRG1','CD40')
 # load colors
 source(here::here('r','fig_colors.R'))
 
+#local cache of rdata for faster loading
 local.data.dir <- '/Volumes/HFSE/lenti-data'
+
 if (reload_data | !exists('ctv_gated_means_dt'))
-  load(file=file.path(local.data.dir, 'ctv_plot_data.Rdata'))
+  load(file=file.path(s3.data.dir, 'ctv_plot_data.Rdata'))
 
 plots <- list()
 

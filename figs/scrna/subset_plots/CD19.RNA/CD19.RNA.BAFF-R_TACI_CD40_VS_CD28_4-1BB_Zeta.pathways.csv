@@ -1,3 +1,0 @@
-ident_a,ident_b,gse,ID,Description,setSize,enrichmentScore,NES,pvalue,p.adjust,qvalues,rank,leading_edge,core_enrichment
-BAFF-R_TACI_CD40,CD28_4-1BB_Zeta,gse_bp,GO:0044419,interspecies interaction between organisms,4,0.888888888888889,1.87517226175312,0.0168224299065421,0.0168224299065421,0.89651447207501,5,"tags=100%, list=38%, signal=89%",HLA-DRA/GNLY/STAT1/CD74
-BAFF-R_TACI_CD40,CD28_4-1BB_Zeta,gse_kegg,hsa05152,Tuberculosis,7,0.718541110864467,1.67233863527838,0.0448833034111311,0.0448833034111311,0.400790513833992,7,"tags=86%, list=54%, signal=86%",HLA-DRA/HLA-DRB1/STAT1/CD74/HLA-DPA1/HLA-DQB1
