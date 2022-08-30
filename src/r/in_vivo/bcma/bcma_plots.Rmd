@@ -1,6 +1,7 @@
 ---
 title: "BCMA BAFFR Plots"
 output: html_notebook
+---
 
 ```{r}
 library(ggplot2)
@@ -8,6 +9,7 @@ library(data.table)
 library(patchwork)
 library(cowplot)
 library(tidyverse)
+library(zoo)
 
 # load colors
 source(here::here("r",'fig_colors.R'))
@@ -70,108 +72,28 @@ tumor_growth_plot <- ggplot(plot.data,
       panel.border=element_rect(color='black', fill=NA))
 ```
 
-
-## Mixed Effects Model, Repeated Measures
 ```{r}
-
-library(nlme)
 
 rad_me_data <- plot.data[,
     list(exp.num, costim=relevel(costim, ref='TRAC KO'),
     mouse.num=factor(paste(mouse.num, exp.num, sep='.')), 
     log2.rad= log2(avg.radiance), 
     day=ordered(day))]
-    
-with(rad_me_data, {
-  nestinginfo <- groupedData(log2.rad ~ costim | mouse.num,
-    outer = ~ exp.num,
-    data= rad_me_data)
-  fit.compsym <- gls(log2.rad ~ costim * day,
-    data=nestinginfo,
-    corr=corCompSymm(, form= ~ 1 | mouse.num))
-  fit.ar1 <- gls(log2.rad ~ costim * day,
-    data=nestinginfo,
-    corr=corAR1(, form= ~ 1 | mouse.num))
-  fit.ar1het <- gls(log2.rad ~ costim * day,
-    data=nestinginfo,
-    corr=corAR1(, form= ~ 1 | mouse.num),
-    weights=varIdent(form = ~ 1 | exp.num))
-  
-  # compare models for AIC and loglik
-  print(anova(fit.compsym, fit.ar1, fit.ar1het)) #compares the models
-  print(anova(fit.compsym))
-  print(anova(fit.ar1))
-  print(anova(fit.ar1het))
-})
 
-# AR1 covariance structure gave lowest AIC and loglik, so using that
-compute_pairwise_mixed_effects <- function(data) {
-  glsControl(maxIter=1000, msMaxIter=1000, tolerance=1e-3)
-  with(data, tryCatch({
-    
-    print(paste(unique(data$costim), collapse='.'))
-    
-    nestinginfo <- groupedData(log2.rad ~ costim | exp.num/mouse.num,
-    data= data)
+as.numeric.char <- function(x) as.numeric(as.character(x))
 
-    fit.ar1 <- gls(log2.rad ~ costim * day,
-      data=nestinginfo,
-      corr=corAR1(, form= ~ 1 | mouse.num))
-        
-    return(list(costim=paste(unique(data$costim), collapse='.'), 
-      model=fit.ar1))},
-    
-    error=function(cond) {
-      
-      message("Here's the original error message:")
-      message(cond)
-      return(NA)
-    }))
-}
-
-models <- apply(rad_me_data[, combn(unique(costim),2)], 2,
-  function(x) compute_pairwise_mixed_effects(rad_me_data[costim %in% x]))
-  
-p_values <- data.table(t(sapply(models, function(model_i) c(model_i$cars, anova(model_i$model)$`p-value`[4]))))
-names(p_values) <- c('car_1','car_2','pvalue')
-p_values[, pvalue := as.numeric(pvalue)] 
-p_values[, car_1 := factor(car_1, levels=growth_dt[, unique(car)])]
-p_values[, car_2 := factor(car_2, levels=growth_dt[, unique(car)])]
-
-
-models_cd8 <- lapply(prolif_data_raw[,unique(CAR.align)],
-  function(x) compute_pairwise_mixed_effects(prolif_data_raw[t.type=='CD8'], x))
-for (i in seq(length(models_cd8))) models_cd8[[i]]$t.type = 'CD8'
-
-models_cd4 <- lapply(prolif_data_raw[,unique(CAR.align)],
-  function(x) compute_pairwise_mixed_effects(prolif_data_raw[t.type=='CD4'], x))
-for (i in seq(length(models_cd4))) models_cd4[[i]]$t.type = 'CD4'
-
-models_combined <- lapply(prolif_data_raw[,unique(CAR.align)],
-  function(x) compute_pairwise_mixed_effects(prolif_data_raw, x))
-for (i in seq(length(models_combined))) models_combined[[i]]$t.type = 'both'
-
-p_values <- data.table(t(sapply(
-  c(models_cd8, models_cd4, models_combined),
-    function(model_i) c(
-      CAR.align=as.character(model_i$car),
-      t.type=model_i$t.type,
-      pval=as.numeric(anova(model_i$model)$`p-value`[2]),
-      coef=as.numeric(model_i$model$coefficients[2])))))
-p_values[, coef := as.numeric(coef)]
-p_values[, pval := as.numeric(pval)]
-p_values[, CAR.align := factor(CAR.align)]
-p_values[, padj := p.adjust(as.numeric(pval), 'BH'), by='t.type']
-
-```
-
-
-```{r}
+# expand to all possible ordinal days among measurements
 rad_me_expanded <- rad_me_data[, 
-  expand.grid(day=unique(day),mouse.num= unique(mouse.num))]
+  expand.grid(
+    day=rad_me_data[, seq(
+      min(as.numeric.char(day)),
+      max(as.numeric.char(day)))],
+    mouse.num= unique(mouse.num))]
 
-rad_me_data_interpolated <- rad_me_data[rad_me_expanded,  
-  on=.(day, mouse.num), nomatch=NA]
+rad_me_data_interpolated <- copy(rad_me_data)[,
+  day := as.numeric.char(day)][
+    rad_me_expanded,  
+    on=.(day, mouse.num), nomatch=NA]
   
 setorderv(rad_me_data_interpolated, c("mouse.num","day"))
 
@@ -189,88 +111,25 @@ rad_me_data_interpolated[,
     log2.rad.interpolated - log2.rad.interpolated[
       day==min(day[!is.na(log2.rad.interpolated)])]),
   by=.(mouse.num)]
-  
-library(nlme)
-    
-with(rad_me_data_interpolated, {
-  nestinginfo <- groupedData(log2.rad.interpolated.rel ~ costim | mouse.num,
-    outer = ~ exp.num,
-    data= rad_me_data_interpolated[!is.na(log2.rad.interpolated.rel)])
-  fit.compsym <- gls(log2.rad.interpolated.rel ~ costim * day,
-    data=nestinginfo,
-    corr=corCompSymm(, form= ~ 1 | mouse.num))
-  fit.ar1 <- gls(log2.rad.interpolated.rel ~ costim * day,
-    data=nestinginfo,
-    corr=corAR1(, form= ~ 1 | mouse.num))
-  fit.ar1het <- gls(log2.rad.interpolated.rel ~ costim * day,
-    data=nestinginfo,
-    corr=corAR1(, form= ~ 1 | mouse.num),
-    weights=varIdent(form = ~ 1 | exp.num))
-  
-  # compare models for AIC and loglik
-  print(anova(fit.compsym, fit.ar1, fit.ar1het)) #compares the models
-  print(anova(fit.compsym))
-  print(anova(fit.ar1))
-  print(anova(fit.ar1het))
-})
 
-# AR1 covariance structure gave lowest AIC and loglik, so using that
-compute_pairwise_mixed_effects <- function(data) {
-  glsControl(maxIter=1000, msMaxIter=1000, tolerance=1e-3)
-  with(data, tryCatch({
-    
-    print(paste(unique(data$costim), collapse='.'))
-    
-    nestinginfo <- groupedData(log2.rad.interpolated.rel ~ costim | exp.num/mouse.num,
-      data= data[!is.na(log2.rad.interpolated.rel)])
+rad_me_data_interpolated_auc <- rad_me_data_interpolated[
+    !is.na(log2.rad.interpolated.rel)][,
+      `:=`(
+        auc= sum(log2.rad.interpolated.rel, na.rm=T), 
+        final.day= day==max(day),
+        tumormax.day= day==day[which.max(log2.rad.interpolated.rel)]),
+        by=.(mouse.num)]
 
-    fit.compsym <- gls(log2.rad.interpolated.rel ~ costim * day,
-    data=nestinginfo,
-    corr=corCompSymm(, form= ~ 1 | mouse.num))
-        
-    return(list(costim=paste(unique(data$costim), collapse='.'), 
-      model=fit.compsym))},
-    
-    error=function(cond) {
-      
-      message("Here's the original error message:")
-      message(cond)
-      return(NA)
-    }))
-}
+ggplot(rad_me_data_interpolated_auc,
+  aes(x=costim, y=auc, color=exp.num)) + 
+  geom_jitter(height=0) + 
+  stat_compare_means(comparisons=list(c('BAFF-R','CD28'), c('BAFF-R','41BB'), c('CD28','41BB'), c('BAFF-R','TRAC KO'))) + labs('Area under the curve, relative to initial tumor size')
 
-models <- apply(rad_me_data_interpolated[, combn(unique(costim),2)], 2,
-  function(x) compute_pairwise_mixed_effects(rad_me_data_interpolated[costim %in% x]))
-  
-p_values <- data.table(t(sapply(models, function(model_i) c(model_i$cars, anova(model_i$model)$`p-value`[4]))))
-names(p_values) <- c('car_1','car_2','pvalue')
-p_values[, pvalue := as.numeric(pvalue)] 
-p_values[, car_1 := factor(car_1, levels=growth_dt[, unique(car)])]
-p_values[, car_2 := factor(car_2, levels=growth_dt[, unique(car)])]
-
-
-models_cd8 <- lapply(prolif_data_raw[,unique(CAR.align)],
-  function(x) compute_pairwise_mixed_effects(prolif_data_raw[t.type=='CD8'], x))
-for (i in seq(length(models_cd8))) models_cd8[[i]]$t.type = 'CD8'
-
-models_cd4 <- lapply(prolif_data_raw[,unique(CAR.align)],
-  function(x) compute_pairwise_mixed_effects(prolif_data_raw[t.type=='CD4'], x))
-for (i in seq(length(models_cd4))) models_cd4[[i]]$t.type = 'CD4'
-
-models_combined <- lapply(prolif_data_raw[,unique(CAR.align)],
-  function(x) compute_pairwise_mixed_effects(prolif_data_raw, x))
-for (i in seq(length(models_combined))) models_combined[[i]]$t.type = 'both'
-
-p_values <- data.table(t(sapply(
-  c(models_cd8, models_cd4, models_combined),
-    function(model_i) c(
-      CAR.align=as.character(model_i$car),
-      t.type=model_i$t.type,
-      pval=as.numeric(anova(model_i$model)$`p-value`[2]),
-      coef=as.numeric(model_i$model$coefficients[2])))))
-p_values[, coef := as.numeric(coef)]
-p_values[, pval := as.numeric(pval)]
-p_values[, CAR.align := factor(CAR.align)]
-p_values[, padj := p.adjust(as.numeric(pval), 'BH'), by='t.type']
+ggplot(rad_me_data_interpolated_auc, aes(x=day, y=log2.rad.interpolated.rel, group=mouse.num, color=costim, label=round(auc,2))) + 
+  geom_point(aes(size=max.day)) + 
+  geom_line() + 
+  geom_text_repel(
+    data=rad_me_data_interpolated_auc[max.day==T], color='black') +
+  facet_wrap(~costim)
 ```
 

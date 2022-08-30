@@ -28,12 +28,7 @@ rm(list = ls())
 
 setDTthreads(8)
 
-# data.output.dir <- file.path(here::here(
-#   '..','..',
-#   's3-roybal-tcsl',
-#   'lenti_screen_compiled_data','data'))
-
-s3.data.dir <- '/Volumes/s3/roybal-tcsl/lenti_screen_compiled_data/data'
+source(here::here('r','local_settings.R'))
 
 data.output.dir <- file.path(s3.data.dir)
 load(file=file.path(data.output.dir, 'pooled_deseq2_analysis_data.Rdata'))
@@ -759,7 +754,7 @@ top_x_mad <- function(x, top=5, na.rm = TRUE) {
 }
 
 
-plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
+plot_all_reps <- function(df=read.counts, value_col, df_only=F, ordinal=F) {
   
   all_rep_comparisons <- df[
     grepl('CTV', assay)][order(assay)][order(t.type)][order(k.type)][, 
@@ -839,6 +834,8 @@ plot_all_reps <- function(df=read.counts, value_col, df_only=F) {
     facet_grid(rep_pair ~  k.type + t.type + assay))
 
 }
+
+
 ```
 
 # map abundance relative to previous timepoint

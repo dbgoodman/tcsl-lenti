@@ -1,0 +1,619 @@
+---
+title: "fig7_compiled.Rmd"
+author: "dbg_csa"
+date: "6/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(data.table)
+library(patchwork)
+library(cowplot)
+library(tidyverse)
+library(zoo)
+library(dplyr)
+library(ggpubr)
+library(scales)
+
+# get local path to s3 dir and other local settings
+source(here::here('r','local_settings.R'))
+
+# load colors
+source(here::here("r",'fig_colors.R'))
+```
+
+### M28 In Vivo Killing
+
+```{r}
+growth_dt <- fread(paste0(s3.data.dir, "/invivo/tcsl166_growth.csv"))
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt[, length_2 := as.numeric(length_2)]
+growth_dt <- growth_dt[car != '']
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Untransduced','zeta'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+ggplot(growth_dt,
+  aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
+  geom_line() +
+  facet_wrap(~car)
+
+supp_invivo_burden <- ggplot(growth_dt[day < 45 & car != 'None'],
+    aes(
+      x=day,
+      y=vol_lwl,
+      color=factor(car,levels=c(car_order,'Untransduced')),
+      group=interaction(car,cage,mouse))) +
+  geom_line() +
+  facet_wrap(~car) +
+  scale_color_manual(values=c(car_colors, 'Untransduced'='grey50')) +
+  theme_minimal() + theme(legend.position = 'none') +
+  geom_vline(xintercept=-Inf) +
+  geom_hline(yintercept=-Inf)
+
+growth_dt_means <- growth_dt[, list(
+  vol_lww = mean(vol_lww, na.rm=T),
+  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
+  vol_lwl = mean(vol_lwl, na.rm=T),
+  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
+  vol_lwlw = mean(vol_lwlw, na.rm=T),
+  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
+  by=c('car','day')]
+
+all_cars <- ggplot(growth_dt_means[day <=45],
+  aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+  geom_line(legend=F) + geom_point(show.legend=F) +
+  geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+  scale_linetype_manual("", values=1+(levels(growth_dt_means[,car])=='None')*1) +
+  scale_color_manual("", values=c('Untransduced'='#666666', 'None'='#666666', car_colors)) +
+  labs(color="g", linetype="g") + theme_minimal()
+
+left_group <- c('None','Untransduced','41BB','BAFF-R','CD28','TACI','CD40')
+right_group <- c('None','Untransduced','KLRG1','zeta')
+car_linetypes <- 1+(levels(growth_dt_means[,car])=='None')*1
+names(car_linetypes) <- levels(growth_dt_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.spacing.y = unit(2, 'pt'),
+      legend.margin = margin(2, 3, 3, 3),
+      legend.key.height=unit(15,'pt'),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill=NA))
+
+tumor_a <- ggplot(
+  growth_dt_means[day <=50 & car %in% left_group][car == 'Untransduced', car := 'Unt'],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(
+        aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("",
+        values=plyr::rename(car_linetypes[left_group], 
+          replace = c("Untransduced" = "Unt"))) +
+      scale_color_manual("", values=c('None'='#666666', 'Unt'='#666666', 
+        car_colors[gsub("Untransduced","Unt",left_group)])) +
+      theme_minimal() + 
+      plot_theme + 
+      labs(y=bquote('Mean Tumor Volume'~(mm^3)), x='Days post tumor injection')
+
+tumor_b <- ggplot(growth_dt_means[day <=50 & car %in% right_group][car == 'Untransduced', car := 'Unt'],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(
+        aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("",
+        values=plyr::rename(car_linetypes[right_group], 
+          replace = c("Untransduced" = "Unt"))) +
+      scale_color_manual("", values=c('None'='#666666', 'Unt'='#666666', 
+        car_colors[gsub("Untransduced","Unt",right_group)])) +
+      theme_minimal() + 
+      plot_theme + 
+      theme(plot.margin=margin(3,3,3,20)) +
+      labs(y=bquote('Mean Tumor Volume'~(mm^3)), x='Days post tumor injection')
+
+in_vivo_tumor_growth <- plot_grid(
+    NULL,
+    tumor_a,
+    tumor_b,
+    rel_widths=c(0.5, 0.5, 0.5),
+    labels=c('A','B','C'), ncol=3, align='h',axis='tb')
+```
+
+## M28 Supp Fig In vivo Killing
+
+```{r}
+
+all_group <- c('None','Untransduced','41BB','BAFF-R','CD28', 'CD40', 'KLRG1','TACI', 'zeta')
+car_linetypes <- 1+(levels(growth_dt_means[,car])=='None')*1
+names(car_linetypes) <- levels(growth_dt_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.spacing.y = unit(2, 'pt'),
+      legend.margin = margin(2, 3, 3, 3),
+      legend.key.height=unit(15,'pt'),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill=NA))
+
+
+supp_all_tumors <- ggplot(
+  growth_dt_means[day <=50 & car %in% all_group][car == 'Untransduced', car := 'Unt'],
+      aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+    geom_line() + 
+    geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+  scale_linetype_manual("",
+        values=plyr::rename(car_linetypes[all_group], 
+          replace = c("Untransduced" = "Unt"))) +
+      scale_color_manual("", values=c('None'='#666666', 'Unt'='#666666', 
+        car_colors[gsub("Untransduced","Unt",all_group)])) +    theme_minimal() + 
+    plot_theme + 
+    labs(y=bquote('Tumor Volume'~(mm^3)), x='Days post tumor injection')
+
+supp_all_tumors
+
+```
+
+### M28 In vivo Stats
+
+```{r}
+
+growth_dt <- fread(paste0(s3.data.dir, "/invivo/tcsl166_growth.csv"))
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt[, length_2 := as.numeric(length_2)]
+growth_dt <- growth_dt[car != '']
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB','BAFF-R','CD28','CD40','KLRG1','None','TACI','Untransduced','zeta'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+
+m28_data <- growth_dt[,
+    list(costim=relevel(car, ref='Untransduced'),
+    mouse.num=factor(paste(cage, mouse, sep='.')), 
+    vol_lwl= vol_lwl, 
+    day=ordered(day))]
+
+as.numeric.char <- function(x) as.numeric(as.character(x))
+
+# expand to all possible ordinal days among measurements
+m28_data_expanded <- m28_data[, 
+  expand.grid(
+    day=m28_data[, seq(
+      min(as.numeric.char(day)),
+      max(as.numeric.char(day)))],
+    mouse.num= unique(mouse.num))]
+
+m28_data_interpolated <- copy(m28_data)[,
+  day := as.numeric.char(day)][
+    m28_data_expanded,  
+    on=.(day, mouse.num), nomatch=NA]
+  
+setorderv(m28_data_interpolated, c("mouse.num","day"))
+
+m28_data_interpolated[, costim := na.omit(unique(costim)), by=mouse.num]
+
+# interpolate missing days linearly
+m28_data_interpolated[,
+  vol_lwl := na.approx(vol_lwl[order(day)], na.rm=F),
+  by=mouse.num]  
+  
+# relative to earliest day with data
+m28_data_interpolated[, 
+  vol_lwl.rel := (
+    vol_lwl - vol_lwl[
+      day==min(day[!is.na(vol_lwl)])]),
+  by=.(mouse.num)]
+
+m28_data_interpolated_auc <- m28_data_interpolated[
+    !is.na(vol_lwl.rel)][,
+      `:=`(
+        auc= sum(vol_lwl.rel, na.rm=T), 
+        final.day= day==max(day),
+        tumormax.day= day==day[which.max(vol_lwl.rel)]),
+        by=.(mouse.num)]
+
+ggplot(
+  m28_data_interpolated_auc,
+  aes(x=day, y=vol_lwl.rel, group=mouse.num, 
+    color=costim, label=round(auc,2))) + 
+  geom_point(aes(size=tumormax.day)) + 
+  geom_line() + 
+  geom_text_repel(
+    data=m28_data_interpolated_auc[tumormax.day==T], color='black') +
+  facet_wrap(~costim)
+
+ggplot(m28_data_interpolated_auc[final.day==T],
+  aes(x=reorder(costim,-auc), y=auc, color=costim)) + 
+  geom_jitter(height=0) + 
+  scale_color_manual(values=car_colors) +
+  stat_compare_means(method='t.test', 
+    comparisons=asplit(m28_data_interpolated_auc[,
+      combn(unique(costim), 2)], 2)) + 
+  labs('Area under the curve, relative to initial tumor size') + 
+  theme_minimal() + 
+  labs(x='CAR', y='Area under the curve')
+
+ggplot(m28_data_interpolated_auc[final.day==T & costim %in% c('zeta','KLRG1','CD40','Untransduced','None')],
+  aes(x=reorder(costim,-auc), y=auc, color=costim)) + 
+  geom_jitter(height=0) + 
+  scale_color_manual(values=car_colors) +
+  stat_compare_means(method='t.test', label = "p.signif",
+    comparisons=asplit(m28_data_interpolated_auc[
+      costim %in% c('zeta','KLRG1','Untransduced','None'),
+      combn(unique(as.character(costim)), 2)], 2)) + 
+  labs('Area under the curve, relative to initial tumor size') + 
+  theme_minimal() + 
+  labs(x='CAR', y='Area under the curve')
+
+# individual mouse spider plots
+
+all_group <- c('None','Unt','41BB','BAFF-R','CD28', 'CD40', 'KLRG1','TACI', 'zeta')
+car_linetypes <- 1+(levels(m28_data_interpolated_auc[,costim])=='None')*1
+names(car_linetypes) <- levels(m28_data_interpolated_auc[,costim])
+car_linetypes <- plyr::rename(car_linetypes, c(Untransduced='Unt'))
+
+m28_spider_all_dt <- copy(m28_data_interpolated_auc)[
+  costim == 'Untransduced', costim := 'Unt']
+
+m28_spider_all_dt[, costim_groups := costim]
+m28_spider_all_dt[costim %in% c('None','Unt'),
+  costim_groups := 'None/Unt']
+
+m28_spider_all <- ggplot(
+  m28_spider_all_dt,
+  aes(x=day, y=vol_lwl.rel, group=mouse.num, 
+    linetype=costim,
+    color=costim, label=round(auc,2))) + 
+  geom_line() + 
+  facet_wrap(~costim_groups, ncol=4) + 
+  scale_linetype_manual(values= car_linetypes[all_group]) + 
+  scale_color_manual(values=car_colors[all_group]) +
+  theme_minimal() +
+  labs(
+    color='', linetype='',
+    x='Days post tumor injection',
+    y=bquote('Tumor Volume'~(mm^3))) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    #axis.line = element_line(colour = "black"),
+    plot.title = element_text(hjust = 0.5),
+    panel.border=element_rect(color='black', fill=NA))
+```
+
+
+## m28 - Supp Fig ALPPL2 vs CD19 killing 
+
+```{r}
+growth_dt <- fread(paste0(s3.data.dir,'/invivo/tcsl164_growth_r.csv'))
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt <- growth_dt[car != '']
+growth_dt[, c('V7','V8') := NULL]
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB-CD19','41BB-ALPPL2','CD28-KO','CD28-Lenti','NT','Unt'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+ggplot(growth_dt,
+  aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
+  geom_line() +
+  facet_wrap(~car)
+
+supp_invivo_burden <- ggplot(growth_dt[day < 45 & car != 'NT'],
+    aes(
+      x=day,
+      y=vol_lwl,
+      color=factor(car,levels=c(car_order)),
+      group=interaction(car,cage,mouse))) +
+  geom_line() +
+  facet_wrap(~car) +
+  scale_color_manual(values=c(car_colors, 'Unt'='grey50')) +
+  theme_minimal() + theme(legend.position = 'NT') +
+  geom_vline(xintercept=-Inf) +
+  geom_hline(yintercept=-Inf)
+
+growth_dt_alppl_means <- growth_dt[, list(
+  vol_lww = mean(vol_lww, na.rm=T),
+  vol_lww_se = sd(vol_lww, na.rm=T)/sqrt(.N),
+  vol_lwl = mean(vol_lwl, na.rm=T),
+  vol_lwl_se = sd(vol_lwl, na.rm=T)/sqrt(.N),
+  vol_lwlw = mean(vol_lwlw, na.rm=T),
+  vol_lwlw_se = sd(vol_lwlw, na.rm=T)/sqrt(.N)),
+  by=c('car','day')]
+
+left_group <- c('NT','Unt','41BB-CD19','41BB-ALPPL2')
+right_group <- c('NT','Unt','CD28-KO','CD28-Lenti')
+car_linetypes <- 1+(levels(growth_dt_alppl_means[,car])=='NT')*1
+names(car_linetypes) <- levels(growth_dt_alppl_means[,car])
+
+plot_theme <- theme(
+      legend.position = c(.05, .95),
+      legend.justification = c("left", "top"),
+      legend.box.just = "right",
+      legend.box.background = element_rect(fill='white'),
+      legend.title=element_blank(),
+      legend.spacing.y = unit(2, 'pt'),
+      legend.margin = margin(2, 3, 3, 3),
+      legend.key.height=unit(15,'pt'),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill=NA))
+
+
+tumor_alppl2 <- ggplot(growth_dt_alppl_means[day <=30 & car %in% left_group],
+        aes(x=day, y=vol_lwl, color=car, linetype=car)) +
+      geom_line() + 
+      geom_pointrange(aes(ymin=vol_lwl-vol_lwl_se, ymax=vol_lwl+vol_lwl_se), show.legend=F) + 
+      scale_linetype_manual("", values=car_linetypes[left_group]) +
+      scale_color_manual("", values=c(
+         'NT'='#666666', 'Unt'='#666666', '41BB-CD19'='#6BAED6', '41BB-ALPPL2'='#01578a')) +
+      theme_minimal() + 
+      plot_theme + 
+      labs(y=bquote('Tumor Volume'~(mm^3)), x='')
+```
+
+## BCMA In Vivo
+
+
+```{r}
+# load measurements
+tumor_measurements_fn <- here::here("r","in_vivo","bcma",'bcma.data.csv')
+
+tumor_measurements <- fread(tumor_measurements_fn)
+
+# remove values where there is nothing written in the avg.radiance (aka when the mouse died)
+tumor_measurements <- tumor_measurements[avg.radiance != 'NA']
+
+
+##plot each mouse individually by group
+plot.data <- tumor_measurements[day<32 &
+  scfv!="BC50" & scfv!="BC30" &
+  costim!="Zeta" & costim!="PBS"]
+  
+#rename baffr to work with CAR colors
+plot.data[costim=='BAFFR', costim := 'BAFF-R']
+
+##this is fixing it so that we incorporate trac ko as the same color as unt. 
+##first we find what costims are unique
+plot_car_colors <- car_colors[unique(plot.data$costim)]
+#remove na because that's what trac ko becomes
+plot_car_colors <- plot_car_colors[!is.na(plot_car_colors)]
+#assign it the right color from original choices
+plot_car_colors['TRAC KO'] <- car_colors['Unt']
+names(plot_car_colors)[2] <- '4-1BB'
+
+#this changes the order that it shows the plots in within ggplot
+plot.data[, costim := 
+  factor(costim,
+    levels=c("BAFF-R", "41BB", "CD28", "TRAC KO"),
+    labels=c("BAFF-R", "4-1BB", "CD28", "TRAC KO"))]
+
+tumor_growth_plot <- ggplot(plot.data[costim != 'CD28'],
+    aes(y=(avg.radiance), x=day, color=costim,
+        group=interaction(exp.num, scfv, costim, mouse.num),
+        linetype=factor(exp.num, labels=paste('Donor',1:2)))) + 
+          ## line type is the dashed vs solid. solid is linetype 1
+    geom_line() +
+    geom_point() + 
+    scale_y_log10(
+      breaks = trans_breaks("log10", function(x) 10^x),
+      labels = trans_format("log10", math_format(10^.x))) +
+    scale_color_manual(values=plot_car_colors[c(3,2,4)]) +
+    theme_minimal() +
+    labs(
+      x="Days Post T cell Injection",
+      y="Radiance (log10)",
+      color='',
+      linetype='')+
+    facet_wrap(c("costim"), ncol=3) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      #axis.line = element_line(colour = "black"),
+      plot.title = element_text(hjust = 0.5),
+      panel.border=element_rect(color='black', fill=NA))
+
+tumor_growth_plot_with_cd28 <- ggplot(plot.data,
+    aes(y=(avg.radiance), x=day, color=costim,
+        group=interaction(exp.num, scfv, costim, mouse.num),
+        linetype=factor(exp.num, labels=paste('Donor',1:2)))) + 
+          ## line type is the dashed vs solid. solid is linetype 1
+    geom_line() +
+    geom_point() + 
+    scale_y_log10(
+      breaks = trans_breaks("log10", function(x) 10^x),
+      labels = trans_format("log10", math_format(10^.x))) +
+    scale_color_manual(values=plot_car_colors) +
+    theme_minimal() +
+    labs(
+      x="Days Post T cell Injection",
+      y="Radiance (log10)",
+      color='',
+      linetype='')+
+    facet_wrap(c("costim"), ncol=4) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      #axis.line = element_line(colour = "black"),
+      plot.title = element_text(hjust = 0.5),
+      panel.border=element_rect(color='black', fill=NA))
+
+# fig7_compiled <- plot_grid(
+#   # top col
+#   plot_grid(
+#     tumor_a + theme(aspect.ratio = 1),
+#     tumor_b + theme(aspect.ratio = 1),
+#     rel_heights=c(0.5, 0.5),
+#     labels=c('A','B'), nrow=2, align='v',axis='tb'),
+#   # second col
+#   plot_grid(
+#     tumor_growth_plot + theme(
+#       aspect.ratio = 1,
+#       legend.position='bottom',
+#       legend.direction = 'horizontal'),
+#     NULL,
+#     rel_heights=c(1.5,1),
+#     labels=c('C','D'), nrow=2, align='v'),
+#   ncol=2, labels=c('',''), rel_widths=c(1,2.3))
+
+fig7_compiled <- (tumor_a + theme(
+    aspect.ratio = 1,
+    legend.position='bottom',
+    legend.direction = 'horizontal',
+    legend.box.background = element_blank())) + 
+  (tumor_b + theme(
+    aspect.ratio = 1,
+    legend.position='bottom',
+    legend.direction = 'horizontal',
+    legend.box.background = element_blank())) + 
+  (tumor_growth_plot + theme(
+    aspect.ratio = 1,
+    legend.position='bottom',
+    legend.direction = 'horizontal')) + 
+  plot_spacer() +
+  plot_layout(design= "
+    AACCCCC
+    AACCCCC
+    BBDDDDD
+    BBDDDDD"
+  ) +
+  plot_annotation(tag_levels=c('A','B','C','D'))
+
+fig_scale <- 1.05
+ggsave(here::here('..','figs','compiled','fig7.newdraft.pdf'), fig7_compiled, 
+  height=7*fig_scale, width=11*fig_scale, useDingbats=FALSE)
+```
+
+### BCMA In Vivo Stats
+
+```{r}
+
+rad_me_data <- plot.data[,
+    list(exp.num, costim=relevel(costim, ref='TRAC KO'),
+    mouse.num=factor(paste(mouse.num, exp.num, sep='.')), 
+    log2.rad= log2(avg.radiance), 
+    day=ordered(day))]
+
+as.numeric.char <- function(x) as.numeric(as.character(x))
+
+# expand to all possible ordinal days among measurements
+rad_me_expanded <- rad_me_data[, 
+  expand.grid(
+    day=rad_me_data[, seq(
+      min(as.numeric.char(day)),
+      max(as.numeric.char(day)))],
+    mouse.num= unique(mouse.num))]
+
+rad_me_data_interpolated <- copy(rad_me_data)[,
+  day := as.numeric.char(day)][
+    rad_me_expanded,  
+    on=.(day, mouse.num), nomatch=NA]
+  
+setorderv(rad_me_data_interpolated, c("mouse.num","day"))
+
+rad_me_data_interpolated[, exp.num := na.omit(unique(exp.num)), by=mouse.num]
+rad_me_data_interpolated[, costim := na.omit(unique(costim)), by=mouse.num]
+
+# interpolate missing days linearly
+rad_me_data_interpolated[,
+  log2.rad.interpolated := na.approx(log2.rad[order(day)], na.rm=F),
+  by=mouse.num]  
+  
+# relative to earliest day with data
+rad_me_data_interpolated[, 
+  log2.rad.interpolated.rel := (
+    log2.rad.interpolated - log2.rad.interpolated[
+      day==min(day[!is.na(log2.rad.interpolated)])]),
+  by=.(mouse.num)]
+
+rad_me_data_interpolated_auc <- rad_me_data_interpolated[
+    !is.na(log2.rad.interpolated.rel)][,
+      `:=`(
+        auc= sum(log2.rad.interpolated.rel, na.rm=T), 
+        final.day= day==max(day),
+        tumormax.day= day==day[which.max(log2.rad.interpolated.rel)]),
+        by=.(mouse.num)]
+```
+
+### S7 
+
+* S7A: alppl2 vs cd19 m28
+* S7B: m28 tumor all
+* S7C: m28 spiders all
+
+```{r}
+
+left_plots <- align_patches(
+  tumor_alppl2,
+  m28_spider_all,
+  tumor_growth_plot_with_cd28)
+
+fig_S7 <- plot_grid(
+  plot_grid(
+    NULL, left_plots[[1]],
+    nrow=1, rel_widths=c(1,.8), 
+    labels=c('A','B')),
+  left_plots[[2]],
+  plot_grid(
+    NULL, NULL,
+    nrow=1,
+    labels=c('D','E')),
+  left_plots[[3]],
+  nrow=4, 
+  labels=c('','C','','F'),
+  rel_heights=c(1.2,2,1,1),
+  axis='hv', align='tblr')
+
+ggsave(here::here('..','figs','compiled','figS7.newdraft.pdf'), fig_S7, 
+  height=13, width=11, useDingbats=FALSE)
+```
