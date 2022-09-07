@@ -35,6 +35,8 @@ rm(list = ls())
 
 setDTthreads(8)
 
+#sudo ln -s /Users/dbg/Library/Group\ Containers/G69SCX94XU.duck/Library/Application\ Support/duck/Volumes/s3.amazonaws.com\ –\ S3 /Volumes/S3
+
 # get local path to s3 dir and other local settings
 source(here::here('r','local_settings.R'))
 
@@ -535,6 +537,27 @@ fig_3_single_dendro <- make_dendroheatmap(
       plot.margin = margin(5.5,66,5.5,44, unit="pt")))
 
 fig_3_single_dendro
+
+# RAW DATA TABLE - Fig3A Heatmap
+
+heatmap_export_rows <- list(
+  CAR.align='Domain Name',
+  assay='Assay Name',
+  t.type='T Cell Type',
+  k.type='K562 Condition',
+  value.scale='Z-score',
+  comparison='Internal name for measurement z-score',
+  padj='Adjusted P-value')
+
+chosen_metrics_export <- copy(chosen_metrics[, 
+  names(heatmap_export_rows), with=F])
+
+names(chosen_metrics_export) <- unlist(heatmap_export_rows)
+
+fwrite(list('# z-score heatmap data: Fig 3A'),
+    here::here('..','tables','fig3a_heatmap.csv'))
+fwrite(chosen_metrics_export, append=T, col.names=T,
+    here::here('..','tables','fig3a_heatmap.csv'))
 ```
 
 ## Fig2: abundance over time stats (need for fig2 and 3)
@@ -757,6 +780,31 @@ car.abund.data.neg.plot <- ggplot(car.abund.data.neg,
     panel.border = element_rect(fill=NA),
     strip.background=element_rect(linetype=1, color='white', size=3),
     strip.text = element_text(color='white',face='bold'))
+
+# RAW DATA TABLE - abundance change over time - Fig 2C, 3B, S3D
+
+abund_raw_data <- rbind(car.abund.data.neg, car.abund.data)
+
+abund_raw_data_rows <- list(
+  CAR.align='Domain Name',
+  sort.group='Sort Group (Subset, Sort, Donor, Replicate)',
+  donor='Donor Name',
+  t.type='T Cell Type',
+  k.type='K562 Condition',
+  cell.count='Number of inferred cells for Domain',
+  car.abund.rel.baseline='CAR abundance relative to baseline',
+  day='Days of expansion',
+  padj='Adjusted p-value')
+
+abund_raw_data_export <- copy(abund_raw_data[, 
+  names(abund_raw_data_rows), with=F])
+
+names(abund_raw_data_export) <- unlist(abund_raw_data_rows)
+
+fwrite(list('# Domain abundance data: Fig 2C, 3C, S3D'),
+    here::here('..','tables','fig3c_car_abund.csv'))
+fwrite(abund_raw_data_export, append=T, col.names=T,
+    here::here('..','tables','fig3c_car_abund.csv'))
 
 ```
 
@@ -1016,6 +1064,28 @@ pca_factors <- ggplot(plot_summary[, k.type := factor(k.type, labels=c('CD19-','
     panel.grid=element_blank())
 
 ratio.values <- pca_type_combined[, (max(PC1)-min(PC1))/(max(PC2)-min(PC2))]
+
+
+# RAW DATA TABLE - PCA Fig 3B, S3B
+
+pca_type_combined_rows <- list(
+  CAR.align='Domain Name',
+  Activity='Domain Activity Curated from Literature',
+  Family='Domain Family',
+  PC1='PC1',
+  PC2='PC2',
+  len='Domain Length')
+
+pca_type_combined_export <- copy(pca_type_combined[, 
+  names(pca_type_combined_rows), with=F])
+
+names(pca_type_combined_export) <- unlist(pca_type_combined_rows)
+
+fwrite(list('# PCA data: Fig 3B, S3B'),
+    here::here('..','tables','fig3b_pca.csv'))
+fwrite(pca_type_combined_export, append=T, col.names=T,
+    here::here('..','tables','fig3b_pca.csv'))
+
 ```
 
 ### Fig2: cytokine panels - by cytokine, colored with donor - using this
@@ -1209,6 +1279,36 @@ cytokine_subset_colors <- ggplot(cyto.plot.data,
         strip.background = element_rect(colour="white", fill="white"),
         legend.justification=c(1,1),
         legend.position=c(0.25,1))
+
+# RAW DATA TABLE - CYTOKINES
+
+cyto_export_rows <- list(
+  CAR.align='Domain Name',
+  sort.cond='Cytokine Bin',
+  assay='Cytokine Sort Group (IL2/IFNg/both)',
+  donor='Donor Name',
+  t.type='T Cell Type',
+  k.type='K562 Condition',
+  cell.count='Number of inferred cells for Domain',
+  sort.group='Sorted Cell Group',
+  car.bin.cells='Number of CAR-T cells in bin for this domain',
+  car.bin.pct='Number of CAR-T cells in bin for this domain',
+  car.bin.pct.incl='Number of CAR-T cells in bin for this domain, including double positive cells',
+  l2fc.mean='Log2 Fold Change, Domain Mean',
+  l2fc.mean.donor='Log2 Fold Change, Domain/Donor Mean',
+  l2fc.mean.subset='Log2 Fold Change, Domain/Subset Mean',
+  sort.group='Sort Group (Subset, Cytokine, Donor, Replicate)',
+  sort.group.cond.rank='Domain Rank within Sort Group')
+
+cyto.plot.data_export <- copy(cyto.plot.data[, 
+  names(cyto_export_rows), with=F])
+
+names(cyto.plot.data_export) <- unlist(cyto_export_rows)
+
+fwrite(list('# Cytokine data: Fig 2B, S2C'),
+    here::here('..','tables','fig2b_cyto.csv'))
+fwrite(cyto.plot.data_export, append=T, col.names=T,
+    here::here('..','tables','fig2b_cyto.csv'))
 ```
 
 ### Fig2: early vs late plot
@@ -1344,6 +1444,24 @@ sprinter_plot <- ggplot(sprinter_dt,
     x='Overall expansion, log2(d0-d14) FC from mean',
     fill='Significant late/early expansion,\np<0.05:',
     size='Overall rel. expansion, -log10(p):')
+
+# RAW DATA - Early vs late proliferation Fig S2E
+
+sprinter_dt_names <- list(
+  CAR.align='Domain Name',
+  Estimate.evl='log2 Early vs Late Expansion',
+  Estimate.total='log2 Total Expansion',
+  p.val.evl='Early vs late significant, addjusted p-value')
+
+sprinter_dt_export <- copy(sprinter_dt[, 
+  names(sprinter_dt_names), with=F])
+
+names(sprinter_dt_export) <- unlist(sprinter_dt_names)
+
+fwrite(list('# Early vs Late Data: Fig S2E'),
+    here::here('..','tables','figs2e_evl.csv'))
+fwrite(cd69.pct.pos_export, append=T, col.names=T,
+    here::here('..','tables','figs2e_evl.csv'))
 ```
 
 ## Fig2: abudance over time plot
@@ -1444,6 +1562,28 @@ fig2_abundance_over_time_vert <- ggplot(
   scale_y_continuous('Relative Expansion,\n log2 FC from mean ') +
   theme_minimal() +
   theme(panel.border=element_rect(fill=NA), panel.grid=element_blank())
+
+# RAW DATA TABLE - ABUNDANCE OVER TIME
+
+abund_export_rows <- list(
+  CAR.align='Domain Name',
+  assay='Sort Name',
+  t.type='T Cell Type',
+  pval='P-value on plot',
+  padj='P-value after multiple testing correction',
+  padj.signif='Significance Score',
+  mean.car.abund.rel.baseline='log2 Mean Domain abundance relative to baseline')
+  
+  
+abund_plot_data_export <- unique(copy(abund_plot_data[, 
+  names(abund_export_rows), with=F]))
+
+names(abund_plot_data_export) <- unlist(abund_export_rows)
+
+fwrite(list('# Abundance over time data: Fig 2C'),
+    here::here('..','tables','fig2c_rel_abund.csv'))
+fwrite(abund_plot_data_export, append=T, col.names=T,
+    here::here('..','tables','fig2c_rel_abund.csv'))
 ```
 
 ### Fig2: CD4 vs CD8s (new version, w/ mean prolif and diff)
@@ -1513,6 +1653,25 @@ prolif_4v8_rel_vert <- ggplot(cast_4v8_w_blanks[order(CAR.type)],
 
 ggsave(here::here('..','figs','pooled','mixed_4v8_rel.pdf'), prolif_4v8_rel,
        height=2.5, width=7, useDingbats=FALSE)
+
+# EXPORT RAW DATA - FIG 2D (was 2E)
+
+cast_4v8_rows <- list(
+  CAR.align='Domain Name',
+  assay='Cytokine Sort Group (IL2/IFNg/both)',
+  mean_lfc='Mean Log2 fold change for CD4/CD8',
+  log2FoldChange_CD4='CD4 log2 fold change',
+  log2FoldChange_CD8='CD8 log2 fold change')
+
+cast_4v8_export <- copy(cast_4v8[, 
+  names(cast_4v8_rows), with=F])
+
+names(cast_4v8_export) <- unlist(cast_4v8_rows)
+
+fwrite(list('# abund_4v8 data: Fig 2D'),
+    here::here('..','tables','fig2d_abund_4v8.csv'))
+fwrite(cast_4v8_export, append=T, col.names=T,
+    here::here('..','tables','fig2d_abund_4v8.csv'))
 
 ```
 
@@ -1600,7 +1759,7 @@ barplot_stacked_plot_horiz <- ggplot(subset_barplot_reads) +
     axis.text.x = element_markdown(size=9, angle = 90, vjust = 0.5, hjust=1),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    strip.background = element_blank(),
+    strip.background = element_blank(),f
     panel.background = element_blank(),
     panel.border = element_blank()) +
   geom_point(data=subset_barplot_reads[CAR.align %in% c('4-1BB','CD28')],
@@ -1613,6 +1772,38 @@ barplot_stacked_plot_horiz <- ggplot(subset_barplot_reads) +
 
 ggsave(here::here('..','figs','pooled','fig2a_stackbar_single_donor_horiz.pdf'), 
        barplot_stacked_plot_horiz, height=6, width=9, useDingbats=FALSE)
+
+# RAW DATA TABLE - CTV
+
+ctv_export_rows <- list(
+  CAR.align='Domain Name',
+  bin='Sorted Bin',
+  counts='Read Count',
+  date='Experiment Date',
+  batch='Experiment Batch',
+  donor='Donor Name',
+  timepoint='Experimental Timepoint',
+  assay='Assay Name',
+  t.type='T Cell Type',
+  k.type='K562 Condition',
+  cell.count='Number of inferred cells for Domain',
+  sort.group='Sorted Cell Group',
+  len='Domain Length',
+  car.bin.pct='Percent of CAR reads in bin',
+  car.abs.pct='Absolute pct of Reads in Whole Sort for CAR',
+  rlog_car_score='DESeq2 RLog CAR Score')
+
+read.counts_export <- copy(read.counts[
+  assay %in% c('CTV1','CTV2','CTV3','baseline') &
+    batch %in% c('prolif1','prolif2'), 
+  names(ctv_export_rows), with=F])
+
+names(read.counts_export) <- unlist(ctv_export_rows)
+
+fwrite(list('# CTV data: Fig 2A'),
+    here::here('..','tables','fig2a_ctv.csv'))
+fwrite(read.counts_export, append=T, col.names=T,
+    here::here('..','tables','fig2a_ctv.csv'))
 
 ```
 
@@ -1760,6 +1951,11 @@ ggsave(here::here('..','figs','compiled','fig3.newdraft.pdf'), fig3,
 ## FigS1: Load Exhaustion Data 
 ```{r}
 
+s1_car_set <- c('CD28','41BB','zeta','untrans')
+s1_car_colors <- c(
+  car_colors[intersect(names(car_colors), s1_car_set)],
+  untrans='grey50')
+
 data_dir <- here::here('..','data')
 
 if (reload_data | !exists('exh_dt'))
@@ -1787,6 +1983,33 @@ outlier_wells <- unique(exh_means[n_oob == 1, list(donor,k562,day,t_type,car,wel
 exh_dt <- outlier_wells[, outlier_well := T][exh_dt, on=.(donor,k562,day,t_type,car,well,plate)]
 exh_dt[is.na(outlier_well), outlier_well := F]
 
+get_marker_counts <- function(exh_dt, exh_vars=c('tim3_t','lag3_t', 'pd1_t','cd39_t')) {
+  marker_ct <- exh_dt[!outlier_well & variable %in% exh_vars,
+    list(n_pos_marker= sum(gt_thresh)),
+    by=c('well','plate','day','Time','car','donor','k562','t_type')]
+  
+  marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
+  
+  marker_ct <- map_day_0(marker_ct)
+  
+  marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:length(exh_vars)))), 
+    by=c('well','plate','day','car','donor','k562','t_type')]
+  names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
+  
+  marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
+    by=c('well','plate','day','car','donor','k562','t_type')]
+  
+  return(marker_freq)
+}
+
+if (!exists('day_dt'))
+  day_dt <- get_marker_counts(
+    exh_dt,
+    exh_vars=c('tim3_t','lag3_t', 'pd1_t','cd39_t'))[
+      day %in% c(0,6,15,24,33) &
+      car %in% s1_car_set &
+      k562 == 'cd19+']
+
 plots <- list()
 
 cd4_marker_pos_threshold <- list(
@@ -1808,32 +2031,36 @@ cd8_marker_pos_threshold <- list(
   cd39_t= 1250)
 
 censor_negative_min = -1500
+
+stacked_exh_plot <- function(day_dt_subset) {
+  
+  day_dt_subset <- day_dt_subset[, 
+      c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
+      by=c('n_pos_marker','t_type','donor','day','k562','car')][,
+        t_type := toupper(t_type)]
+  
+  day_dt_subset[, car := factor(car)]
+  day_dt_subset[, pct := as.numeric(pct)]
+  
+  ggplot(unique(day_dt_subset[, list(car, mean_pct, n_pos_marker, day, t_type, donor)])) +
+    geom_bar(aes(x=factor(day, levels=rev(levels(factor(day)))), y=mean_pct, fill=n_pos_marker),
+      stat='identity', width=1, color='black', size=0.2) +
+    facet_grid(car ~ donor, scales='free') +
+    scale_y_continuous(expand=c(0,0), labels=label_percent(), breaks=c(.5,1)) +
+    scale_x_discrete(expand=c(0,0), limits=rev) +
+    scale_fill_manual(
+      'Exh. Markers per cell', values=brewer.pal(9,'RdPu')[c(1,2,5,7,9)]) +
+    labs(x="Days in Culture", y='Fraction of Cells') +
+    theme_minimal() +
+    theme(
+      panel.grid=element_blank(),
+      panel.border=element_rect(color='black', size=0.2, fill=NA))
+
+}
+
 ```
 
-### Fig1: Exh panel
 
-```{r}
-# donor 1 CD8 exh data for main text:
-fig1_exh_panel <- stacked_exh_plot(day_dt[t_type == 'cd8' & day %in% c(0,15,24,33) & donor == 1][,
-    donor := factor(paste0('Donor ',donor))]) +
-  labs(x='Day') +
-  scale_y_continuous(expand=c(0,0), labels=label_percent(), breaks=c(0,.5,1)) +
-  guides(fill = guide_legend(
-    title.position = "top", 
-    title.hjust = 0.5,
-    label.position = "bottom")) +
-  theme(
-    legend.position = 'top',
-    strip.text.x = element_blank(),
-    panel.spacing.y = unit(0.8, "lines"),
-    panel.background = element_rect(fill='grey70'),
-    legend.key.size = unit(0.8,'lines'),
-    plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
-    axis.title.y=element_blank())
-
-ggsave(here::here('..','figs','compiled','fig1_exh.pdf'), fig1_exh_panel,
-       height=4, width=1.5, useDingbats=FALSE)
-```
 
 ## FigS1D: compare abundance and length to expansion and proliferation
 
@@ -1888,35 +2115,34 @@ supp_S1D_len_abund_vs_outcome <- len_abund_vs_outcome_horiz &
   theme(panel.border=element_rect(fill=NA),
         panel.grid = element_blank())
 
+# RAW DATA - CAR ABUND LEN CORRELATIONS
+
+all_corr_data <- unique(
+  car_len_abund_comparisons[, 
+    list(CAR.align, mean_rlog_car_score, baseline.car.abund,
+      meanlog2.abund.rel.baseline, len)])
+
+all_corr_data_rows <- list(
+  CAR.align='Domain Name',
+  mean_rlog_car_score='Mean rlog CAR Cell Division Score',
+  baseline.car.abund='Baseline Abundance in Library for Domain',
+  meanlog2.abund.rel.baseline='Mean Log2 Relative Abundance for Domain',
+  len='Domain Length in nucleotides')
+
+all_corr_data_export <- copy(all_corr_data[, 
+  names(all_corr_data_rows), with=F])
+
+names(all_corr_data_export) <- unlist(all_corr_data_rows)
+
+fwrite(list('# Domain Correlation data: Fig S1D'),
+    here::here('..','tables','figs1d_corr_data.csv'))
+fwrite(all_corr_data_export, append=T, col.names=T,
+    here::here('..','tables','figs1d_corr_data.csv'))
 ```
 
 ### FigS1: 28, BB, Zeta exhaustion data
 
 ```{r}
-
-s1_car_set <- c('CD28','41BB','zeta','untrans')
-s1_car_colors <- c(
-  car_colors[intersect(names(car_colors), s1_car_set)],
-  untrans='grey50')
-
-get_marker_counts <- function(exh_dt, exh_vars=c('tim3_t','lag3_t', 'pd1_t','cd39_t')) {
-  marker_ct <- exh_dt[!outlier_well & variable %in% exh_vars,
-    list(n_pos_marker= sum(gt_thresh)),
-    by=c('well','plate','day','Time','car','donor','k562','t_type')]
-  
-  marker_ct <- marker_ct[, N := .N, by=c('well','plate','day','car','k562','t_type')][N > 1]
-  
-  marker_ct <- map_day_0(marker_ct)
-  
-  marker_freq <- marker_ct[, data.frame(table(factor(n_pos_marker, levels= 0:length(exh_vars)))), 
-    by=c('well','plate','day','car','donor','k562','t_type')]
-  names(marker_freq)[names(marker_freq) == 'Var1'] <- 'n_pos_marker'
-  
-  marker_freq[ n_pos_marker != 7, pct := Freq/sum(Freq), 
-    by=c('well','plate','day','car','donor','k562','t_type')]
-  
-  return(marker_freq)
-}
 
 if (!exists('day_dt'))
   day_dt <- get_marker_counts(
@@ -1925,32 +2151,6 @@ if (!exists('day_dt'))
       day %in% c(0,6,15,24,33) &
       car %in% s1_car_set &
       k562 == 'cd19+']
-
-stacked_exh_plot <- function(day_dt_subset) {
-  
-  day_dt_subset <- day_dt_subset[, 
-      c('mean_pct','sd_pct') := list(mean(pct), sd(pct)), 
-      by=c('n_pos_marker','t_type','donor','day','k562','car')][,
-        t_type := toupper(t_type)]
-  
-  day_dt_subset[, car := factor(car)]
-  day_dt_subset[, pct := as.numeric(pct)]
-  
-  ggplot(unique(day_dt_subset[, list(car, mean_pct, n_pos_marker, day, t_type, donor)])) +
-    geom_bar(aes(x=factor(day, levels=rev(levels(factor(day)))), y=mean_pct, fill=n_pos_marker),
-      stat='identity', width=1, color='black', size=0.2) +
-    facet_grid(car ~ donor, scales='free') +
-    scale_y_continuous(expand=c(0,0), labels=label_percent(), breaks=c(.5,1)) +
-    scale_x_discrete(expand=c(0,0), limits=rev) +
-    scale_fill_manual(
-      'Exh. Markers per cell', values=brewer.pal(9,'RdPu')[c(1,2,5,7,9)]) +
-    labs(x="Days in Culture", y='Fraction of Cells') +
-    theme_minimal() +
-    theme(
-      panel.grid=element_blank(),
-      panel.border=element_rect(color='black', size=0.2, fill=NA))
-
-}
 
 plots$exh_stacked_bars <- ((
   stacked_exh_plot(day_dt[t_type == 'cd4' & day %in% c(0,15,24,33)][,
@@ -2026,6 +2226,29 @@ plots$marker_means <- (
       axis.title.y=element_blank())
   ) + 
   plot_layout(guides='collect')
+
+# RAW DATA TABLE - INDIV EXH MARKER MEANS
+
+indiv_exh_export_rows <- list(
+  car='Domain Name',
+  variable='Exhaution Marker',
+  mean_val='Mean Fluorescence Intensity',
+  sem_val='Mean Fluorescence Intensity, SEM',
+  day='Experiment Day',
+  donor='Donor Name')
+
+indiv_exh_export <- copy(indiv_marker_means[t_type == 'cd4'][, 
+      donor := factor(paste0('Donor ',donor))][,
+      variable := factor(variable, labels=levels(variable))][, 
+  names(indiv_exh_export_rows), with=F])
+
+names(indiv_exh_export) <- unlist(indiv_exh_export_rows)
+
+fwrite(list('# Individual Exhaustion data: Fig S1A'),
+    here::here('..','tables','figs1a_indiv_exh.csv'))
+fwrite(indiv_exh_export, append=T, col.names=T,
+    here::here('..','tables','figs1a_indiv_exh.csv'))
+
 ```
 
 ### Exhaustion stats (CD28, zeta, BB)
@@ -2392,6 +2615,29 @@ s1c_ordinal_plots <- ggplot(all_reps) + geom_jitter(
   geom_text(data=assay_kw_signif, aes(label=signif_label),
            x=39, y=1, vjust=1, hjust=0, size=2.5)
 
+# RAW DATA TABLE - Domain Ranking Comparison Fig S1C
+
+all_reps_rows <- list(
+  CAR.align='Domain Name',
+  assay='Assay Name',
+  donor='Donor Name',
+  t.type='T Cell Type',
+  batch='Experimental Batch',
+  sort.group='Sorted Cell Group',
+  car.score.rank='Rank of Domain within the Sort Group',
+  car.score.rank.mean='Mean Rank of the Domain',
+  car.score.rank.mean.assay='Mean Rank of the Domain within the Assay')
+
+all_reps_export <- copy(all_reps[, 
+  names(all_reps_rows), with=F])
+
+names(all_reps_export) <- unlist(all_reps_rows)
+
+fwrite(list('# Domain Rank data: Fig S1C'),
+    here::here('..','tables','figs1c_domain_rank.csv'))
+fwrite(all_reps_export, append=T, col.names=T,
+    here::here('..','tables','figs1c_domain_rank.csv'))
+
 ```
 
 
@@ -2478,6 +2724,72 @@ ggsave(here::here('..','figs','pooled','cd69_panel.pdf'), cd69_panel,
        height=3, width=8, useDingbats=FALSE)
 
 supp_S2_2_cd69_panel <- cd69_panel
+
+# RAW DATA TABLE - CD69 Expression Sort
+
+cd69.pct.pos_names <- list(
+  CAR.align='Domain Name',
+  assay='Assay Name',
+  t.type='T Cell Type',
+  neg='CD69 % Pos, CD19- Condition',
+  pos='CD69 % Pos, CD19+ Condition')
+
+cd69.pct.pos_export <- copy(cd69.pct.pos[, 
+  names(cd69.pct.pos_names), with=F])
+
+names(cd69.pct.pos_export) <- unlist(cd69.pct.pos_names)
+
+fwrite(list('# CD69 Sort Data: Fig S2D'),
+    here::here('..','tables','figs2d_cd69.csv'))
+fwrite(cd69.pct.pos_export, append=T, col.names=T,
+    here::here('..','tables','figs2d_cd69.csv'))
+
+```
+
+### Fig1: Exh panel (run after S1 because of needed fxns)
+
+```{r}
+
+
+# donor 1 CD8 exh data for main text:
+fig1_exh_panel <- stacked_exh_plot(day_dt[t_type == 'cd8' & day %in% c(0,15,24,33) & donor == 1][,
+    donor := factor(paste0('Donor ',donor))]) +
+  labs(x='Day') +
+  scale_y_continuous(expand=c(0,0), labels=label_percent(), breaks=c(0,.5,1)) +
+  guides(fill = guide_legend(
+    title.position = "top", 
+    title.hjust = 0.5,
+    label.position = "bottom")) +
+  theme(
+    legend.position = 'top',
+    strip.text.x = element_blank(),
+    panel.spacing.y = unit(0.8, "lines"),
+    panel.background = element_rect(fill='grey70'),
+    legend.key.size = unit(0.8,'lines'),
+    plot.subtitle = element_text(hjust=0.5, margin=margin(0,0,0,0,'pt')),
+    axis.title.y=element_blank())
+
+ggsave(here::here('..','figs','compiled','fig1_exh.pdf'), fig1_exh_panel,
+       height=4, width=1.5, useDingbats=FALSE)
+
+# RAW DATA TABLE - EXHAUSTION
+day_dt_export <- copy(day_dt)
+names(day_dt_export) <- c(
+  'Well',
+  'Plate',
+  'Day',
+  'CAR',
+  'T Cell Donor',
+  'K562 Condition',
+  'T Cell Subset',
+  'Number of Positive Exhaustion Markers',
+  'Number of T Cells',
+  'Fraction of T Cells')
+
+fwrite(list('# Exhaustion marker data: Fig 1E, S1B'),
+    here::here('..','tables','fig1_exhaustion.csv'))
+fwrite(day_dt_export, append=T, col.names=T,
+    here::here('..','tables','fig1_exhaustion.csv'))
 ```
 
 ### FigS2: Volcano Plot
@@ -2552,6 +2864,27 @@ interbin_volcano <- ggplot(data.subset.dt[order(CAR.type)],
   theme(panel.border=element_rect(fill=NA), panel.grid=element_blank())
 
 supp_S2_5_interbin_volcano <- interbin_volcano
+
+# RAW DATA - INTERBIN VOLCANO S2A
+
+interbin_volcano_export_rows <- list(
+  CAR.align='Domain Name',
+  assay='Sort Assay Name',
+  t.type='T Cell Type',
+  k.type='K562 Condition',
+  group='Sorted Cell Group',
+  log2FoldChange='Log2 Fold Change, Domain Mean',
+  padj='P value after multiple hypothesis correction')
+
+interbin_volcano_export <- copy(data.subset.dt[order(CAR.type), 
+  names(interbin_volcano_export_rows), with=F])
+
+names(interbin_volcano_export) <- unlist(interbin_volcano_export_rows)
+
+fwrite(list('# Interbin volcano data: Fig S2A'),
+    here::here('..','tables','figs2a_volcano.csv'))
+fwrite(interbin_volcano_export, append=T, col.names=T,
+    here::here('..','tables','figs2a_volcano.csv'))
 ```
 
 ### FigS2: CD19 neg pos comparison
@@ -2678,6 +3011,25 @@ ggplot_pos_neg_assay_rank <- ggplot(pos_neg_assay_plot,
 #supp_S2_4_pos_neg <- ggplot_pos_neg_assay
 supp_S2_4_pos_neg <- (ggplot_pos_neg_assay / ggplot_pos_neg_assay_rank)
 
+# RAW DATA TABLE - POS NEG ASSAY SCALED PROLIFERATION
+
+pos_neg_assay_plot_rows <- list(
+  CAR.align='Domain Name',
+  t.type='T Cell Type',
+  y_scaled_comb='CD19+ Scaled Proliferation',
+  x_scaled_comb='CD19- Scaled Proliferation',
+  y_scaled_comb_rank='CD19+ Scaled Proliferation Rank',
+  x_scaled_comb='CD19- Scaled Proliferation Rank')
+
+pos_neg_assay_plot_export <- copy(pos_neg_assay_plot[, names(pos_neg_assay_plot_rows), with=F])
+
+names(pos_neg_assay_plot_export) <- unlist(pos_neg_assay_plot_rows)
+
+fwrite(list('# CD19+/- Ranking: Fig S2B'),
+    here::here('..','tables','figs2b_cd19_pos_neg_scaled.csv'))
+fwrite(interbin_volcano_export, append=T, col.names=T,
+    here::here('..','tables','figs2b_cd19_pos_neg_scaled.csv'))
+
 ```
 
 
@@ -2749,13 +3101,15 @@ myc_average_exp <- map_day_0_diff(mfi_myc_summ)[,
 pca_car_colors <- copy(car_colors)
 names(pca_car_colors) <- gsub('TNR8', 'CD30', names(pca_car_colors))
 
-supp_S3_2_gfp_myc <- ggplot(myc_average_exp[,
+myc_gfp_data <- myc_average_exp[,
     k562 := factor(
       k562,
       levels=levels(factor(k562)),
       labels=c('CD19+ K562s','CD19- K562s','No K562s'))
     ][car == 'TNR8', car := 'CD30'][,
-    car := factor(car, levels=gsub('TNR8','CD30',car_order))],
+    car := factor(car, levels=gsub('TNR8','CD30',car_order))]
+
+supp_S3_2_gfp_myc <- ggplot(myc_gfp_data,
     aes(
       x=car, fill=car, y=value_avg, color=car, group=(interaction(car,k562)))) + 
   geom_boxplot(alpha=0.8) +
@@ -2774,6 +3128,25 @@ supp_S3_2_gfp_myc <- ggplot(myc_average_exp[,
   labs(y='CAR : GFP Ratio\n(relative to mean)',
        x='CAR', title='') +
   geom_hline(yintercept=1, linetype=3, color='grey50')
+
+# RAW DATA TABLE - car to gfp expression ratio data
+
+myc_gfp_export_rows <- list(
+  car='Domain Name',
+  variable='Assay Measurement',
+  t_type='T Cell Type',
+  k562='K562 Condition',
+  value_avg='CAR to GFP Ratio')
+
+myc_gfp_data_export <- copy(myc_gfp_data[, 
+  names(myc_gfp_export_rows), with=F])
+
+names(myc_gfp_data_export) <- unlist(myc_gfp_export_rows)
+
+fwrite(list('# car to gfp expression ratio data: Fig S3C'),
+    here::here('..','tables','figs3c_car2gfp_exp.csv'))
+fwrite(myc_gfp_data_export, append=T, col.names=T,
+    here::here('..','tables','figs3c_car2gfp_exp.csv'))
 
 ```
 
@@ -2814,7 +3187,7 @@ fig_s3 <- ((fig_s3a |
      plot_spacer() + 
   plot_annotation(tag_levels = 'A')
 
-ggsave(here::here('..','figs','compiled','figS3.newdraft.pdf'), fig_S3,
+ggsave(here::here('..','figs','compiled','figS3.newdraft.pdf'), fig_s3,
        height=13, width=11, useDingbats=FALSE)
 
 

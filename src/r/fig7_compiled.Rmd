@@ -28,6 +28,32 @@ source(here::here("r",'fig_colors.R'))
 ### M28 In Vivo Killing
 
 ```{r}
+
+#first, load alppl2 data and save it
+growth_dt <- fread(paste0(s3.data.dir,'/invivo/tcsl164_growth_r.csv'))
+growth_dt[, length_1 := as.numeric(length_1)]
+growth_dt <- growth_dt[car != '']
+growth_dt[, c('V7','V8') := NULL]
+
+growth_dt <- rbindlist(
+  list(
+    growth_dt,
+    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
+    fill=T)
+
+growth_dt[, car := mapvalues(
+  factor(car),
+  from=levels(factor(car)), 
+  to=c('41BB-CD19','41BB-ALPPL2','CD28-KO','CD28-Lenti','NT','Unt'))]
+
+growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
+growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
+growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+
+growth_dt_alppl2 <- copy(growth_dt)
+
+#-------
+
 growth_dt <- fread(paste0(s3.data.dir, "/invivo/tcsl166_growth.csv"))
 growth_dt[, length_1 := as.numeric(length_1)]
 growth_dt[, length_2 := as.numeric(length_2)]
@@ -137,6 +163,30 @@ in_vivo_tumor_growth <- plot_grid(
     tumor_b,
     rel_widths=c(0.5, 0.5, 0.5),
     labels=c('A','B','C'), ncol=3, align='h',axis='tb')
+
+# RAW DATA TABLE - m28 tumor, Fig 7A/7B
+
+m28_solid_growth <- rbind(
+  growth_dt[day <= 50 & car %in% left_group][car == 'Untransduced', car := 'Unt'],
+  growth_dt[day <= 50 & car %in% right_group][car == 'Untransduced', car := 'Unt'],
+  growth_dt_alppl2, fill=T)
+
+m28_solid_growth_rows <- list(
+  car='Domain Name',
+  cage='Cage Number',
+  mouse='Mouse Number',
+  vol_lww='Tumor Volume, L*W^2',
+  day='Tumor Measurement Day')
+
+m28_solid_growth_export <- m28_solid_growth[,
+  names(m28_solid_growth_rows), with=F]
+
+names(m28_solid_growth_export) <- unlist(m28_solid_growth_rows)
+
+fwrite(list('# m28 in vivo data: Fig 7A, 7B, S7B, S7C'),
+    here::here('..','tables','fig7b_m28_tumors.csv'))
+fwrite(m28_solid_growth_export, append=T, col.names=T,
+    here::here('..','tables','fig7b_m28_tumors.csv'))
 ```
 
 ## M28 Supp Fig In vivo Killing
@@ -316,31 +366,15 @@ m28_spider_all <- ggplot(
     #axis.line = element_line(colour = "black"),
     plot.title = element_text(hjust = 0.5),
     panel.border=element_rect(color='black', fill=NA))
+
+
 ```
 
 
 ## m28 - Supp Fig ALPPL2 vs CD19 killing 
 
 ```{r}
-growth_dt <- fread(paste0(s3.data.dir,'/invivo/tcsl164_growth_r.csv'))
-growth_dt[, length_1 := as.numeric(length_1)]
-growth_dt <- growth_dt[car != '']
-growth_dt[, c('V7','V8') := NULL]
-
-growth_dt <- rbindlist(
-  list(
-    growth_dt,
-    growth_dt[, list(day=0, width_1=0, length_1=0), by=c('cage','mouse','car')]),
-    fill=T)
-
-growth_dt[, car := mapvalues(
-  factor(car),
-  from=levels(factor(car)), 
-  to=c('41BB-CD19','41BB-ALPPL2','CD28-KO','CD28-Lenti','NT','Unt'))]
-
-growth_dt[, vol_lww := length_1 * width_1^2 * 0.5]
-growth_dt[, vol_lwl := length_1^2 * width_1 * 0.5]
-growth_dt[, vol_lwlw := length_1 * width_1 * (length_1+width_1)/2 * 0.5]
+growth_dt <- growth_dt_alppl2
 
 ggplot(growth_dt,
   aes(x=day, y=as.numeric(length_1)*as.numeric(width_1)^2*0.5, color=car, group=interaction(car,cage,mouse))) + 
@@ -487,6 +521,26 @@ tumor_growth_plot_with_cd28 <- ggplot(plot.data,
       #axis.line = element_line(colour = "black"),
       plot.title = element_text(hjust = 0.5),
       panel.border=element_rect(color='black', fill=NA))
+
+
+# RAW DATA TABLE - multiple myeloma tumor, Fig 7C/D, S7F
+
+plot.data_rows <- list(
+  costim='Domain Name',
+  mouse.num='Cage Number',
+  exp.num='Donor Number',
+  avg.radiance='Average radiance',
+  day='Tumor Measurement Day')
+
+plot.data_export <- copy(plot.data[,
+  names(plot.data_rows), with=F])
+
+names(plot.data_export) <- unlist(plot.data_rows)
+
+fwrite(list('# multiple myeloma in vivo data: Fig 7C, S7F'),
+    here::here('..','tables','fig7c_mm_tumors.csv'))
+fwrite(plot.data_export, append=T, col.names=T,
+    here::here('..','tables','fig7c_mm_tumors.csv'))
 
 # fig7_compiled <- plot_grid(
 #   # top col

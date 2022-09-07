@@ -24,6 +24,7 @@ library(grid)
 library(ggridges)
 library(cowplot)
 library(stringr)
+library(rstatix)
 
 #rm(list = ls())
 setDTthreads(8)
@@ -201,6 +202,35 @@ proliferation_tiles_neg <- ggplot(ctv_gated_means_donormerge_supp_subset,
   scale_x_discrete('', expand=c(0,0))
 
 proliferation_tiles_neg
+
+
+# RAW DATA TABLE - CTV ARRAYED
+
+ctv_summary_data <- rbind(
+  ctv_gated_means_donormerge_subset,
+  ctv_gated_means_donormerge_supp_subset)
+
+ctv_summary_data_rows <- list(
+  car='Domain Name',
+  day='Measurement Day',
+  variable='Measurement',
+  donor='Donor Name',
+  t_type='T Cell Type',
+  k562='K562 Condition',
+  value_mean='MFI Measurement mean',
+  value_sd='MFI Measurement standard deviation',
+  value_rel_day_mean='Mean MFI Measurement relative to Donor/day/k562 mean',
+  value_rel_day_sd='SD of MFI Measurement relative to Donor/day/k562 mean')
+
+ctv_summary_data_export <- copy(ctv_summary_data[, 
+  names(ctv_summary_data_rows), with=F])
+
+names(ctv_summary_data_export) <- unlist(ctv_summary_data_rows)
+
+fwrite(list('# CTV arrayed data: Fig 4B'),
+    here::here('..','tables','fig4b_ctv.csv'))
+fwrite(ctv_summary_data_export, append=T, col.names=T,
+    here::here('..','tables','fig4b_ctv.csv'))
 ```
 
 ```{r}
@@ -368,6 +398,24 @@ exp_model <- aov(formula=doublings~V1*variable + Error(donor),
 # p 41BB to CD40: 4.5e-11
 
 
+# RAW DATA TABLE - CD40 Expansion
+
+car_expansion_rows <- list(
+  measure='Measurement type - cells/fold expansion',
+  V1='Measurement Day',
+  variable='Domain Name',
+  donor='Donor Name',
+  value='Measurement value')
+
+car_expansion_export <- copy(car_expansion[, 
+  names(car_expansion_rows), with=F])
+
+names(car_expansion_export) <- unlist(car_expansion_rows)
+
+fwrite(list('# CD40 arrayed expansion data: Fig 4D'),
+    here::here('..','tables','fig4d_cd40_expansion.csv'))
+fwrite(car_expansion_export, append=T, col.names=T,
+    here::here('..','tables','fig4d_cd40_expansion.csv'))
 ```
 ## Exhaustion Plots
 
@@ -578,6 +626,27 @@ plots$exh_stacked_bars_taci <- (
   plot_layout(guides='collect')
 
 plots$exh_stacked_bars_taci
+
+# RAW DATA TABLE - EXHAUSTION
+
+day_dt_export <- copy(day_dt)
+names(day_dt_export) <- c(
+  'Well',
+  'Plate',
+  'Day',
+  'CAR',
+  'T Cell Donor',
+  'K562 Condition',
+  'T Cell Subset',
+  'Number of Positive Exhaustion Markers',
+  'Number of T Cells',
+  'Fraction of T Cells')
+
+fwrite(list('# Exhaustion marker data: Fig 4F, S4E'),
+    here::here('..','tables','fig4f_exhaustion.csv'))
+fwrite(day_dt_export, append=T, col.names=T,
+    here::here('..','tables','fig4f_exhaustion.csv'))
+
 
 ```
 
@@ -880,6 +949,25 @@ supp_S3_AB <- (
   ) / (
   plots$supp_exh_stacked_bars_horiz & theme(legend.position = 'bottom'))
 
+# RAW DATA TABLE - INDIV EXH MARKER MEANS
+
+indiv_exh_export_rows <- list(
+  car='Domain Name',
+  variable='Exhaution Marker',
+  mean_val='Mean Fluorescence Intensity',
+  sem_val='Mean Fluorescence Intensity, SEM',
+  day='Experiment Day',
+  donor='Donor Name')
+
+indiv_exh_export <- copy(indiv_marker_means_supp[, 
+  names(indiv_exh_export_rows), with=F])
+
+names(indiv_exh_export) <- unlist(indiv_exh_export_rows)
+
+fwrite(list('# Individual Exhaustion data: Fig S4D'),
+    here::here('..','tables','figs4d_indiv_exh.csv'))
+fwrite(indiv_exh_export, append=T, col.names=T,
+    here::here('..','tables','figs4d_indiv_exh.csv'))
 
 ```
 ## Diff Plots
@@ -992,6 +1080,36 @@ plots$cd27_lines_combined <- (
   (cd27_lines_expanded_vert_func('cd8') + theme(
     legend.position='none')
 )
+
+# RAW DATA TABLE - CD27 Lines
+
+cd27_lines_export_dt <- map_day_0(diff_dt)[
+  variable=='cd27_t' & k562 == 'cd19+' &
+        value > censor_negative_min][,
+            list(val_sd= sd(value)/sqrt(.N), val_mean= mean(value)),
+        by=.(car, day, donor, variable, k562)][
+                (donor == 2 | (donor == 1 & day < 33))][,
+                  donor := paste('Donor',donor)][]
+
+cd27_lines_export_dt_rows <- list(
+  car='Domain Name',
+  day='Measurement Day',
+  donor='Donor Name',
+  k562='K562 Condition',
+  val_sd='MFI standard deviation',
+  val_sd='MFI mean')
+
+cd27_lines_export_dt <- copy(cd27_lines_export_dt[, 
+  names(cd27_lines_export_dt_rows), with=F])
+
+names(cd27_lines_export_dt) <- unlist(cd27_lines_export_dt_rows)
+
+fwrite(list('# Metabolism data: Fig S4C'),
+    here::here('..','tables','figs4g_cd27.csv'))
+fwrite(cd27_lines_export_dt, append=T, col.names=T,
+    here::here('..','tables','figs4g_cd27.csv'))
+
+
 ```
 
 ### CD27 Expression - Ridges
@@ -1250,9 +1368,31 @@ plots$diff_supp <- (
       axis.text.y=element_blank())
 )
 
+# RAW DATA TABLE - SUPP DIFF ARRAYED DATA
+
+cd62_cd45ra_diff_dt_rows <- list(
+  car='Domain Name',
+  day='Measurement Day',
+  diff='Differentiation Status',
+  donor='Donor Name',
+  type='T Cell Type',
+  k562='K562 Condition',
+  val_mean='MFI Measurement mean',
+  val_sd='MFI Measurement standard deviation')
+
+cd62_cd45ra_diff_dt_export <- copy(cd62_cd45ra_diff_dt[, 
+  names(cd62_cd45ra_diff_dt_rows), with=F])
+
+names(cd62_cd45ra_diff_dt_export) <- unlist(cd62_cd45ra_diff_dt_rows)
+
+fwrite(list('# Differentiation Arrayed Data: Fig S4H'),
+    here::here('..','tables','figs4h_diff.csv'))
+fwrite(cd62_cd45ra_diff_dt_export, append=T, col.names=T,
+    here::here('..','tables','figs4h_diff.csv'))
+
 ```
 
-### Metab Placeholder Plot
+### Metab Plot
 
 ```{r}
 
@@ -1300,6 +1440,23 @@ metab_vert <- ggplot(metab_dt) +
   labs(x='',y='Mitochondrial Metabolic\nDependence(Z-score)')
 
 metab_vert
+
+# RAW DATA TABLE - CTV ARRAYED
+
+metab_dt_rows <- list(
+  car='Domain Name',
+  zscore='Mitochondrial Metabolic Dependence (Z-score)',
+  t_type='T Cell Type')
+
+metab_dt_export <- copy(metab_dt[, 
+  names(metab_dt_rows), with=F])
+
+names(metab_dt_export) <- unlist(metab_dt_rows)
+
+fwrite(list('# Metabolism data: Fig S4C'),
+    here::here('..','tables','figs4c_metab.csv'))
+fwrite(metab_dt_export, append=T, col.names=T,
+    here::here('..','tables','figs4c_metab.csv'))
 ```
 
 ## Compile Fig 4

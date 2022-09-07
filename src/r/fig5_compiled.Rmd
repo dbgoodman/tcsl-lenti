@@ -30,7 +30,7 @@ data_dir <- here::here('..','data')
 # get local path to s3 dir and other local settings
 source(here::here('r','local_settings.R'))
 
-load(file=file.path(s3.data.dir, 'incucyte_plot_data.Rdata'))
+#load(file=file.path(s3.data.dir, 'incucyte_plot_data.Rdata'))
 
 # add 'd' in front of days
 incucyte_new_dt[, day_f := factor(day, levels=c(0,8,15,22,29), labels=paste0('d',c(0,8,15,22,29)))]
@@ -188,6 +188,41 @@ killing_plots_combined_all_vert_old <- combine_plots_vert(
   plot_set_time(copy(cd4_mean_dt)[, `:=`(donor= 1, Elapsed=80)], 80, cast_y=t_type, switch_facet='x'),
   plot_set_time(copy(cd8_mean_dt)[, `:=`(donor= 1, Elapsed=32)], 32, cast_y=t_type, switch_facet='x'),
   0.2, use_leg=F)
+
+
+# RAW DATA TABLE - INCUCYTE 
+
+incucyte_export <- rbind(
+  incucyte_new_dt[
+    k562=='mkate_cd19' & !noise & t_type == 'CD4' & 
+    measurement==chosen_measure & car!='none'],
+  incucyte_new_dt[
+    k562=='mkate_cd19' & !noise & t_type == 'CD8' & 
+    measurement==chosen_measure & car!='none']
+)
+
+incucyte_export_rows <- list(
+  car='Domain Name',
+  day='Measurement Day',
+  well='Measurement Well',
+  rep='Measurement Replicate',
+  Elapsed='Time Elapsed',
+  donor='Donor Number',
+  t_type='T Cell Type',
+  k562='K562 Condition',
+  mean_value_none='Relative tumor growth vs. no T cells, raw image intensity',
+  mean_value_none_rollmean10_rmnoise='10-sample rolling mean of raw image intensity for relative tumor growth vs. no T cells',
+  mean_value_none_rollmean10='10-sample rolling mean of relative tumor growth vs. no T cells, (with noisy/failed images kept)')
+
+incucyte_export <- incucyte_export[, 
+  names(incucyte_export_rows), with=F]
+
+names(incucyte_export) <- unlist(incucyte_export_rows)
+
+fwrite(list('# Incucyte arrayed data: Fig 5D, 5E, S5C, S5D, S5E'),
+    here::here('..','tables','fig5d_incucyte.csv'))
+fwrite(incucyte_export, append=T, col.names=T,
+    here::here('..','tables','fig5d_incucyte.csv'))
 
 ```
 
@@ -710,6 +745,29 @@ cytokines_d1_d10_horiz <- ggplot(
     legend.position = "right") +
   theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
 
+# RAW DATA TABLE - CYTOKINES ARRAYED
+
+flow.means.dt_rows <- list(
+  car='Domain Name',
+  days='Measurement Day',
+  cytokine='Measured Cytokine',
+  donor='Donor Number',
+  cell.type='T Cell Type',
+  k562='K562 Condition',
+  pct.mean='Mean percentage of Cytokine-positive cells',
+  pct.stdev='Stdev. of percentage of Cytokine-positive cells',
+  pct.mean.donor='Between-donor mean percentage of Cytokine-positive cells')
+
+flow.means.dt_export <- copy(flow.means.dt[, 
+  names(flow.means.dt_rows), with=F])
+
+names(flow.means.dt_export) <- unlist(flow.means.dt_rows)
+
+fwrite(list('# CTV arrayed data: Fig 4B'),
+    here::here('..','tables','fig5c_cytokines.csv'))
+fwrite(flow.means.dt_export, append=T, col.names=T,
+    here::here('..','tables','fig5c_cytokines.csv'))
+
 ```
 
 ### Cytokines all days separate donors supp
@@ -748,163 +806,6 @@ cytokines_all <- ggplot(flow.all.means.dt) +
   theme(legend.title.align=0.5, plot.title = element_text(hjust = 0.5))
 
 cytokines_all
-
-# cytokine stats - pairwise wilcox or t test:
-
-cytokine_choice <- 'IFNg'
-days_subset <- c(1,4,10)
-
-ggplot(flow.all.means.dt[days %in% c(1,4,10)]) +
-  geom_jitter(aes(x=car, y=pct.mean.rel, color=factor(days))) +
-  facet_wrap(~cytokine)
-
-generate_cytokine_stats_wilcox_t <- function(cytokine_choice, days_subset,use_test=t.test) {
-  
-  cytokine_subset_test <- function(cars_subset, cytokine_choice, days_subset) {
-    car_pair_cast <- dcast(
-      flow.all.means.dt[
-        k562 == '+' &
-        cytokine == cytokine_choice &
-        car %in% cars_subset &
-        days %in% days_subset], 
-      days + donor ~ car,
-      value.var='pct.mean.rel')
-      
-    car_pair_test <- use_test(
-      unlist(car_pair_cast[, cars_subset[1], with=F]),
-      unlist(car_pair_cast[, cars_subset[2], with=F]),
-      paired=T)
-    
-    return(list(cars_subset[1], cars_subset[2], car_pair_test$p.value))
-  }
-  
-  car_cytokine_order <- rev(c(
-    'CD28','41BB','CD30','BAFF-R','TACI','CD40','zeta','KLRG1'))
-  
-  flow.all.means.dt[, car := factor(car, levels=car_cytokine_order)]
-  
-  cytokine_stats <- rbindlist(
-    apply(
-      combn(flow.all.means.dt[, levels(car)], 2),
-      2, 
-      function (car_subset) cytokine_subset_test(
-        car_subset, cytokine_choice, days_subset)))
-  
-  names(cytokine_stats) <- c('car_a','car_b','p.val')
-  
-  cytokine_stats <- adjust_pvalue(cytokine_stats, p.col = 'p.val', method='BH')
-  cytokine_stats <- add_significance(cytokine_stats, p.col = 'p.val.adj')
-  
-  cytokine_stats[, car_a := factor(car_a, levels=car_cytokine_order)]
-  cytokine_stats[, car_b := factor(car_b, levels=car_cytokine_order[-1])]
-  
-  
-  cytokine_stats_plot <- ggplot(cytokine_stats, 
-      aes(
-        x=car_a,
-        y=car_b,
-        fill=-log10(p.val.adj),
-        label=p.val.adj.signif)) + 
-    geom_tile(color='white') + 
-    scale_fill_gradientn(colors=brewer.pal(9, 'RdPu')[1:7], 
-      guide=guide_colorbar(
-        barheight=0.7,
-        direction = "horizontal",
-        title.position = "top")) + 
-    geom_text() + 
-    coord_cartesian(clip = 'off') +
-    labs(x='', y= paste0(
-      'Overall CD4 ',cytokine_choice,' Rank'), fill=paste0(
-      '-log10(p), ', deparse(substitute(use_test)))) +
-    theme_minimal() +
-    theme(panel.grid=element_blank(),
-          legend.position=c(1,0.05),
-          axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
-          legend.justification=c(1,0))
-  
-  return(list(
-    stats = cytokine_stats,
-    plot = cytokine_stats_plot))
-}
-
-#Verdict - not significant except some vs CD30.
-
-cytokine_stats_panels <- (
-  generate_cytokine_stats('IFNg', c(1,4,10))$plot | 
-    generate_cytokine_stats('IL2', c(1,4,10))$plot) / (
-      generate_cytokine_stats('IFNg', c(1,4,10), wilcox.test)$plot | 
-        generate_cytokine_stats('IL2', c(1,4,10), wilcox.test)$plot)
-
-
-# cytokine stats - RM ANOVA model 
-
-all_days <-unique(flow.all.means.dt$days)
-
-generate_cytokine_stats_anova <- function(cytokine_choice, days_subset) {
-  
-  aov_formula <- pct.mean.rel ~ days*car + Error(donor)
-  
-  overall_model <- aov(
-    formula=aov_formula,
-    data=flow.all.means.dt[days %in% c(1,4,10,18) & cytokine == 'IFNg'])
-  
-  post_hoc_pval <- function(car_pair) {
-      car_pair_data <- flow.all.means.dt[
-        k562 == '+' &
-        cytokine == cytokine_choice &
-        car %in% car_pair &
-        days %in% days_subset]
-      
-      car_pair_data[, days := factor(days, ordered=T)]
-      
-    model <- aov(
-      formula=aov_formula, 
-      data=car_pair_data)
-    aov_df <- data.table(summary(model)$`Error: Within`[[1]], keep.rownames = T)
-    
-    aov_df[, car_a := car_pair[1]]
-    aov_df[, car_b := car_pair[2]]
-    
-    return(aov_df)
-  }
-  
-  all_pairs <- rbindlist(
-    apply(combn(car_cytokine_order, 2), 2, post_hoc_pval))
-  all_pairs[, p.adj := p.adjust(`Pr(>F)`, method='BH')]
-  all_pairs[, car_a := factor(car_a, levels=car_cytokine_order)]
-  all_pairs[, car_b := factor(car_b, levels=car_cytokine_order)]
-  all_pairs[, rn := str_trim(rn)]
-  all_pairs <- add_significance(all_pairs, p.col='p.adj')
-
-  # showing both car and car:day effects
-  stats_plot <- ggplot(all_pairs[rn %in% c('car','days:car')],
-      aes(x=car_a, y=car_b)) + 
-    geom_tile(
-      aes(fill=-log10(p.adj))) + 
-    geom_tile(
-      data=all_pairs[rn %in% c('car','days:car')][p.adj < 0.05],
-      color='black', fill=NA, size=1) +
-    scale_fill_distiller(palette="RdPu", direction=1, limits=c(0,4), oob=squish) +
-    facet_wrap(~rn) + 
-    scale_color_manual(values=c('white','black')) + 
-    theme_minimal() + 
-    theme(panel.grid=element_blank(),
-      legend.position=c(1,0.05),
-      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
-      legend.justification=c(1,0))
-  
-  return(list(stats=all_pairs, plot=stats_plot))
-}
-
-(generate_cytokine_stats_anova('IFNg', c(1,4,10))$plot + labs(subtitle='IFNg')) / 
-  (generate_cytokine_stats_anova('IL2', c(1,4,10))$plot + labs(subtitle='IL2')) / 
-  (generate_cytokine_stats_anova('TNFa', c(1,4,10))$plot + labs(subtitle='TNFa'))
-    + plot_annotation(title='RM Anova on days 1,4,10: pct.mean.rel ~ days*car + Error(donor)')
-
-ggplot(flow.all.means.dt[days %in% c(1,4,10) & cytokine == 'IFNg']) +
-  geom_jitter(aes(x=car, y=pct.mean.rel, color=donor)) +
-  facet_wrap(~days) + labs(y='Difference from Mean % Positive') | (generate_cytokine_stats_anova('IFNg', c(1,4,10))$plot + labs(subtitle='IFNg'))
-
 ```
 
 ## jurkat signaling
@@ -1126,6 +1027,28 @@ plots$combined_sig_plot_nomut_pos
 plots$combined_sig_plot_nomut_pos_ap1
 plots$combined_sig_plot_nomut_pos_nfkb
 
+# RAW DATA TABLE - REPORTERS 
+
+plot.signaling.dt_rows <- list(
+  car_lab='Domain Name',
+  stim_lab='Stimulation Condition',
+  Hours='Hours after stimulation',
+  combo_mcherry_pct_v_unt='Percent of reporter-transduced cells cells relative to no CAR',
+  combo_mcherry_percent='Percent of reporter-transduced cells cells transduced with reporter',
+  combo_mcherry_mfi='MFI of reporter-transduced cells cells',
+  combo_mcherry_mfi_v_unt='MFI of reporter-transduced cells relative to no CAR',
+  line_lab='Jurkat Reporter Line')
+
+plot.signaling.dt_export <- plot.signaling.dt[, 
+  names(plot.signaling.dt_rows), with=F]
+
+names(plot.signaling.dt_export) <- unlist(plot.signaling.dt_rows)
+
+fwrite(list('# Reporter Line arrayed data: Fig 5G, S5G'),
+    here::here('..','tables','fig5g_reporters.csv'))
+fwrite(plot.signaling.dt_export, append=T, col.names=T,
+    here::here('..','tables','fig5g_reporters.csv'))
+
 ```
 
 ## Fig 5 Compile
@@ -1269,8 +1192,8 @@ s5e_ggtheme <- theme(
         plot.margin=margin(5,35,10,15, unit='pt'))
 
 s5e <- plot_grid(
-  plots$combined_sig_plot_nomut_pos_ap1 + labs(subtitle='AP1') + s4e_ggtheme,
-  plots$combined_sig_plot_nomut_pos_nfat + labs(subtitle='NFAT') + s4e_ggtheme
+  plots$combined_sig_plot_nomut_pos_ap1 + labs(subtitle='AP1') + s5e_ggtheme,
+  plots$combined_sig_plot_nomut_pos_nfat + labs(subtitle='NFAT') + s5e_ggtheme
 )
 
 fig_s5_compiled <- plot_grid(
