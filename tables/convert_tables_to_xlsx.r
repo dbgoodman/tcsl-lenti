@@ -7,6 +7,7 @@ load_csvs <- function(filenames) {
   table_list <- list()
   
   descriptions <- data.table()
+  message('filename')
   
   for (filename in filenames) {
     file_id <- gsub('.*/(.*)\\.csv','\\1', filename)
@@ -17,7 +18,6 @@ load_csvs <- function(filenames) {
     
     table_list[[file_id]] <- table
   }
-  
   table_list <- c(list('descriptions'=descriptions), table_list)
   
   return(table_list)
